@@ -1,0 +1,79 @@
+add_person:
+  name: Add person
+  description: Add a person to the family tree.
+  fields:
+    config_entry_id:
+      name: Config entry
+      description: Family Tree entry (optional while only one exists)
+      selector:
+        config_entry:
+          integration: family_tree
+    given_names:
+      name: Given names
+      example: Anna Maria
+      selector:
+        text:
+    call_name:
+      name: Call name
+      example: Anna
+      selector:
+        text:
+    surname_prefix:
+      name: Surname prefix
+      example: van
+      selector:
+        text:
+    surname:
+      name: Surname
+      example: Berg
+      selector:
+        text:
+    sex:
+      name: Sex
+      default: unknown
+      selector:
+        select:
+          options:
+            - male
+            - female
+            - intersex
+            - unknown
+    is_living:
+      name: Living
+      default: true
+      selector:
+        boolean:
+    notes:
+      name: Notes
+      selector:
+        text:
+
+link_user:
+  name: Link Home Assistant user
+  description: Link a Home Assistant user to a person for lineage indicators.
+  fields:
+    config_entry_id:
+      name: Config entry
+      selector:
+        config_entry:
+          integration: family_tree
+    ha_user_id:
+      name: Home Assistant user id
+      required: true
+      selector:
+        text:
+    person_id:
+      name: Person id
+      required: true
+      selector:
+        text:
+
+export_gedcom:
+  name: Export GEDCOM
+  description: Export the family tree as GEDCOM 5.5.1 text (admin or automation).
+  fields:
+    config_entry_id:
+      name: Config entry
+      selector:
+        config_entry:
+          integration: family_tree

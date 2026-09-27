@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Family Tree",
+        "description": "Track your family history in Home Assistant.",
+        "data": {
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Enter a name"
+    },
+    "abort": {
+      "already_configured": "Family Tree is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Family Tree options",
+        "description": "Configure GeoNames countries for place search and family surname shortcuts for the dashboard.",
+        "data": {
+          "gazetteer_countries": "Gazetteer countries (ISO codes)",
+          "family_shortcuts": "Family surname shortcuts"
+        },
+        "data_description": {
+          "gazetteer_countries": "ISO 3166-1 alpha-2 codes to download from GeoNames (e.g. NL, BE).",
+          "family_shortcuts": "Surname prefixes shown as quick filters (e.g. van Iersel)."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "people_count": {
+        "name": "People"
+      },
+      "living_count": {
+        "name": "Living"
+      },
+      "next_birthday": {
+        "name": "Next birthday"
+      }
+    },
+    "calendar": {
+      "family_events": {
+        "name": "Family events"
+      }
+    }
+  }
+}

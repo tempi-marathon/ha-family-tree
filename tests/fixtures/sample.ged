@@ -1,0 +1,51 @@
+0 HEAD
+1 SOUR FamilyTreeTest
+1 GEDC
+2 VERS 5.5.1
+1 CHAR UTF-8
+0 @I1@ INDI
+1 NAME Johannes /van Iersel/
+2 GIVN Johannes
+2 SPFX van
+2 SURN Iersel
+1 SEX M
+1 BIRT
+2 DATE 12 MAR 1950
+2 PLAC Eindhoven, Noord-Brabant, Netherlands
+2 MAP
+3 LATI N51.4416
+3 LONG E5.4697
+0 @I2@ INDI
+1 NAME Maria /de Vries/
+2 GIVN Maria
+2 SPFX de
+2 SURN Vries
+1 SEX F
+1 BIRT
+2 DATE 5 JUL 1952
+2 PLAC Tilburg, Noord-Brabant, Netherlands
+1 DEAT
+2 DATE 20 JAN 2020
+2 PLAC Eindhoven, Noord-Brabant, Netherlands
+0 @I3@ INDI
+1 NAME Anna /van Iersel/
+2 GIVN Anna
+2 SPFX van
+2 SURN Iersel
+1 SEX F
+1 BIRT
+2 DATE 3 SEP 1978
+2 PLAC Eindhoven, Noord-Brabant, Netherlands
+0 @F1@ FAM
+1 HUSB @I1@
+1 WIFE @I2@
+1 CHIL @I3@
+1 MARR
+2 DATE 14 JUN 1975
+2 PLAC Eindhoven, Noord-Brabant, Netherlands
+1 NCHI 1
+0 @S1@ SOUR
+1 TITL Civil Registry Eindhoven
+1 AUTH Gemeente Eindhoven
+1 WWW https://example.test/source
+0 TRLR

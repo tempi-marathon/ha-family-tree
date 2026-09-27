@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Stamboom",
+        "description": "Bijhouden van je familiegeschiedenis in Home Assistant.",
+        "data": {
+          "name": "Naam"
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Voer een naam in"
+    },
+    "abort": {
+      "already_configured": "Stamboom is al geconfigureerd"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Stamboom-opties",
+        "description": "Configureer GeoNames-landen voor plaatszoeken en familienaam-snelkoppelingen voor het dashboard.",
+        "data": {
+          "gazetteer_countries": "Gazetteer-landen (ISO-codes)",
+          "family_shortcuts": "Familienaam-snelkoppelingen"
+        },
+        "data_description": {
+          "gazetteer_countries": "ISO 3166-1 alpha-2 codes om te downloaden van GeoNames (bijv. NL, BE).",
+          "family_shortcuts": "Achternaam-voorvoegsels als snelfilters (bijv. van Iersel)."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "people_count": {
+        "name": "Personen"
+      },
+      "living_count": {
+        "name": "Levend"
+      },
+      "next_birthday": {
+        "name": "Volgende verjaardag"
+      }
+    },
+    "calendar": {
+      "family_events": {
+        "name": "Familiegebeurtenissen"
+      }
+    }
+  }
+}
