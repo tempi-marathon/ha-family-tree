@@ -2,52 +2,52 @@
   "config": {
     "step": {
       "user": {
-        "title": "Stamboom",
-        "description": "Geef deze stamboom een naam. Je kunt dit later wijzigen.",
+        "title": "Family Tree",
+        "description": "Give this family tree a name. You can change it later.",
         "data": {
-          "name": "Naam"
+          "name": "Name"
         }
       },
       "gazetteer": {
-        "title": "Landen voor plaatszoeken",
-        "description": "Kies landen om te downloaden voor offline plaatszoeken (GeoNames). Dit is nodig om geboorte-/sterfte-/huwelijksplaatsen te zoeken. Later aanpasbaar via Configureren.",
+        "title": "Place search countries",
+        "description": "Select countries to download for offline place lookup (GeoNames). You need this for searching birth/death/marriage places. You can change this later under Configure.",
         "data": {
-          "gazetteer_countries": "Landen (ISO-codes)"
+          "gazetteer_countries": "Countries (ISO codes)"
         },
         "data_description": {
-          "gazetteer_countries": "Kies uit de lijst of typ ISO 3166-1 alpha-2 codes (bijv. NL, BE, DE). Laat leeg om over te slaan; plaatszoeken blijft dan handmatig tot je landen toevoegt."
+          "gazetteer_countries": "Pick from the list or type ISO 3166-1 alpha-2 codes (e.g. NL, BE, DE). Leave empty to skip; place search stays manual until you add countries."
         }
       },
       "shortcuts": {
-        "title": "Familiesnelkoppelingen",
-        "description": "Optionele achternaam-snelkoppelingen in het Stamboom-paneel (bijv. je hoofdfamilienamen). Laat leeg als je het nog niet weet — later via Configureren toe te voegen.",
+        "title": "Family shortcuts",
+        "description": "Optional surname shortcuts shown in the Family Tree panel (e.g. your main family names). Leave empty if unsure — you can add them later under Configure.",
         "data": {
-          "family_shortcuts": "Achternaam-snelkoppelingen"
+          "family_shortcuts": "Surname shortcuts"
         },
         "data_description": {
-          "family_shortcuts": "Typ een achternaam en druk op Enter (bijv. Molenschot, van Iersel). Nederlandse tussenvoegsels worden bij sorteren genegeerd."
+          "family_shortcuts": "Type a surname and press Enter (e.g. Molenschot, van Iersel). Matching ignores Dutch prefixes for sorting."
         }
       }
     },
     "error": {
-      "invalid_name": "Voer een naam in"
+      "invalid_name": "Enter a name"
     },
     "abort": {
-      "already_configured": "Stamboom is al geconfigureerd"
+      "already_configured": "Family Tree is already configured"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Stamboom-opties",
-        "description": "Offline plaatszoek-landen en achternaam-snelkoppelingen voor deze stamboom.",
+        "title": "Family Tree options",
+        "description": "Offline place-search countries and surname shortcuts for this tree.",
         "data": {
-          "gazetteer_countries": "Gazetteer-landen (ISO-codes)",
-          "family_shortcuts": "Familienaam-snelkoppelingen"
+          "gazetteer_countries": "Gazetteer countries (ISO codes)",
+          "family_shortcuts": "Family surname shortcuts"
         },
         "data_description": {
-          "gazetteer_countries": "ISO 3166-1 alpha-2 codes om te downloaden van GeoNames (bijv. NL, BE).",
-          "family_shortcuts": "Achternamen als snelle links in het paneel (bijv. van Iersel)."
+          "gazetteer_countries": "ISO 3166-1 alpha-2 codes to download from GeoNames (e.g. NL, BE).",
+          "family_shortcuts": "Surnames shown as quick links in the panel (e.g. van Iersel)."
         }
       }
     }
@@ -55,18 +55,18 @@
   "entity": {
     "sensor": {
       "people_count": {
-        "name": "Personen"
+        "name": "People"
       },
       "living_count": {
-        "name": "Levend"
+        "name": "Living"
       },
       "next_birthday": {
-        "name": "Volgende verjaardag"
+        "name": "Next birthday"
       }
     },
     "calendar": {
       "family_events": {
-        "name": "Familiegebeurtenissen"
+        "name": "Family events"
       }
     }
   }
