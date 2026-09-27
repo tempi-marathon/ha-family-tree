@@ -500,7 +500,8 @@ async def ws_settings(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/persons/save",
-        vol.Optional("id"): str,
+        # Never use key "id" here — it collides with the websocket message id (int).
+        vol.Optional("person_id"): str,
         vol.Optional("given_names", default=""): _bounded_string(MAX_NAME),
         vol.Optional("call_name", default=""): _bounded_string(MAX_NAME),
         vol.Optional("surname_prefix", default=""): _bounded_string(MAX_NAME),
@@ -526,7 +527,7 @@ async def ws_persons_save(
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
-        person_id = msg.get("id")
+        person_id = msg.get("person_id")
         if person_id:
             existing = coordinator.repo.get_person(person_id, include_deleted=True)
             if existing is None:
@@ -652,7 +653,7 @@ async def ws_persons_purge(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/unions/save",
-        vol.Optional("id"): str,
+        vol.Optional("union_id"): str,
         vol.Optional("union_type", default=UnionType.UNKNOWN.value): vol.In(
             [t.value for t in UnionType]
         ),
@@ -678,7 +679,7 @@ async def ws_unions_save(
     partners = [(pid, idx) for idx, pid in enumerate(msg["partner_ids"])]
 
     def _run() -> dict[str, Any]:
-        union_id = msg.get("id")
+        union_id = msg.get("union_id")
         if union_id:
             existing = coordinator.repo.get_union(union_id)
             if existing is None:
@@ -806,7 +807,7 @@ async def ws_parent_child_remove(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/places/save",
-        vol.Optional("id"): str,
+        vol.Optional("place_id"): str,
         vol.Required("name"): _bounded_string(MAX_NAME, allow_empty=False),
         vol.Optional("admin1", default=""): _bounded_string(MAX_NAME),
         vol.Optional("country", default=""): _bounded_string(MAX_NAME),
@@ -829,7 +830,7 @@ async def ws_places_save(
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
-        place_id = msg.get("id")
+        place_id = msg.get("place_id")
         lat = msg.get("latitude")
         lon = msg.get("longitude")
         if place_id:
@@ -872,7 +873,7 @@ async def ws_places_save(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/events/save",
-        vol.Optional("id"): str,
+        vol.Optional("event_id"): str,
         vol.Required("subject_type"): vol.In([s.value for s in SubjectType]),
         vol.Required("subject_id"): str,
         vol.Required("event_type"): vol.In([t.value for t in EventType]),
@@ -896,7 +897,7 @@ async def ws_events_save(
     parsed = parse_gedcom_date(date_text)
 
     def _run() -> dict[str, Any]:
-        event_id = msg.get("id")
+        event_id = msg.get("event_id")
         if event_id:
             # Update path: load existing via list is awkward; rewrite fields
             event = Event(

@@ -66,6 +66,27 @@ function icon(path: string) {
   return html`<svg class="mdi" viewBox="0 0 24 24" aria-hidden="true"><path d=${path}></path></svg>`;
 }
 
+function mdButton(
+  label: string,
+  opts: {
+    variant?: "filled" | "outlined" | "text";
+    disabled?: boolean;
+    onClick: (e: Event) => void;
+  },
+) {
+  const variant = opts.variant ?? "outlined";
+  return html`
+    <button
+      type="button"
+      class="md-btn md-btn-${variant}"
+      ?disabled=${opts.disabled ?? false}
+      @click=${opts.onClick}
+    >
+      ${label}
+    </button>
+  `;
+}
+
 export class FamilyTreePanel extends LitElement {
   @property({ attribute: false }) public hass!: HomeAssistant;
   @property({ type: Boolean }) public narrow = false;
@@ -251,6 +272,7 @@ export class FamilyTreePanel extends LitElement {
 
   private _openCreate() {
     this._editing = null;
+    this._error = "";
     this._form = {
       given_names: "",
       call_name: "",
@@ -265,6 +287,7 @@ export class FamilyTreePanel extends LitElement {
 
   private _openEdit(person: PersonDto) {
     this._editing = person;
+    this._error = "";
     this._form = {
       given_names: person.given_names || "",
       call_name: person.call_name || "",
@@ -280,9 +303,9 @@ export class FamilyTreePanel extends LitElement {
   private async _savePerson() {
     if (!this.hass || !this._canWrite()) return;
     this._saving = true;
+    this._error = "";
     try {
-      const payload = {
-        id: this._editing?.id,
+      const payload: Parameters<typeof savePerson>[1] = {
         given_names: this._form.given_names,
         call_name: this._form.call_name,
         surname_prefix: this._form.surname_prefix,
@@ -291,6 +314,9 @@ export class FamilyTreePanel extends LitElement {
         is_living: this._form.is_living === "true",
         notes: this._form.notes,
       };
+      if (this._editing?.id) {
+        payload.person_id = this._editing.id;
+      }
       const { person } = await savePerson(this.hass, payload);
       this._dialogOpen = false;
       await this._refreshAll();
@@ -859,40 +885,156 @@ export class FamilyTreePanel extends LitElement {
     `;
   }
 
+  private _closeDialog = () => {
+    this._dialogOpen = false;
+  };
+
   private _renderDialog() {
+    const write = this._canWrite();
+    const dialogTitle = this._editing
+      ? personDisplayName(this._editing)
+      : this._tt("add_person");
     return html`
-      <div class="dialog-backdrop" @click=${() => (this._dialogOpen = false)}>
-        <div class="dialog" @click=${(e: Event) => e.stopPropagation()} role="dialog">
-          <header>
-            <h3>${this._editing ? personDisplayName(this._editing) : this._tt("add_person")}</h3>
-            <button class="icon-btn" @click=${() => (this._dialogOpen = false)}>${icon(MDI_CLOSE)}</button>
-          </header>
-          <label>${this._tt("given_names")}<input .value=${this._form.given_names || ""}
-            @input=${(e: Event) => (this._form = { ...this._form, given_names: (e.target as HTMLInputElement).value })} /></label>
-          <label>${this._tt("call_name")}<input .value=${this._form.call_name || ""}
-            @input=${(e: Event) => (this._form = { ...this._form, call_name: (e.target as HTMLInputElement).value })} /></label>
-          <label>${this._tt("surname_prefix")}<input .value=${this._form.surname_prefix || ""}
-            @input=${(e: Event) => (this._form = { ...this._form, surname_prefix: (e.target as HTMLInputElement).value })} /></label>
-          <label>${this._tt("surname")}<input .value=${this._form.surname || ""}
-            @input=${(e: Event) => (this._form = { ...this._form, surname: (e.target as HTMLInputElement).value })} /></label>
-          <label>${this._tt("sex")}
-            <select .value=${this._form.sex || "unknown"}
-              @change=${(e: Event) => (this._form = { ...this._form, sex: (e.target as HTMLSelectElement).value })}>
-              <option value="male">${this._tt("sex_male")}</option>
-              <option value="female">${this._tt("sex_female")}</option>
-              <option value="intersex">${this._tt("sex_intersex")}</option>
-              <option value="unknown">${this._tt("sex_unknown")}</option>
-            </select>
-          </label>
-          <label class="check"><input type="checkbox" .checked=${this._form.is_living === "true"}
-            @change=${(e: Event) => (this._form = { ...this._form, is_living: (e.target as HTMLInputElement).checked ? "true" : "false" })} />
-            ${this._tt("living")}</label>
-          <label>${this._tt("notes")}<textarea .value=${this._form.notes || ""}
-            @input=${(e: Event) => (this._form = { ...this._form, notes: (e.target as HTMLTextAreaElement).value })}></textarea></label>
-          <footer>
-            <button @click=${() => (this._dialogOpen = false)}>${this._tt("cancel")}</button>
-            <button class="primary" ?disabled=${this._saving} @click=${() => this._savePerson()}>${this._tt("save")}</button>
-          </footer>
+      <div class="dialog-backdrop">
+        <div
+          class="dialog ${this.narrow ? "dialog-narrow" : ""}"
+          role="dialog"
+          aria-modal="true"
+          aria-label=${dialogTitle}
+          @click=${(e: Event) => e.stopPropagation()}
+        >
+          <div class="dialog-header">
+            <h2>${dialogTitle}</h2>
+            <button
+              type="button"
+              class="icon-btn dialog-close"
+              aria-label=${this._tt("cancel")}
+              @click=${this._closeDialog}
+            >
+              ${icon(MDI_CLOSE)}
+            </button>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">${this._tt("details")}</div>
+            <label
+              >${this._tt("given_names")}
+              <input
+                .value=${this._form.given_names || ""}
+                ?disabled=${!write}
+                @input=${(e: Event) =>
+                  (this._form = {
+                    ...this._form,
+                    given_names: (e.target as HTMLInputElement).value,
+                  })}
+              />
+            </label>
+            <label
+              >${this._tt("call_name")}
+              <input
+                .value=${this._form.call_name || ""}
+                ?disabled=${!write}
+                @input=${(e: Event) =>
+                  (this._form = {
+                    ...this._form,
+                    call_name: (e.target as HTMLInputElement).value,
+                  })}
+              />
+            </label>
+            <div class="row2">
+              <label
+                >${this._tt("surname_prefix")}
+                <input
+                  .value=${this._form.surname_prefix || ""}
+                  ?disabled=${!write}
+                  @input=${(e: Event) =>
+                    (this._form = {
+                      ...this._form,
+                      surname_prefix: (e.target as HTMLInputElement).value,
+                    })}
+                />
+              </label>
+              <label
+                >${this._tt("surname")}
+                <input
+                  .value=${this._form.surname || ""}
+                  ?disabled=${!write}
+                  @input=${(e: Event) =>
+                    (this._form = {
+                      ...this._form,
+                      surname: (e.target as HTMLInputElement).value,
+                    })}
+                />
+              </label>
+            </div>
+            <div class="row2">
+              <label
+                >${this._tt("sex")}
+                <select
+                  .value=${this._form.sex || "unknown"}
+                  ?disabled=${!write}
+                  @change=${(e: Event) =>
+                    (this._form = {
+                      ...this._form,
+                      sex: (e.target as HTMLSelectElement).value,
+                    })}
+                >
+                  <option value="male">${this._tt("sex_male")}</option>
+                  <option value="female">${this._tt("sex_female")}</option>
+                  <option value="intersex">${this._tt("sex_intersex")}</option>
+                  <option value="unknown">${this._tt("sex_unknown")}</option>
+                </select>
+              </label>
+              <label class="check-row"
+                >${this._tt("living")}
+                <span class="check-control">
+                  <input
+                    type="checkbox"
+                    .checked=${this._form.is_living === "true"}
+                    ?disabled=${!write}
+                    @change=${(e: Event) =>
+                      (this._form = {
+                        ...this._form,
+                        is_living: (e.target as HTMLInputElement).checked
+                          ? "true"
+                          : "false",
+                      })}
+                  />
+                </span>
+              </label>
+            </div>
+            <label
+              >${this._tt("notes")}
+              <textarea
+                rows="3"
+                .value=${this._form.notes || ""}
+                ?disabled=${!write}
+                @input=${(e: Event) =>
+                  (this._form = {
+                    ...this._form,
+                    notes: (e.target as HTMLTextAreaElement).value,
+                  })}
+              ></textarea>
+            </label>
+          </div>
+
+          ${this._error
+            ? html`<div class="error" role="alert">${this._error}</div>`
+            : nothing}
+
+          <div class="dialog-actions">
+            ${mdButton(this._tt(write ? "cancel" : "close"), {
+              variant: "text",
+              onClick: this._closeDialog,
+            })}
+            ${write
+              ? mdButton(this._tt("save"), {
+                  variant: "filled",
+                  disabled: this._saving,
+                  onClick: () => void this._savePerson(),
+                })
+              : nothing}
+          </div>
         </div>
       </div>
     `;
@@ -930,12 +1072,12 @@ export class FamilyTreePanel extends LitElement {
     }
     .brand-mark .mdi { width: 28px; height: 28px; fill: var(--primary-color); }
     .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
-    .tabs button, .subtabs button, .toolbar button, .dialog footer button, .inline-form button, .row-actions button, .chip {
+    .tabs button, .subtabs button, .toolbar button, .inline-form button, .row-actions button, .chip {
       appearance: none;
       border: 1px solid var(--divider-color);
       background: var(--card-background-color, var(--secondary-background-color));
       color: var(--primary-text-color);
-      border-radius: 6px;
+      border-radius: var(--ha-border-radius-lg, 12px);
       padding: 6px 10px;
       cursor: pointer;
       font: inherit;
@@ -956,7 +1098,7 @@ export class FamilyTreePanel extends LitElement {
     .mdi { width: 20px; height: 20px; fill: currentColor; display: block; }
     .banner, .error {
       padding: 8px 12px;
-      border-radius: 6px;
+      border-radius: var(--ha-border-radius-md, 8px);
       margin: 0 0 12px;
     }
     .banner { background: var(--secondary-background-color); }
@@ -972,7 +1114,7 @@ export class FamilyTreePanel extends LitElement {
       text-align: center;
       padding: 16px 8px;
       background: var(--secondary-background-color);
-      border-radius: 8px;
+      border-radius: var(--ha-border-radius-lg, 12px);
     }
     .stat-n { display: block; font-size: 1.8rem; font-weight: 600; }
     .charts {
@@ -1005,12 +1147,16 @@ export class FamilyTreePanel extends LitElement {
     }
     .toolbar input[type="search"], .toolbar select, .inline-form input, .inline-form select,
     .dialog input, .dialog select, .dialog textarea {
-      font: inherit; padding: 8px 10px; border-radius: 6px;
+      font: inherit; padding: 8px 10px;
+      border-radius: var(--ha-border-radius-lg, 12px);
       border: 1px solid var(--divider-color);
       background: var(--card-background-color, var(--primary-background-color));
       color: var(--primary-text-color);
+      box-sizing: border-box;
+      width: 100%;
     }
-    .toolbar input[type="search"] { flex: 1; min-width: 160px; }
+    .toolbar input[type="search"] { flex: 1; min-width: 160px; width: auto; }
+    .toolbar select { width: auto; }
     .subtabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
     .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 0 0 16px; }
     .kv dt { color: var(--secondary-text-color); }
@@ -1020,33 +1166,149 @@ export class FamilyTreePanel extends LitElement {
     .tree-box { display: flex; flex-direction: column; gap: 16px; align-items: center; }
     .gen { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
     .node {
-      padding: 10px 14px; border-radius: 8px; background: var(--secondary-background-color);
+      padding: 10px 14px; border-radius: var(--ha-border-radius-lg, 12px);
+      background: var(--secondary-background-color);
       cursor: pointer; min-width: 100px; text-align: center;
     }
     .node.self { background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 600; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+    .md-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 36px;
+      padding: 0 16px;
+      border-radius: var(--ha-button-border-radius, var(--ha-border-radius-pill, 9999px));
+      border: none;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      box-sizing: border-box;
+      background: transparent;
+      color: var(--primary-color);
+      font-family: inherit;
+    }
+    .md-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .md-btn-filled {
+      background: var(--primary-color);
+      color: var(--text-primary-color, #fff);
+    }
+    .md-btn-outlined {
+      border: 1px solid var(--primary-color);
+      color: var(--primary-color);
+      background: transparent;
+    }
+    .md-btn-text {
+      color: var(--primary-color);
+      background: transparent;
+      padding: 0 8px;
+    }
     .dialog-backdrop {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.45);
-      display: flex; align-items: center; justify-content: center; z-index: 100;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
       padding: 16px;
+      box-sizing: border-box;
     }
     .dialog {
-      width: min(420px, 100%);
-      max-height: 90vh; overflow: auto;
-      background: var(--card-background-color, var(--primary-background-color));
-      border-radius: 10px; padding: 16px;
-      display: flex; flex-direction: column; gap: 10px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+      background: var(--card-background-color, #fff);
+      color: var(--primary-text-color);
+      padding: 20px;
+      border-radius: var(--ha-dialog-border-radius, var(--ha-border-radius-lg, 12px));
+      width: min(520px, 100%);
+      max-height: 90vh;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-sizing: border-box;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
     }
-    .dialog header { display: flex; align-items: center; justify-content: space-between; }
-    .dialog header h3 { margin: 0; }
-    .dialog label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9em; }
-    .dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    .dialog-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .dialog-header h2 {
+      margin: 0;
+      flex: 1;
+      min-width: 0;
+      font-size: 1.25rem;
+      font-weight: 500;
+    }
+    .dialog-close {
+      flex-shrink: 0;
+      margin: -8px -8px -8px 0;
+    }
+    .dialog.dialog-narrow {
+      width: 100%;
+      max-height: 100%;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    }
+    .dialog-backdrop:has(.dialog-narrow) {
+      align-items: stretch;
+      padding-top: max(12px, env(safe-area-inset-top, 0px));
+      padding-right: max(12px, env(safe-area-inset-right, 0px));
+      padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+      padding-left: max(12px, env(safe-area-inset-left, 0px));
+    }
+    .form-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--divider-color);
+      border-radius: var(--ha-border-radius-md, 8px);
+      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+    }
+    .form-section-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--primary-color);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .dialog label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.9rem;
+    }
+    .row2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .check-row .check-control {
+      display: flex;
+      align-items: center;
+      min-height: 40px;
+    }
+    .check-row input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      accent-color: var(--primary-color);
+    }
+    .dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 4px;
+    }
     @media (max-width: 600px) {
       .stats-row { grid-template-columns: 1fr; }
       .kv { grid-template-columns: 1fr; }
+      .row2 { grid-template-columns: 1fr; }
     }
   `;
 }

@@ -145,7 +145,16 @@ export async function getPerson(
 
 export async function savePerson(
   hass: HomeAssistant,
-  data: Partial<PersonDto> & { id?: string },
+  data: {
+    person_id?: string;
+    given_names?: string;
+    call_name?: string;
+    surname_prefix?: string;
+    surname?: string;
+    sex?: string;
+    is_living?: boolean;
+    notes?: string;
+  },
 ): Promise<{ person: PersonDto }> {
   return msg(hass, "family_tree/persons/save", data) as Promise<{ person: PersonDto }>;
 }
@@ -219,7 +228,12 @@ export async function saveUnion(
   hass: HomeAssistant,
   data: Record<string, unknown>,
 ): Promise<{ union: UnionDto }> {
-  return msg(hass, "family_tree/unions/save", data) as Promise<{ union: UnionDto }>;
+  const { id, union_id, ...rest } = data;
+  const payload = {
+    ...rest,
+    ...(union_id || id ? { union_id: String(union_id || id) } : {}),
+  };
+  return msg(hass, "family_tree/unions/save", payload) as Promise<{ union: UnionDto }>;
 }
 
 export async function deleteUnion(
@@ -263,9 +277,14 @@ export async function listPlaces(
 
 export async function savePlace(
   hass: HomeAssistant,
-  data: Partial<PlaceDto> & { name: string },
+  data: Partial<PlaceDto> & { name: string; place_id?: string },
 ): Promise<{ place: PlaceDto }> {
-  return msg(hass, "family_tree/places/save", data) as Promise<{ place: PlaceDto }>;
+  const { id, place_id, ...rest } = data;
+  const payload = {
+    ...rest,
+    ...(place_id || id ? { place_id: place_id || id } : {}),
+  };
+  return msg(hass, "family_tree/places/save", payload) as Promise<{ place: PlaceDto }>;
 }
 
 export async function listSources(
@@ -281,7 +300,12 @@ export async function saveEvent(
   hass: HomeAssistant,
   data: Record<string, unknown>,
 ): Promise<{ event: EventDto }> {
-  return msg(hass, "family_tree/events/save", data) as Promise<{ event: EventDto }>;
+  const { id, event_id, ...rest } = data;
+  const payload = {
+    ...rest,
+    ...(event_id || id ? { event_id: String(event_id || id) } : {}),
+  };
+  return msg(hass, "family_tree/events/save", payload) as Promise<{ event: EventDto }>;
 }
 
 export async function deleteEvent(
