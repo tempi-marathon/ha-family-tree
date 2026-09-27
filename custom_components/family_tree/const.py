@@ -16,6 +16,22 @@ DEFAULT_PROFILE_NAME: Final = "Family Tree"
 DEFAULT_GAZETTEER_COUNTRIES: Final = []
 DEFAULT_FAMILY_SHORTCUTS: Final = []
 
+# Suggested ISO codes shown in setup/options selectors (custom values still allowed).
+SUGGESTED_GAZETTEER_COUNTRIES: Final = [
+    "NL",
+    "BE",
+    "DE",
+    "FR",
+    "GB",
+    "IE",
+    "US",
+    "CA",
+    "AU",
+    "ID",
+    "SR",
+    "CW",
+]
+
 ATTR_CONFIG_ENTRY_ID: Final = "config_entry_id"
 
 # Caps (authenticated DoS guard)

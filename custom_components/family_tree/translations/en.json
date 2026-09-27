@@ -2,32 +2,52 @@
   "config": {
     "step": {
       "user": {
-        "title": "Family Tree",
-        "description": "Track your family history in Home Assistant.",
+        "title": "Stamboom",
+        "description": "Geef deze stamboom een naam. Je kunt dit later wijzigen.",
         "data": {
-          "name": "Name"
+          "name": "Naam"
+        }
+      },
+      "gazetteer": {
+        "title": "Landen voor plaatszoeken",
+        "description": "Kies landen om te downloaden voor offline plaatszoeken (GeoNames). Dit is nodig om geboorte-/sterfte-/huwelijksplaatsen te zoeken. Later aanpasbaar via Configureren.",
+        "data": {
+          "gazetteer_countries": "Landen (ISO-codes)"
+        },
+        "data_description": {
+          "gazetteer_countries": "Kies uit de lijst of typ ISO 3166-1 alpha-2 codes (bijv. NL, BE, DE). Laat leeg om over te slaan; plaatszoeken blijft dan handmatig tot je landen toevoegt."
+        }
+      },
+      "shortcuts": {
+        "title": "Familiesnelkoppelingen",
+        "description": "Optionele achternaam-snelkoppelingen in het Stamboom-paneel (bijv. je hoofdfamilienamen). Laat leeg als je het nog niet weet — later via Configureren toe te voegen.",
+        "data": {
+          "family_shortcuts": "Achternaam-snelkoppelingen"
+        },
+        "data_description": {
+          "family_shortcuts": "Typ een achternaam en druk op Enter (bijv. Molenschot, van Iersel). Nederlandse tussenvoegsels worden bij sorteren genegeerd."
         }
       }
     },
     "error": {
-      "invalid_name": "Enter a name"
+      "invalid_name": "Voer een naam in"
     },
     "abort": {
-      "already_configured": "Family Tree is already configured"
+      "already_configured": "Stamboom is al geconfigureerd"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Family Tree options",
-        "description": "Configure GeoNames countries for place search and family surname shortcuts for the dashboard.",
+        "title": "Stamboom-opties",
+        "description": "Offline plaatszoek-landen en achternaam-snelkoppelingen voor deze stamboom.",
         "data": {
-          "gazetteer_countries": "Gazetteer countries (ISO codes)",
-          "family_shortcuts": "Family surname shortcuts"
+          "gazetteer_countries": "Gazetteer-landen (ISO-codes)",
+          "family_shortcuts": "Familienaam-snelkoppelingen"
         },
         "data_description": {
-          "gazetteer_countries": "ISO 3166-1 alpha-2 codes to download from GeoNames (e.g. NL, BE).",
-          "family_shortcuts": "Surname prefixes shown as quick filters (e.g. van Iersel)."
+          "gazetteer_countries": "ISO 3166-1 alpha-2 codes om te downloaden van GeoNames (bijv. NL, BE).",
+          "family_shortcuts": "Achternamen als snelle links in het paneel (bijv. van Iersel)."
         }
       }
     }
@@ -35,18 +55,18 @@
   "entity": {
     "sensor": {
       "people_count": {
-        "name": "People"
+        "name": "Personen"
       },
       "living_count": {
-        "name": "Living"
+        "name": "Levend"
       },
       "next_birthday": {
-        "name": "Next birthday"
+        "name": "Volgende verjaardag"
       }
     },
     "calendar": {
       "family_events": {
-        "name": "Family events"
+        "name": "Familiegebeurtenissen"
       }
     }
   }

@@ -3,9 +3,29 @@
     "step": {
       "user": {
         "title": "Family Tree",
-        "description": "Track your family history in Home Assistant.",
+        "description": "Give this family tree a name. You can change it later.",
         "data": {
           "name": "Name"
+        }
+      },
+      "gazetteer": {
+        "title": "Place search countries",
+        "description": "Select countries to download for offline place lookup (GeoNames). You need this for searching birth/death/marriage places. You can change this later under Configure.",
+        "data": {
+          "gazetteer_countries": "Countries (ISO codes)"
+        },
+        "data_description": {
+          "gazetteer_countries": "Pick from the list or type ISO 3166-1 alpha-2 codes (e.g. NL, BE, DE). Leave empty to skip; place search stays manual until you add countries."
+        }
+      },
+      "shortcuts": {
+        "title": "Family shortcuts",
+        "description": "Optional surname shortcuts shown in the Family Tree panel (e.g. your main family names). Leave empty if unsure — you can add them later under Configure.",
+        "data": {
+          "family_shortcuts": "Surname shortcuts"
+        },
+        "data_description": {
+          "family_shortcuts": "Type a surname and press Enter (e.g. Molenschot, van Iersel). Matching ignores Dutch prefixes for sorting."
         }
       }
     },
@@ -20,14 +40,14 @@
     "step": {
       "init": {
         "title": "Family Tree options",
-        "description": "Configure GeoNames countries for place search and family surname shortcuts for the dashboard.",
+        "description": "Offline place-search countries and surname shortcuts for this tree.",
         "data": {
           "gazetteer_countries": "Gazetteer countries (ISO codes)",
           "family_shortcuts": "Family surname shortcuts"
         },
         "data_description": {
           "gazetteer_countries": "ISO 3166-1 alpha-2 codes to download from GeoNames (e.g. NL, BE).",
-          "family_shortcuts": "Surname prefixes shown as quick filters (e.g. van Iersel)."
+          "family_shortcuts": "Surnames shown as quick links in the panel (e.g. van Iersel)."
         }
       }
     }
