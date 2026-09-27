@@ -23,6 +23,7 @@ export interface EventDto {
   subject_id: string;
   type: string;
   place_id: string | null;
+  place_name?: string;
   date_text: string;
   date_qualifier: string;
   date_from: string | null;
