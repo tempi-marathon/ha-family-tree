@@ -170,16 +170,69 @@ def _sub_block(line: _Line, tag: str) -> _Line | None:
     return None
 
 
-def _parse_name(value: str) -> tuple[str, str, str]:
-    """Return given_names, surname_prefix, surname from a NAME value."""
-    # GEDCOM: Given /Surname/ or Given /prefix Surname/
+def _extract_quoted_nick(given: str) -> tuple[str, str]:
+    """Pull ``"Nick"`` / ``'Nick'`` out of a given-name string."""
+    match = re.search(r'["\u201c\u201d]([^"\u201c\u201d]+)["\u201c\u201d]', given)
+    if not match:
+        match = re.search(r"'([^']+)'", given)
+    if not match:
+        return given.strip(), ""
+    nick = match.group(1).strip()
+    cleaned = (given[: match.start()] + given[match.end() :]).strip()
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,")
+    return cleaned, nick
+
+
+def _parse_name(value: str) -> tuple[str, str, str, str]:
+    """Return given_names, surname_prefix, surname, call_name from a NAME value."""
+    # GEDCOM: Given /Surname/ or Given "Nick" /prefix Surname/
     match = re.match(r"^(.*?)\s*/([^/]*)/\s*(.*)$", value.strip())
     if not match:
-        return value.strip(), "", ""
-    given = match.group(1).strip()
+        given, nick = _extract_quoted_nick(value.strip())
+        return given, "", "", nick
+    given_raw = match.group(1).strip()
     surname_raw = match.group(2).strip()
+    given, nick = _extract_quoted_nick(given_raw)
     prefix, surname = split_surname(surname_raw)
-    return given, prefix, surname
+    return given, prefix, surname, nick
+
+
+def preview_gedcom(text: str) -> ImportReport:
+    """Parse GEDCOM and return counts without writing to the repository."""
+    report = ImportReport()
+    places: set[str] = set()
+    lines = _parse_lines(text)
+    for record in _records(lines):
+        if not record:
+            continue
+        tag = record[0].tag
+        groups = _child_map(record)
+        if tag == "INDI":
+            report.persons += 1
+            for event_tag in _EVENT_TAGS:
+                if event_tag in ("MARR", "DIV"):
+                    continue
+                if event_tag in groups:
+                    report.events += len(groups[event_tag])
+                    for block in groups[event_tag]:
+                        plac = _sub_value(block, "PLAC")
+                        if plac:
+                            places.add(plac.strip().casefold())
+        elif tag == "FAM":
+            report.unions += 1
+            if "CHIL" in groups:
+                report.parent_child += len(groups["CHIL"])
+            for event_tag in ("MARR", "DIV"):
+                if event_tag in groups:
+                    report.events += len(groups[event_tag])
+                    for block in groups[event_tag]:
+                        plac = _sub_value(block, "PLAC")
+                        if plac:
+                            places.add(plac.strip().casefold())
+        elif tag == "SOUR":
+            report.sources += 1
+    report.places = len(places)
+    return report
 
 
 def _coord(value: str | None) -> float | None:
@@ -210,31 +263,34 @@ class GedcomImporter:
         self._place_cache: dict[str, str] = {}
 
     def import_text(self, text: str, *, replace: bool = False) -> ImportReport:
-        if replace:
-            self.repo.clear_all()
+        def _run() -> ImportReport:
+            if replace:
+                self.repo.clear_all()
 
-        lines = _parse_lines(text)
-        records = _records(lines)
+            lines = _parse_lines(text)
+            records = _records(lines)
 
-        # First pass: sources
-        for record in records:
-            if not record or record[0].tag != "SOUR":
-                continue
-            self._import_source(record)
+            # First pass: sources
+            for record in records:
+                if not record or record[0].tag != "SOUR":
+                    continue
+                self._import_source(record)
 
-        # Second: individuals
-        for record in records:
-            if not record or record[0].tag != "INDI":
-                continue
-            self._import_indi(record)
+            # Second: individuals
+            for record in records:
+                if not record or record[0].tag != "INDI":
+                    continue
+                self._import_indi(record)
 
-        # Third: families
-        for record in records:
-            if not record or record[0].tag != "FAM":
-                continue
-            self._import_fam(record)
+            # Third: families
+            for record in records:
+                if not record or record[0].tag != "FAM":
+                    continue
+                self._import_fam(record)
 
-        return self.report
+            return self.report
+
+        return self.repo.import_batch(_run)
 
     def _resolve_person(self, xref: str | None) -> str | None:
         if not xref:
@@ -366,7 +422,7 @@ class GedcomImporter:
         given = surname_prefix = surname = call_name = ""
         if "NAME" in groups:
             name_line = groups["NAME"][0]
-            given, surname_prefix, surname = _parse_name(name_line.value)
+            given, surname_prefix, surname, call_name = _parse_name(name_line.value)
             givn = _sub_value(name_line, "GIVN")
             surn = _sub_value(name_line, "SURN")
             spfx = _sub_value(name_line, "SPFX")
@@ -381,6 +437,23 @@ class GedcomImporter:
             nick = _sub_value(name_line, "NICK")
             if nick:
                 call_name = nick
+            ruf = _sub_value(name_line, "_RUFNAME")
+            if ruf and not call_name:
+                call_name = ruf
+
+        # INDI-level name parts (some exporters put these beside NAME, not under it)
+        if "GIVN" in groups and groups["GIVN"][0].value.strip():
+            given = groups["GIVN"][0].value.strip()
+        if "SURN" in groups and groups["SURN"][0].value.strip():
+            surname = groups["SURN"][0].value.strip()
+        if "SPFX" in groups and groups["SPFX"][0].value.strip():
+            surname_prefix = groups["SPFX"][0].value.strip()
+        elif surname and not surname_prefix:
+            surname_prefix, surname = split_surname(surname)
+        if "NICK" in groups and groups["NICK"][0].value.strip():
+            call_name = groups["NICK"][0].value.strip()
+        if "_RUFNAME" in groups and groups["_RUFNAME"][0].value.strip() and not call_name:
+            call_name = groups["_RUFNAME"][0].value.strip()
 
         sex = Sex.UNKNOWN
         if "SEX" in groups:

@@ -29,6 +29,9 @@ export interface EventDto {
   date_to: string | null;
   sort_date: string | null;
   description: string;
+  place_name?: string;
+  union_id?: string;
+  partner_names?: string[];
 }
 
 export interface PlaceDto {
