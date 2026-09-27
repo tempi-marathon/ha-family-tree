@@ -73,22 +73,27 @@ function icon(path: string) {
   return html`<svg class="mdi" viewBox="0 0 24 24" aria-hidden="true"><path d=${path}></path></svg>`;
 }
 
-/** Brand mark matching brand/icon.png: mint badge + Y-tree of three nodes. */
+/** Circular emblem: trunk + canopy of head-circles (family tree). */
 function brandMark() {
   return html`
     <svg class="brand-logo" viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="18.5" fill="#e8f5e9" />
+      <circle class="brand-logo-badge" cx="20" cy="20" r="18.5" />
       <path
-        d="M20 26.5 V20 L12.5 13.5 M20 20 L27.5 13.5"
-        fill="none"
-        stroke="#2e7d32"
-        stroke-width="2.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+        class="brand-logo-trunk"
+        d="M18.4 31.6h3.2l-.4-8.2c1.4-1.2 3.8-3.2 5.6-4.4l-.9-1.3c-1.5 1-3.5 2.6-4.7 3.8V14.8h-1.4v6.7c-1.2-1.2-3.2-2.8-4.7-3.8l-.9 1.3c1.8 1.2 4.2 3.2 5.6 4.4l-.4 8.2z"
+        fill="currentColor"
       />
-      <circle cx="20" cy="28.2" r="3.4" fill="#2e7d32" />
-      <circle cx="11.2" cy="12.2" r="3.4" fill="#2e7d32" />
-      <circle cx="28.8" cy="12.2" r="3.4" fill="#2e7d32" />
+      <circle cx="20" cy="10.8" r="3.15" fill="currentColor" />
+      <circle cx="12.8" cy="13.4" r="2.55" fill="currentColor" />
+      <circle cx="27.2" cy="13.4" r="2.55" fill="currentColor" />
+      <circle cx="9.2" cy="18.4" r="2.2" fill="currentColor" />
+      <circle cx="30.8" cy="18.4" r="2.2" fill="currentColor" />
+      <circle cx="15.4" cy="17.2" r="2.1" fill="currentColor" />
+      <circle cx="24.6" cy="17.2" r="2.1" fill="currentColor" />
+      <circle cx="20" cy="15.6" r="2.35" fill="currentColor" />
+      <circle cx="12.2" cy="22.6" r="1.75" fill="currentColor" />
+      <circle cx="27.8" cy="22.6" r="1.75" fill="currentColor" />
+      <circle cx="20" cy="21.4" r="1.9" fill="currentColor" />
     </svg>
   `;
 }
