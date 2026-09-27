@@ -23,13 +23,15 @@ export interface EventDto {
   subject_id: string;
   type: string;
   place_id: string | null;
-  place_name?: string;
   date_text: string;
   date_qualifier: string;
   date_from: string | null;
   date_to: string | null;
   sort_date: string | null;
   description: string;
+  place_name?: string;
+  union_id?: string;
+  partner_names?: string[];
 }
 
 export interface PlaceDto {

@@ -71,6 +71,18 @@ const EN = {
   event_residence: "Residence",
   days: "days",
   tab_menu: "Menu",
+  confirm_import: "Confirm import",
+  importing: "Importing…",
+  import_preview: "Import preview",
+  import_persons: "People",
+  import_unions: "Families",
+  import_events: "Events",
+  import_sources: "Sources",
+  import_places: "Places",
+  replace_warning: "This will replace all existing family tree data.",
+  event_marriage: "Marriage",
+  event_divorce: "Divorce",
+  siblings_count: "siblings",
 } as const;
 
 const NL: Record<LocaleKey, string> = {
@@ -142,6 +154,18 @@ const NL: Record<LocaleKey, string> = {
   event_residence: "Woonplaats",
   days: "dagen",
   tab_menu: "Menu",
+  confirm_import: "Import bevestigen",
+  importing: "Importeren…",
+  import_preview: "Importvoorbeeld",
+  import_persons: "Personen",
+  import_unions: "Families",
+  import_events: "Gebeurtenissen",
+  import_sources: "Bronnen",
+  import_places: "Plaatsen",
+  replace_warning: "Dit vervangt alle bestaande stamboomgegevens.",
+  event_marriage: "Huwelijk",
+  event_divorce: "Scheiding",
+  siblings_count: "broers/zussen",
 };
 
 export function pickLocale(language?: string): Record<LocaleKey, string> {

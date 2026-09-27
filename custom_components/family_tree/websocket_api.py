@@ -41,7 +41,7 @@ from .models import (
     UnionType,
 )
 from .names import display_name, matches_family_shortcut
-from .relatives import tree_for
+from .relatives import enrich_event_dict, tree_for, union_events_for_person
 from .stats import compute_stats
 
 _LOGGER = logging.getLogger(__name__)
@@ -190,14 +190,8 @@ async def ws_persons_get(
             return None
         events = []
         for e in coordinator.repo.list_events(SubjectType.PERSON, person.id):
-            payload = e.to_dict()
-            place_name = ""
-            if e.place_id:
-                place = coordinator.repo.get_place(e.place_id)
-                if place is not None:
-                    place_name = place.name
-            payload["place_name"] = place_name
-            events.append(payload)
+            events.append(enrich_event_dict(coordinator.repo, e.to_dict()))
+        events.extend(union_events_for_person(coordinator.repo, person.id))
         citations = coordinator.repo.list_citations(SubjectType.PERSON, person.id)
         return {
             "person": {**person.to_dict(), "display_name": display_name(person)},
@@ -350,7 +344,7 @@ async def ws_unions_get(
                 }
             )
         events = [
-            e.to_dict()
+            enrich_event_dict(coordinator.repo, e.to_dict())
             for e in coordinator.repo.list_events(SubjectType.UNION, union.id)
         ]
         return {"union": union.to_dict(), "partners": partners, "events": events}
@@ -885,6 +879,7 @@ async def ws_places_save(
         vol.Required("subject_id"): str,
         vol.Required("event_type"): vol.In([t.value for t in EventType]),
         vol.Optional("place_id"): vol.Any(None, str),
+        vol.Optional("place", default=""): _bounded_string(MAX_NAME),
         vol.Optional("date_text", default=""): _bounded_string(100),
         vol.Optional("description", default=""): _bounded_string(MAX_NOTES),
         **_OPTIONAL_ENTRY,
@@ -904,15 +899,23 @@ async def ws_events_save(
     parsed = parse_gedcom_date(date_text)
 
     def _run() -> dict[str, Any]:
+        place_id = msg.get("place_id")
+        place_name = (msg.get("place") or "").strip()
+        if not place_id and place_name:
+            found = coordinator.repo.find_place(place_name)
+            place_id = (
+                found.id
+                if found
+                else coordinator.repo.add_place(Place(name=place_name)).id
+            )
         event_id = msg.get("event_id")
         if event_id:
-            # Update path: load existing via list is awkward; rewrite fields
             event = Event(
                 id=event_id,
                 subject_type=SubjectType(msg["subject_type"]),
                 subject_id=msg["subject_id"],
                 type=EventType(msg["event_type"]),
-                place_id=msg.get("place_id"),
+                place_id=place_id,
                 date_text=date_text,
                 date_qualifier=parsed.qualifier,
                 date_from=parsed.date_from,
@@ -926,7 +929,7 @@ async def ws_events_save(
                 subject_type=SubjectType(msg["subject_type"]),
                 subject_id=msg["subject_id"],
                 type=EventType(msg["event_type"]),
-                place_id=msg.get("place_id"),
+                place_id=place_id,
                 date_text=date_text,
                 date_qualifier=parsed.qualifier,
                 date_from=parsed.date_from,
@@ -935,7 +938,7 @@ async def ws_events_save(
                 description=msg.get("description") or "",
             )
             saved = coordinator.repo.add_event(event)
-        return saved.to_dict()
+        return enrich_event_dict(coordinator.repo, saved.to_dict())
 
     connection.send_result(
         msg["id"], {"event": await hass.async_add_executor_job(_run)}

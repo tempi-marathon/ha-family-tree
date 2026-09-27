@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN, MAX_IMPORT_BYTES
 from .gedcom_export import export_gedcom
-from .gedcom_import import GedcomImporter
+from .gedcom_import import GedcomImporter, preview_gedcom
 from .helpers import get_coordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
             return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
 
         replace = request.query.get("replace", "0") in ("1", "true", "yes")
+        preview = request.query.get("preview", "0") in ("1", "true", "yes")
         content_type = (request.content_type or "").lower()
 
         try:
@@ -69,6 +70,18 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
         except Exception as err:  # noqa: BLE001
             _LOGGER.exception("Failed to read GEDCOM upload")
             return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+
+        if preview:
+
+            def _preview() -> dict:
+                return preview_gedcom(text).to_dict()
+
+            try:
+                report = await hass.async_add_executor_job(_preview)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.exception("GEDCOM preview failed")
+                return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+            return self.json({"ok": True, "preview": True, "report": report})
 
         def _import() -> dict:
             importer = GedcomImporter(coordinator.repo)

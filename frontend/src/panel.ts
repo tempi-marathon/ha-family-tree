@@ -28,7 +28,7 @@ import {
   subscribeRevision,
   type SettingsDto,
 } from "./api";
-import { daysUntilLabel, formatGedcomDate } from "./dates_view";
+import { daysUntilLabel, formatGedcomDate, formatLifespanLine } from "./dates_view";
 import { formatHassError } from "./errors";
 import { type LocaleKey, t } from "./i18n";
 import {
@@ -37,12 +37,7 @@ import {
   type PanelView,
 } from "./panel_view_state";
 import { filterAndSortPeople, personDisplayName } from "./people_view";
-import {
-  flattenChildren,
-  flattenParents,
-  nodeName,
-  partnerNames,
-} from "./tree_view";
+import { nodeName } from "./tree_view";
 import type { HomeAssistant } from "./types";
 
 const PANEL_TAG = "family-tree-panel";
@@ -57,24 +52,21 @@ const MDI_COG =
   "M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z";
 const MDI_DELETE =
   "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z";
+const MDI_PLUS =
+  "M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z";
 
 type PersonTab = "details" | "relationships" | "tree" | "sources";
+type DialogMode = "person" | "event" | "import";
 
-type EventTypeKey =
-  | "event_birth"
-  | "event_death"
-  | "event_baptism"
-  | "event_burial"
-  | "event_occupation"
-  | "event_residence";
-
-const EVENT_TYPE_KEYS: Record<string, EventTypeKey> = {
+const EVENT_TYPE_KEYS: Record<string, LocaleKey> = {
   birth: "event_birth",
   death: "event_death",
   baptism: "event_baptism",
   burial: "event_burial",
   occupation: "event_occupation",
   residence: "event_residence",
+  marriage: "event_marriage",
+  divorce: "event_divorce",
 };
 
 function icon(path: string) {
@@ -146,6 +138,7 @@ export class FamilyTreePanel extends LitElement {
   @state() private _detail: PersonDetail | null = null;
   @state() private _personTab: PersonTab = "details";
   @state() private _dialogOpen = false;
+  @state() private _dialogMode: DialogMode = "person";
   @state() private _editing: PersonDto | null = null;
   @state() private _form: Record<string, string> = {};
   @state() private _eventForm: Record<string, string> = {};
@@ -158,12 +151,16 @@ export class FamilyTreePanel extends LitElement {
   @state() private _gazHits: GazetteerHit[] = [];
   @state() private _replaceImport = false;
   @state() private _importStatus = "";
+  @state() private _importFile: File | null = null;
+  @state() private _importReport: Record<string, number> | null = null;
+  @state() private _importPhase: "" | "preview" | "importing" | "done" = "";
 
   private _unsub: (() => void) | null = null;
   private _connected = false;
   private _viewHydrated = false;
   private _charts: Chart[] = [];
   private _revision = 0;
+  private _chartsStatsKey = "";
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -187,7 +184,11 @@ export class FamilyTreePanel extends LitElement {
       void this._connect();
     }
     if (this._view === "dashboard" && this._stats) {
-      this.updateComplete.then(() => this._renderCharts());
+      const key = JSON.stringify(this._stats);
+      if (key !== this._chartsStatsKey) {
+        this._chartsStatsKey = key;
+        this.updateComplete.then(() => this._renderCharts());
+      }
     }
   }
 
@@ -312,6 +313,7 @@ export class FamilyTreePanel extends LitElement {
 
   private _openCreate() {
     this._editing = null;
+    this._dialogMode = "person";
     this._error = "";
     this._form = {
       given_names: "",
@@ -327,6 +329,7 @@ export class FamilyTreePanel extends LitElement {
 
   private _openEdit(person: PersonDto) {
     this._editing = person;
+    this._dialogMode = "person";
     this._error = "";
     this._form = {
       given_names: person.given_names || "",
@@ -337,6 +340,12 @@ export class FamilyTreePanel extends LitElement {
       deceased: person.is_living ? "false" : "true",
       notes: person.notes || "",
     };
+    this._dialogOpen = true;
+  }
+
+  private _openAddEvent() {
+    this._dialogMode = "event";
+    this._eventForm = { event_type: "birth", date_text: "", place: "", description: "" };
     this._dialogOpen = true;
   }
 
@@ -407,6 +416,7 @@ export class FamilyTreePanel extends LitElement {
 
   private async _saveEvent() {
     if (!this.hass || !this._detail || !this._canWrite()) return;
+    this._saving = true;
     try {
       let placeId: string | null = null;
       const placeName = (this._eventForm.place || "").trim();
@@ -427,12 +437,100 @@ export class FamilyTreePanel extends LitElement {
         subject_id: this._detail.person.id,
         event_type: this._eventForm.event_type || "birth",
         date_text: this._eventForm.date_text || "",
+        place: this._eventForm.place || undefined,
         description: this._eventForm.description || "",
         place_id: placeId,
       });
       this._eventForm = {};
+      this._dialogOpen = false;
       this._detail = await getPerson(this.hass, this._detail.person.id);
     } catch (err) {
+      this._error = formatHassError(err);
+    } finally {
+      this._saving = false;
+    }
+  }
+
+  private async _authHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {};
+    const access =
+      (this.hass as unknown as { connection?: { options?: { auth?: { accessToken?: string } } } })
+        ?.connection?.options?.auth?.accessToken;
+    const authData = (this.hass as unknown as { auth?: { data?: { access_token?: string } } })
+      .auth?.data?.access_token;
+    const bearer = authData || access;
+    if (bearer) headers.Authorization = `Bearer ${bearer}`;
+    return headers;
+  }
+
+  private async _previewGedcom(file: File) {
+    if (!this.hass || !this._canWrite()) return;
+    this._importFile = file;
+    this._importPhase = "preview";
+    this._importReport = null;
+    this._importStatus = this._tt("loading");
+    this._dialogMode = "import";
+    this._dialogOpen = true;
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const url = `/api/family_tree/import_gedcom?preview=1`;
+      const resp = await fetch(url, {
+        method: "POST",
+        body: form,
+        credentials: "same-origin",
+        headers: await this._authHeaders(),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `Preview failed (${resp.status})`);
+      }
+      const body = await resp.json();
+      this._importReport = (body.report || {}) as Record<string, number>;
+      this._importStatus = "";
+    } catch (err) {
+      this._importStatus = "";
+      this._importPhase = "";
+      this._dialogOpen = false;
+      this._error = formatHassError(err);
+    }
+  }
+
+  private async _confirmImport() {
+    if (!this._importFile) return;
+    await this._importGedcom(this._importFile);
+  }
+
+  private async _importGedcom(file: File) {
+    if (!this.hass || !this._canWrite()) return;
+    this._importPhase = "importing";
+    this._importStatus = this._tt("importing");
+    this._dialogMode = "import";
+    this._dialogOpen = true;
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const url = `/api/family_tree/import_gedcom?replace=${this._replaceImport ? "1" : "0"}`;
+      const resp = await fetch(url, {
+        method: "POST",
+        body: form,
+        credentials: "same-origin",
+        headers: await this._authHeaders(),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `Import failed (${resp.status})`);
+      }
+      const body = await resp.json();
+      this._importReport = (body.report || {}) as Record<string, number>;
+      this._importPhase = "done";
+      this._importStatus = "";
+      this._importFile = null;
+      await this._refreshAll();
+    } catch (err) {
+      this._importStatus = "";
+      this._importPhase = "";
+      this._dialogOpen = false;
       this._error = formatHassError(err);
     }
   }
@@ -508,47 +606,6 @@ export class FamilyTreePanel extends LitElement {
       const res = await searchGazetteer(this.hass, this._gazQuery.trim());
       this._gazHits = res.results;
     } catch (err) {
-      this._error = formatHassError(err);
-    }
-  }
-
-  private async _importGedcom(file: File) {
-    if (!this.hass || !this._canWrite()) return;
-    this._importStatus = this._tt("loading");
-    try {
-      const token = await (this.hass as unknown as {
-        auth?: { data?: { access_token?: string } };
-        connection?: { options?: { auth?: { data?: { access_token?: string } } } };
-      }).auth;
-      // Use fetch with credentials — HA panel shares cookies / auth header via hass
-      const form = new FormData();
-      form.append("file", file);
-      const url = `/api/family_tree/import_gedcom?replace=${this._replaceImport ? "1" : "0"}`;
-      const headers: Record<string, string> = {};
-      const access =
-        (this.hass as unknown as { connection?: { options?: { auth?: { accessToken?: string } } } })
-          ?.connection?.options?.auth?.accessToken;
-      // Prefer hass.callApi pattern via raw fetch with Authorization from hass
-      const authData = (this.hass as unknown as { auth?: { data?: { access_token?: string } } })
-        .auth?.data?.access_token;
-      const bearer = authData || access;
-      if (bearer) headers.Authorization = `Bearer ${bearer}`;
-      void token;
-      const resp = await fetch(url, {
-        method: "POST",
-        body: form,
-        credentials: "same-origin",
-        headers,
-      });
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(text || `Import failed (${resp.status})`);
-      }
-      const body = await resp.json();
-      this._importStatus = `Imported: ${JSON.stringify(body.report || body)}`;
-      await this._refreshAll();
-    } catch (err) {
-      this._importStatus = "";
       this._error = formatHassError(err);
     }
   }
@@ -841,6 +898,66 @@ export class FamilyTreePanel extends LitElement {
     `;
   }
 
+  private _eventTypeLabel(type: string): string {
+    const key = EVENT_TYPE_KEYS[type];
+    return key ? this._tt(key) : type;
+  }
+
+  private _renderPersonCard(
+    node: Record<string, unknown>,
+    opts: { subtitle?: string; footer?: string } = {},
+  ) {
+    const id = String(node.id || "");
+    const title = nodeName(node);
+    const formal =
+      (typeof node.formal_name === "string" && node.formal_name) ||
+      [node.given_names, node.surname_prefix, node.surname]
+        .map((p) => (typeof p === "string" ? p.trim() : ""))
+        .filter(Boolean)
+        .join(" ");
+    const lifespan = formatLifespanLine({
+      birth_date_text: typeof node.birth_date_text === "string" ? node.birth_date_text : "",
+      birth_sort_date: typeof node.birth_sort_date === "string" ? node.birth_sort_date : null,
+      death_date_text: typeof node.death_date_text === "string" ? node.death_date_text : "",
+      death_sort_date: typeof node.death_sort_date === "string" ? node.death_sort_date : null,
+      is_living: node.is_living !== false,
+    });
+    const birthPlace = typeof node.birth_place === "string" ? node.birth_place : "";
+    const siblingCount = Number(node.sibling_count || 0);
+    const footer =
+      opts.footer ||
+      (siblingCount > 0 ? `+${siblingCount} ${this._tt("siblings_count")}` : "");
+    return html`
+      <button type="button" class="person-card" @click=${() => id && this._openPerson(id)}>
+        <div class="person-card-title">${title}</div>
+        ${formal && formal !== title
+          ? html`<div class="person-card-formal">${formal}</div>`
+          : nothing}
+        ${lifespan ? html`<div class="person-card-meta">${lifespan}</div>` : nothing}
+        ${birthPlace ? html`<div class="person-card-meta">${birthPlace}</div>` : nothing}
+        ${opts.subtitle ? html`<div class="person-card-meta accent">${opts.subtitle}</div>` : nothing}
+        ${footer ? html`<div class="person-card-footer">${footer}</div>` : nothing}
+      </button>
+    `;
+  }
+
+  private _renderEventCard(ev: EventDto) {
+    const canDelete = this._canWrite() && ev.subject_type === "person";
+    return html`
+      <div class="event-card">
+        <div class="event-card-head">
+          <strong>${this._eventTypeLabel(ev.type)}</strong>
+          ${canDelete
+            ? html`<button class="linkish danger" @click=${() => this._deleteEvent(ev.id)}>${this._tt("delete")}</button>`
+            : nothing}
+        </div>
+        <div class="event-card-meta">${formatGedcomDate(ev.date_text)}</div>
+        ${ev.place_name ? html`<div class="event-card-meta">${ev.place_name}</div>` : nothing}
+        ${ev.description ? html`<div class="event-card-desc">${ev.description}</div>` : nothing}
+      </div>
+    `;
+  }
+
   private _renderPerson() {
     const d = this._detail!;
     const p = d.person;
@@ -874,64 +991,69 @@ export class FamilyTreePanel extends LitElement {
             <dt>${this._tt("deceased")}</dt><dd>${p.is_living ? "—" : "†"}</dd>
             <dt>${this._tt("notes")}</dt><dd>${p.notes || "—"}</dd>
           </dl>
-          <h3>${this._tt("events")}</h3>
-          <ul class="plain">
-            ${d.events.map(
-              (ev: EventDto) => html`<li>
-                <strong>${EVENT_TYPE_KEYS[ev.type] ? this._tt(EVENT_TYPE_KEYS[ev.type]) : ev.type}</strong>
-                ${formatGedcomDate(ev.date_text)}
-                ${ev.place_name ? html` · ${ev.place_name}` : nothing}
-                ${ev.description ? html` — ${ev.description}` : nothing}
-                ${this._canWrite()
-                  ? html`<button class="linkish danger" @click=${() => this._deleteEvent(ev.id)}>${this._tt("delete")}</button>`
-                  : nothing}
-              </li>`,
-            )}
-          </ul>
-          ${this._canWrite()
-            ? html`<div class="inline-form event-form">
-                <select .value=${this._eventForm.event_type || "birth"}
-                  @change=${(e: Event) => (this._eventForm = { ...this._eventForm, event_type: (e.target as HTMLSelectElement).value })}>
-                  <option value="birth">${this._tt("event_birth")}</option>
-                  <option value="death">${this._tt("event_death")}</option>
-                  <option value="baptism">${this._tt("event_baptism")}</option>
-                  <option value="burial">${this._tt("event_burial")}</option>
-                  <option value="occupation">${this._tt("event_occupation")}</option>
-                  <option value="residence">${this._tt("event_residence")}</option>
-                </select>
-                <input placeholder=${this._tt("date")} .value=${this._eventForm.date_text || ""}
-                  @input=${(e: Event) => (this._eventForm = { ...this._eventForm, date_text: (e.target as HTMLInputElement).value })} />
-                <input placeholder=${this._tt("place")} .value=${this._eventForm.place || ""}
-                  @input=${(e: Event) => (this._eventForm = { ...this._eventForm, place: (e.target as HTMLInputElement).value })} />
-                <input placeholder=${this._tt("description")} .value=${this._eventForm.description || ""}
-                  @input=${(e: Event) => (this._eventForm = { ...this._eventForm, description: (e.target as HTMLInputElement).value })} />
-                ${mdButton(this._tt("add_event"), {
-                  variant: "filled",
-                  onClick: () => void this._saveEvent(),
-                })}
-              </div>`
-            : nothing}`
+          <div class="section-head">
+            <h3>${this._tt("events")}</h3>
+            ${this._canWrite()
+              ? html`<button class="primary" @click=${() => this._openAddEvent()}>${icon(MDI_PLUS)} ${this._tt("add_event")}</button>`
+              : nothing}
+          </div>
+          <div class="card-list">
+            ${d.events.map((ev: EventDto) => this._renderEventCard(ev))}
+            ${d.events.length === 0 ? html`<p class="muted">—</p>` : nothing}
+          </div>`
         : this._personTab === "relationships"
           ? html`
               <h3>${this._tt("parents")}</h3>
-              <ul class="plain">${flattenParents(tree?.parents).map((n) => html`<li><button class="linkish" @click=${() => this._openPerson(n.id)}>${n.name}</button></li>`)}</ul>
+              <div class="card-list">
+                ${(tree?.parents || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
+              </div>
               <h3>${this._tt("partners")}</h3>
-              <ul class="plain">${partnerNames(tree?.partners).map((n) => html`<li>${n}</li>`)}</ul>
+              <div class="card-list">
+                ${(tree?.partners || []).flatMap((union) => {
+                  const u = union as Record<string, unknown>;
+                  const partners = (u.partners as Array<Record<string, unknown>>) || [];
+                  const marr = [u.marriage_date, u.marriage_place].filter(Boolean).join(" · ");
+                  return partners.map((partner) =>
+                    this._renderPersonCard(partner, {
+                      subtitle: marr
+                        ? `${this._tt("event_marriage")}: ${marr}`
+                        : typeof u.type === "string"
+                          ? String(u.type)
+                          : undefined,
+                    }),
+                  );
+                })}
+              </div>
               <h3>${this._tt("siblings")}</h3>
-              <ul class="plain">${(tree?.siblings || []).map((s) => html`<li><button class="linkish" @click=${() => this._openPerson(String(s.id))}>${nodeName(s)}</button></li>`)}</ul>
+              <div class="card-list">
+                ${(tree?.siblings || []).map((s) => this._renderPersonCard(s as Record<string, unknown>))}
+              </div>
               <h3>${this._tt("children")}</h3>
-              <ul class="plain">${flattenChildren(tree?.children).map((n) => html`<li><button class="linkish" @click=${() => this._openPerson(n.id)}>${n.name}</button></li>`)}</ul>
+              <div class="card-list">
+                ${(tree?.children || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
+              </div>
             `
           : this._personTab === "tree"
             ? html`<div class="tree-box">
                 <div class="gen">
                   <span class="muted">${this._tt("parents")}</span>
-                  ${flattenParents(tree?.parents).map((n) => html`<div class="node" @click=${() => this._openPerson(n.id)}>${n.name}</div>`)}
+                  ${(tree?.parents || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
                 </div>
-                <div class="gen focus"><div class="node self">${personDisplayName(p)}</div></div>
+                <div class="gen focus">
+                  ${this._renderPersonCard({
+                    id: p.id,
+                    name: personDisplayName(p),
+                    given_names: p.given_names,
+                    call_name: p.call_name,
+                    surname_prefix: p.surname_prefix,
+                    surname: p.surname,
+                    is_living: p.is_living,
+                    ...(tree?.person || {}),
+                  })}
+                </div>
                 <div class="gen">
                   <span class="muted">${this._tt("children")}</span>
-                  ${flattenChildren(tree?.children).map((n) => html`<div class="node" @click=${() => this._openPerson(n.id)}>${n.name}</div>`)}
+                  ${(tree?.children || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
                 </div>
               </div>`
             : html`<ul class="plain">
@@ -964,7 +1086,8 @@ export class FamilyTreePanel extends LitElement {
               <input type="file" accept=".ged,text/plain"
                 @change=${(e: Event) => {
                   const file = (e.target as HTMLInputElement).files?.[0];
-                  if (file) void this._importGedcom(file);
+                  if (file) void this._previewGedcom(file);
+                  (e.target as HTMLInputElement).value = "";
                 }} />
             `
           : nothing}
@@ -1020,13 +1143,250 @@ export class FamilyTreePanel extends LitElement {
 
   private _closeDialog = () => {
     this._dialogOpen = false;
+    if (this._dialogMode === "import" && this._importPhase !== "importing") {
+      this._importPhase = "";
+      this._importFile = null;
+      this._importReport = null;
+      this._importStatus = "";
+    }
   };
+
+  private _renderImportDialogBody() {
+    const report = this._importReport || {};
+    const phase = this._importPhase;
+    if (phase === "importing" || (phase === "preview" && !this._importReport && this._importStatus)) {
+      return html`<p class="muted">${this._importStatus || this._tt("importing")}</p>`;
+    }
+    return html`
+      <p class="muted">${this._importFile?.name || ""}</p>
+      ${this._replaceImport
+        ? html`<p class="error" role="alert">${this._tt("replace_warning")}</p>`
+        : nothing}
+      <ul class="plain import-counts">
+        <li><span>${this._tt("import_persons")}</span><strong>${report.persons ?? 0}</strong></li>
+        <li><span>${this._tt("import_unions")}</span><strong>${report.unions ?? 0}</strong></li>
+        <li><span>${this._tt("import_events")}</span><strong>${report.events ?? 0}</strong></li>
+        <li><span>${this._tt("import_sources")}</span><strong>${report.sources ?? 0}</strong></li>
+        <li><span>${this._tt("import_places")}</span><strong>${report.places ?? 0}</strong></li>
+      </ul>
+    `;
+  }
 
   private _renderDialog() {
     const write = this._canWrite();
-    const dialogTitle = this._editing
-      ? personDisplayName(this._editing)
-      : this._tt("add_person");
+    const mode = this._dialogMode;
+    const dialogTitle =
+      mode === "import"
+        ? this._tt("import_preview")
+        : mode === "event"
+          ? this._tt("add_event")
+          : this._editing
+            ? personDisplayName(this._editing)
+            : this._tt("add_person");
+
+    const personBody = html`
+      <div class="form-section">
+        <div class="form-section-title">${this._tt("details")}</div>
+        <label
+          >${this._tt("given_names")} <span class="req">*</span>
+          <input
+            .value=${this._form.given_names || ""}
+            ?disabled=${!write}
+            required
+            @input=${(e: Event) =>
+              (this._form = {
+                ...this._form,
+                given_names: (e.target as HTMLInputElement).value,
+              })}
+          />
+        </label>
+        <label
+          >${this._tt("call_name")}
+          <input
+            .value=${this._form.call_name || ""}
+            ?disabled=${!write}
+            @input=${(e: Event) =>
+              (this._form = {
+                ...this._form,
+                call_name: (e.target as HTMLInputElement).value,
+              })}
+          />
+        </label>
+        <div class="row2">
+          <label
+            >${this._tt("surname_prefix")}
+            <input
+              .value=${this._form.surname_prefix || ""}
+              ?disabled=${!write}
+              @input=${(e: Event) =>
+                (this._form = {
+                  ...this._form,
+                  surname_prefix: (e.target as HTMLInputElement).value,
+                })}
+            />
+          </label>
+          <label
+            >${this._tt("surname")}
+            <input
+              .value=${this._form.surname || ""}
+              ?disabled=${!write}
+              @input=${(e: Event) =>
+                (this._form = {
+                  ...this._form,
+                  surname: (e.target as HTMLInputElement).value,
+                })}
+            />
+          </label>
+        </div>
+        <div class="row2">
+          <label
+            >${this._tt("sex")}
+            <select
+              .value=${this._form.sex || "unknown"}
+              ?disabled=${!write}
+              @change=${(e: Event) =>
+                (this._form = {
+                  ...this._form,
+                  sex: (e.target as HTMLSelectElement).value,
+                })}
+            >
+              <option value="male">${this._tt("sex_male")}</option>
+              <option value="female">${this._tt("sex_female")}</option>
+              <option value="intersex">${this._tt("sex_intersex")}</option>
+              <option value="unknown">${this._tt("sex_unknown")}</option>
+            </select>
+          </label>
+          <label class="check-row"
+            >${this._tt("deceased")}
+            <span class="check-control">
+              <input
+                type="checkbox"
+                .checked=${this._form.deceased === "true"}
+                ?disabled=${!write}
+                @change=${(e: Event) =>
+                  (this._form = {
+                    ...this._form,
+                    deceased: (e.target as HTMLInputElement).checked
+                      ? "true"
+                      : "false",
+                  })}
+              />
+            </span>
+          </label>
+        </div>
+        <label
+          >${this._tt("notes")}
+          <textarea
+            rows="3"
+            .value=${this._form.notes || ""}
+            ?disabled=${!write}
+            @input=${(e: Event) =>
+              (this._form = {
+                ...this._form,
+                notes: (e.target as HTMLTextAreaElement).value,
+              })}
+          ></textarea>
+        </label>
+      </div>
+    `;
+
+    const eventBody = html`
+      <div class="form-section">
+        <label
+          >${this._tt("events")}
+          <select
+            .value=${this._eventForm.event_type || "birth"}
+            @change=${(e: Event) =>
+              (this._eventForm = {
+                ...this._eventForm,
+                event_type: (e.target as HTMLSelectElement).value,
+              })}
+          >
+            <option value="birth">${this._tt("event_birth")}</option>
+            <option value="death">${this._tt("event_death")}</option>
+            <option value="baptism">${this._tt("event_baptism")}</option>
+            <option value="burial">${this._tt("event_burial")}</option>
+            <option value="occupation">${this._tt("event_occupation")}</option>
+            <option value="residence">${this._tt("event_residence")}</option>
+          </select>
+        </label>
+        <label
+          >${this._tt("date")}
+          <input
+            .value=${this._eventForm.date_text || ""}
+            @input=${(e: Event) =>
+              (this._eventForm = {
+                ...this._eventForm,
+                date_text: (e.target as HTMLInputElement).value,
+              })}
+          />
+        </label>
+        <label
+          >${this._tt("place")}
+          <input
+            .value=${this._eventForm.place || ""}
+            @input=${(e: Event) =>
+              (this._eventForm = {
+                ...this._eventForm,
+                place: (e.target as HTMLInputElement).value,
+              })}
+          />
+        </label>
+        <label
+          >${this._tt("description")}
+          <input
+            .value=${this._eventForm.description || ""}
+            @input=${(e: Event) =>
+              (this._eventForm = {
+                ...this._eventForm,
+                description: (e.target as HTMLInputElement).value,
+              })}
+          />
+        </label>
+      </div>
+    `;
+
+    const actions =
+      mode === "import"
+        ? html`
+            ${mdButton(this._tt(this._importPhase === "done" ? "close" : "cancel"), {
+              variant: "text",
+              disabled: this._importPhase === "importing",
+              onClick: this._closeDialog,
+            })}
+            ${this._importPhase === "preview" && this._importReport
+              ? mdButton(this._tt("confirm_import"), {
+                  variant: "filled",
+                  onClick: () => void this._confirmImport(),
+                })
+              : nothing}
+          `
+        : mode === "event"
+          ? html`
+              ${mdButton(this._tt("cancel"), {
+                variant: "text",
+                onClick: this._closeDialog,
+              })}
+              ${mdButton(this._tt("save"), {
+                variant: "filled",
+                disabled: this._saving,
+                onClick: () => void this._saveEvent(),
+              })}
+            `
+          : html`
+              ${mdButton(this._tt(write ? "cancel" : "close"), {
+                variant: "text",
+                onClick: this._closeDialog,
+              })}
+              ${write
+                ? mdButton(this._tt("save"), {
+                    variant: "filled",
+                    disabled: this._saving,
+                    onClick: () => void this._savePerson(),
+                  })
+                : nothing}
+            `;
+
     return html`
       <div class="dialog-backdrop">
         <div
@@ -1042,133 +1402,24 @@ export class FamilyTreePanel extends LitElement {
               type="button"
               class="icon-btn dialog-close"
               aria-label=${this._tt("cancel")}
+              ?disabled=${mode === "import" && this._importPhase === "importing"}
               @click=${this._closeDialog}
             >
               ${icon(MDI_CLOSE)}
             </button>
           </div>
 
-          <div class="form-section">
-            <div class="form-section-title">${this._tt("details")}</div>
-            <label
-              >${this._tt("given_names")} <span class="req">*</span>
-              <input
-                .value=${this._form.given_names || ""}
-                ?disabled=${!write}
-                required
-                @input=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
-                    given_names: (e.target as HTMLInputElement).value,
-                  })}
-              />
-            </label>
-            <label
-              >${this._tt("call_name")}
-              <input
-                .value=${this._form.call_name || ""}
-                ?disabled=${!write}
-                @input=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
-                    call_name: (e.target as HTMLInputElement).value,
-                  })}
-              />
-            </label>
-            <div class="row2">
-              <label
-                >${this._tt("surname_prefix")}
-                <input
-                  .value=${this._form.surname_prefix || ""}
-                  ?disabled=${!write}
-                  @input=${(e: Event) =>
-                    (this._form = {
-                      ...this._form,
-                      surname_prefix: (e.target as HTMLInputElement).value,
-                    })}
-                />
-              </label>
-              <label
-                >${this._tt("surname")}
-                <input
-                  .value=${this._form.surname || ""}
-                  ?disabled=${!write}
-                  @input=${(e: Event) =>
-                    (this._form = {
-                      ...this._form,
-                      surname: (e.target as HTMLInputElement).value,
-                    })}
-                />
-              </label>
-            </div>
-            <div class="row2">
-              <label
-                >${this._tt("sex")}
-                <select
-                  .value=${this._form.sex || "unknown"}
-                  ?disabled=${!write}
-                  @change=${(e: Event) =>
-                    (this._form = {
-                      ...this._form,
-                      sex: (e.target as HTMLSelectElement).value,
-                    })}
-                >
-                  <option value="male">${this._tt("sex_male")}</option>
-                  <option value="female">${this._tt("sex_female")}</option>
-                  <option value="intersex">${this._tt("sex_intersex")}</option>
-                  <option value="unknown">${this._tt("sex_unknown")}</option>
-                </select>
-              </label>
-              <label class="check-row"
-                >${this._tt("deceased")}
-                <span class="check-control">
-                  <input
-                    type="checkbox"
-                    .checked=${this._form.deceased === "true"}
-                    ?disabled=${!write}
-                    @change=${(e: Event) =>
-                      (this._form = {
-                        ...this._form,
-                        deceased: (e.target as HTMLInputElement).checked
-                          ? "true"
-                          : "false",
-                      })}
-                  />
-                </span>
-              </label>
-            </div>
-            <label
-              >${this._tt("notes")}
-              <textarea
-                rows="3"
-                .value=${this._form.notes || ""}
-                ?disabled=${!write}
-                @input=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
-                    notes: (e.target as HTMLTextAreaElement).value,
-                  })}
-              ></textarea>
-            </label>
-          </div>
+          ${mode === "import"
+            ? this._renderImportDialogBody()
+            : mode === "event"
+              ? eventBody
+              : personBody}
 
-          ${this._error
+          ${this._error && mode !== "import"
             ? html`<div class="error" role="alert">${this._error}</div>`
             : nothing}
 
-          <div class="dialog-actions">
-            ${mdButton(this._tt(write ? "cancel" : "close"), {
-              variant: "text",
-              onClick: this._closeDialog,
-            })}
-            ${write
-              ? mdButton(this._tt("save"), {
-                  variant: "filled",
-                  disabled: this._saving,
-                  onClick: () => void this._savePerson(),
-                })
-              : nothing}
-          </div>
+          <div class="dialog-actions">${actions}</div>
         </div>
       </div>
     `;
@@ -1219,9 +1470,6 @@ export class FamilyTreePanel extends LitElement {
     }
     .brand-logo-badge {
       fill: color-mix(in srgb, var(--primary-color) 18%, var(--card-background-color, #fff));
-    }
-    .brand-mark {
-      color: var(--primary-color);
     }
     .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
     .tabs button, .subtabs button, .toolbar button, .inline-form button, .row-actions button, .chip {
@@ -1351,6 +1599,38 @@ export class FamilyTreePanel extends LitElement {
       cursor: pointer; min-width: 100px; text-align: center;
     }
     .node.self { background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 600; }
+
+    .section-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; margin: 16px 0 8px;
+    }
+    .section-head h3 { margin: 0; }
+    .card-list {
+      display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;
+    }
+    .person-card, .event-card {
+      appearance: none; border: 1px solid var(--divider-color);
+      background: var(--card-background-color, var(--secondary-background-color));
+      border-radius: var(--ha-border-radius-lg, 12px);
+      padding: 12px 14px; text-align: left; color: inherit;
+      box-shadow: var(--ha-card-box-shadow, none);
+      width: 100%; box-sizing: border-box;
+    }
+    button.person-card { cursor: pointer; font: inherit; display: block; }
+    .person-card-title { font-weight: 600; font-size: 1.05rem; }
+    .person-card-formal { margin-top: 2px; }
+    .person-card-meta, .event-card-meta {
+      color: var(--secondary-text-color); font-size: 0.9em; margin-top: 4px;
+    }
+    .person-card-meta.accent, .person-card-footer {
+      color: var(--primary-color); font-size: 0.9em; margin-top: 6px;
+    }
+    .event-card-head {
+      display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    }
+    .event-card-desc { margin-top: 6px; }
+    .import-counts li { justify-content: space-between; }
+    .gen .person-card { max-width: 280px; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
     .event-form input, .event-form select { width: auto; min-width: 120px; flex: 1; }
