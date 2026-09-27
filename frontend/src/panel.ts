@@ -1471,9 +1471,6 @@ export class FamilyTreePanel extends LitElement {
     .brand-logo-badge {
       fill: color-mix(in srgb, var(--primary-color) 18%, var(--card-background-color, #fff));
     }
-    .brand-mark {
-      color: var(--primary-color);
-    }
     .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
     .tabs button, .subtabs button, .toolbar button, .inline-form button, .row-actions button, .chip {
       appearance: none;
