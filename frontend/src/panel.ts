@@ -19,8 +19,10 @@ import {
   listUserLinks,
   purgePerson,
   restorePerson,
+  listPlaces,
   saveEvent,
   savePerson,
+  savePlace,
   searchGazetteer,
   setUserLink,
   subscribeRevision,
@@ -314,7 +316,7 @@ export class FamilyTreePanel extends LitElement {
       surname_prefix: "",
       surname: "",
       sex: "unknown",
-      is_living: "true",
+      deceased: "false",
       notes: "",
     };
     this._dialogOpen = true;
@@ -330,7 +332,7 @@ export class FamilyTreePanel extends LitElement {
       surname_prefix: person.surname_prefix || "",
       surname: person.surname || "",
       sex: person.sex || "unknown",
-      is_living: person.is_living ? "true" : "false",
+      deceased: person.is_living ? "false" : "true",
       notes: person.notes || "",
     };
     this._dialogOpen = true;
@@ -344,16 +346,21 @@ export class FamilyTreePanel extends LitElement {
 
   private async _savePerson() {
     if (!this.hass || !this._canWrite()) return;
+    const given = (this._form.given_names || "").trim();
+    if (!given) {
+      this._error = this._tt("field_required");
+      return;
+    }
     this._saving = true;
     this._error = "";
     try {
       const payload: Parameters<typeof savePerson>[1] = {
-        given_names: this._form.given_names,
+        given_names: given,
         call_name: this._form.call_name,
         surname_prefix: this._form.surname_prefix,
         surname: this._form.surname,
         sex: this._form.sex,
-        is_living: this._form.is_living === "true",
+        is_living: this._form.deceased !== "true",
         notes: this._form.notes,
       };
       if (this._editing?.id) {
@@ -406,6 +413,20 @@ export class FamilyTreePanel extends LitElement {
     if (!this.hass || !this._detail || !this._canWrite()) return;
     this._saving = true;
     try {
+      let placeId: string | null = null;
+      const placeName = (this._eventForm.place || "").trim();
+      if (placeName) {
+        const found = await listPlaces(this.hass, { search: placeName, limit: 20 });
+        const exact = found.places.find(
+          (p) => p.name.localeCompare(placeName, undefined, { sensitivity: "accent" }) === 0,
+        );
+        if (exact) {
+          placeId = exact.id;
+        } else {
+          const { place } = await savePlace(this.hass, { name: placeName });
+          placeId = place.id;
+        }
+      }
       await saveEvent(this.hass, {
         subject_type: "person",
         subject_id: this._detail.person.id,
@@ -413,6 +434,7 @@ export class FamilyTreePanel extends LitElement {
         date_text: this._eventForm.date_text || "",
         place: this._eventForm.place || undefined,
         description: this._eventForm.description || "",
+        place_id: placeId,
       });
       this._eventForm = {};
       this._dialogOpen = false;
@@ -506,6 +528,49 @@ export class FamilyTreePanel extends LitElement {
       this._dialogOpen = false;
       this._error = formatHassError(err);
     }
+  }
+
+  private _pickGedcomFile() {
+    const input = this.renderRoot.querySelector(
+      "#ft-gedcom-file",
+    ) as HTMLInputElement | null;
+    input?.click();
+  }
+
+  private _onGedcomFileChange(e: Event) {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    (e.target as HTMLInputElement).value = "";
+    if (file) void this._importGedcom(file);
+  }
+
+  private _renderEmptyCta() {
+    if (!this._canWrite()) {
+      return html`<div class="empty-state">
+        ${brandMark()}
+        <p>${this._tt("no_people")}</p>
+      </div>`;
+    }
+    return html`<div class="empty-state">
+      ${brandMark()}
+      <p>${this._tt("empty_cta_hint")}</p>
+      <div class="empty-actions">
+        ${mdButton(this._tt("add_person"), {
+          variant: "filled",
+          onClick: () => this._openCreate(),
+        })}
+        ${mdButton(this._tt("import_gedcom"), {
+          variant: "outlined",
+          onClick: () => this._pickGedcomFile(),
+        })}
+      </div>
+      <input
+        id="ft-gedcom-file"
+        class="sr-only"
+        type="file"
+        accept=".ged,text/plain"
+        @change=${(e: Event) => this._onGedcomFileChange(e)}
+      />
+    </div>`;
   }
 
   private async _deleteEvent(id: string) {
@@ -694,17 +759,33 @@ export class FamilyTreePanel extends LitElement {
     const upcoming = this._settings?.upcoming_birthdays || [];
     const anniversaries = this._settings?.upcoming_anniversaries || [];
     const shortcuts = this._settings?.family_shortcuts || [];
+    const emptyTree = (s?.total_persons ?? 0) === 0;
+    const hasAges = Boolean(s?.ages.labels.length);
+    const hasCenturies = Boolean(s?.centuries.labels.length);
+    const hasPlaces = Boolean(s?.places_of_birth.labels.length);
+    const showCharts = hasAges || hasCenturies || hasPlaces;
     return html`
+      ${emptyTree
+        ? this._renderEmptyCta()
+        : html`
       <section class="stats-row">
-        <div class="stat"><span class="stat-n">${s?.total_persons ?? "—"}</span><span>${this._tt("stats_total")}</span></div>
-        <div class="stat"><span class="stat-n">${s?.living ?? "—"}</span><span>${this._tt("stats_living")}</span></div>
-        <div class="stat"><span class="stat-n">${s?.deceased ?? "—"}</span><span>${this._tt("stats_deceased")}</span></div>
+        <div class="stat"><span class="stat-n">${s?.total_persons ?? "—"}</span><span class="stat-label">${this._tt("stats_total")}</span></div>
+        <div class="stat"><span class="stat-n">${s?.living ?? "—"}</span><span class="stat-label">${this._tt("stats_living")}</span></div>
+        <div class="stat"><span class="stat-n">${s?.deceased ?? "—"}</span><span class="stat-label">${this._tt("stats_deceased")}</span></div>
       </section>
-      <section class="charts">
-        <div class="chart-card"><h3>${this._tt("chart_ages")}</h3><div class="chart-wrap"><canvas id="ft-ages"></canvas></div></div>
-        <div class="chart-card"><h3>${this._tt("chart_centuries")}</h3><div class="chart-wrap"><canvas id="ft-centuries"></canvas></div></div>
-        <div class="chart-card"><h3>${this._tt("chart_places")}</h3><div class="chart-wrap"><canvas id="ft-places"></canvas></div></div>
-      </section>
+      ${showCharts
+        ? html`<section class="charts">
+            ${hasAges
+              ? html`<div class="chart-card"><h3>${this._tt("chart_ages")}</h3><div class="chart-wrap"><canvas id="ft-ages"></canvas></div></div>`
+              : nothing}
+            ${hasCenturies
+              ? html`<div class="chart-card"><h3>${this._tt("chart_centuries")}</h3><div class="chart-wrap"><canvas id="ft-centuries"></canvas></div></div>`
+              : nothing}
+            ${hasPlaces
+              ? html`<div class="chart-card"><h3>${this._tt("chart_places")}</h3><div class="chart-wrap"><canvas id="ft-places"></canvas></div></div>`
+              : nothing}
+          </section>`
+        : nothing}
       ${shortcuts.length
         ? html`<section class="block">
             <h3>${this._tt("families")}</h3>
@@ -747,7 +828,7 @@ export class FamilyTreePanel extends LitElement {
               : html`<li class="muted">—</li>`}
           </ul>
         </div>
-      </section>
+      </section>`}
     `;
   }
 
@@ -778,12 +859,17 @@ export class FamilyTreePanel extends LitElement {
           <option value="deceased">${this._tt("filter_deceased")}</option>
         </select>
         ${this._canWrite() && this._view !== "trash"
-          ? html`<button class="primary" @click=${this._openCreate}>${icon(MDI_PLUS)} ${this._tt("add_person")}</button>`
+          ? mdButton(this._tt("add_person"), {
+              variant: "filled",
+              onClick: () => this._openCreate(),
+            })
           : nothing}
       </div>
       <p class="muted">${people.length} / ${this._total}</p>
       ${people.length === 0
-        ? html`<p>${this._tt("no_people")}</p>`
+        ? this._view === "trash" || this._search || this._filterLiving !== "all" || this._filterSex
+          ? html`<p>${this._tt("no_people")}</p>`
+          : this._renderEmptyCta()
         : html`<ul class="people">
             ${people.map(
               (p) => html`<li>
@@ -897,7 +983,7 @@ export class FamilyTreePanel extends LitElement {
             <dt>${this._tt("surname_prefix")}</dt><dd>${p.surname_prefix || "—"}</dd>
             <dt>${this._tt("surname")}</dt><dd>${p.surname || "—"}</dd>
             <dt>${this._tt("sex")}</dt><dd>${p.sex}</dd>
-            <dt>${this._tt("living")}</dt><dd>${p.is_living ? "✓" : "†"}</dd>
+            <dt>${this._tt("deceased")}</dt><dd>${p.is_living ? "—" : "†"}</dd>
             <dt>${this._tt("notes")}</dt><dd>${p.notes || "—"}</dd>
           </dl>
           <div class="section-head">
@@ -1097,10 +1183,11 @@ export class FamilyTreePanel extends LitElement {
       <div class="form-section">
         <div class="form-section-title">${this._tt("details")}</div>
         <label
-          >${this._tt("given_names")}
+          >${this._tt("given_names")} <span class="req">*</span>
           <input
             .value=${this._form.given_names || ""}
             ?disabled=${!write}
+            required
             @input=${(e: Event) =>
               (this._form = {
                 ...this._form,
@@ -1165,16 +1252,16 @@ export class FamilyTreePanel extends LitElement {
             </select>
           </label>
           <label class="check-row"
-            >${this._tt("living")}
+            >${this._tt("deceased")}
             <span class="check-control">
               <input
                 type="checkbox"
-                .checked=${this._form.is_living === "true"}
+                .checked=${this._form.deceased === "true"}
                 ?disabled=${!write}
                 @change=${(e: Event) =>
                   (this._form = {
                     ...this._form,
-                    is_living: (e.target as HTMLInputElement).checked
+                    deceased: (e.target as HTMLInputElement).checked
                       ? "true"
                       : "false",
                   })}
@@ -1336,15 +1423,17 @@ export class FamilyTreePanel extends LitElement {
   static styles = css`
     :host {
       display: block;
+      height: 100%;
       color: var(--primary-text-color);
-      background: var(--primary-background-color);
-      font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif);
+      background: var(--primary-background-color, transparent);
+      font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif);
       --ft-max: 1100px;
     }
     .shell {
       max-width: var(--ft-max);
       margin: 0 auto;
-      padding: 12px 16px 48px;
+      padding: 20px 24px 48px;
+      box-sizing: border-box;
     }
     .top {
       display: flex;
@@ -1358,19 +1447,27 @@ export class FamilyTreePanel extends LitElement {
     .brand {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 1.35rem;
-      font-weight: 600;
-      letter-spacing: 0.02em;
+      gap: 10px;
+      min-width: 0;
+      font-size: 1.3rem;
+      font-weight: 500;
+      letter-spacing: 0.01em;
     }
     .brand-mark {
       display: flex;
       flex-shrink: 0;
+      color: var(--primary-color);
     }
     .brand-logo {
       width: 36px;
       height: 36px;
       display: block;
+    }
+    .brand-logo-badge {
+      fill: color-mix(in srgb, var(--primary-color) 18%, var(--card-background-color, #fff));
+    }
+    .brand-mark {
+      color: var(--primary-color);
     }
     .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
     .tabs button, .subtabs button, .toolbar button, .inline-form button, .row-actions button, .chip {
@@ -1378,24 +1475,38 @@ export class FamilyTreePanel extends LitElement {
       border: 1px solid var(--divider-color);
       background: var(--card-background-color, var(--secondary-background-color));
       color: var(--primary-text-color);
-      border-radius: var(--ha-border-radius-lg, 12px);
-      padding: 6px 10px;
+      border-radius: var(--ha-border-radius-pill, 9999px);
+      padding: 6px 12px;
       cursor: pointer;
       font: inherit;
       display: inline-flex;
       align-items: center;
       gap: 4px;
     }
-    .tabs button.active, .subtabs button.active, .chip.on, button.primary {
+    .tabs button.active, .subtabs button.active, .chip.on {
       background: var(--primary-color);
       color: var(--text-primary-color, #fff);
       border-color: transparent;
     }
     button.danger { color: var(--error-color); }
     .icon-btn {
-      appearance: none; border: none; background: transparent; color: inherit;
-      padding: 4px; cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--primary-text-color);
+      cursor: pointer;
+      flex-shrink: 0;
     }
+    .icon-btn:hover {
+      background: rgba(var(--rgb-primary-text-color, 0, 0, 0), 0.06);
+    }
+    .icon-btn svg { width: 24px; height: 24px; }
     .mdi { width: 20px; height: 20px; fill: currentColor; display: block; }
     .banner, .error {
       padding: 8px 12px;
@@ -1407,24 +1518,38 @@ export class FamilyTreePanel extends LitElement {
     .muted { color: var(--secondary-text-color); font-size: 0.9em; }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
       margin-bottom: 20px;
     }
     .stat {
-      text-align: center;
-      padding: 16px 8px;
-      background: var(--secondary-background-color);
-      border-radius: var(--ha-border-radius-lg, 12px);
+      padding: 16px;
+      border-radius: var(--ha-border-radius-md, 8px);
+      border-left: 3px solid var(--primary-color);
+      background: var(--card-background-color, #fff);
+      box-shadow: var(--ha-card-box-shadow, none);
     }
-    .stat-n { display: block; font-size: 1.8rem; font-weight: 600; }
+    .stat-n { display: block; font-size: 1.5rem; font-weight: 600; }
+    .stat-label {
+      display: block;
+      margin-top: 4px;
+      font-size: 0.85rem;
+      color: var(--secondary-text-color);
+    }
     .charts {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
-    .chart-card h3 { margin: 0 0 8px; font-size: 0.95rem; }
+    .chart-card {
+      padding: 12px;
+      border-radius: var(--ha-card-border-radius, 12px);
+      border: 1px solid var(--divider-color);
+      background: var(--card-background-color, #fff);
+      box-shadow: var(--ha-card-box-shadow, none);
+    }
+    .chart-card h3 { margin: 0 0 8px; font-size: 0.95rem; font-weight: 500; }
     .chart-wrap { height: 200px; position: relative; }
     .two-col {
       display: grid;
@@ -1432,7 +1557,7 @@ export class FamilyTreePanel extends LitElement {
       gap: 16px;
     }
     .block { margin-bottom: 20px; }
-    .block h3 { margin: 0 0 8px; }
+    .block h3 { margin: 0 0 8px; font-size: 1.05rem; font-weight: 500; }
     ul.plain, ul.people { list-style: none; padding: 0; margin: 0; }
     ul.plain li, ul.people li {
       display: flex; align-items: center; justify-content: space-between;
@@ -1463,7 +1588,7 @@ export class FamilyTreePanel extends LitElement {
     .kv dt { color: var(--secondary-text-color); }
     .kv dd { margin: 0; }
     .person-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 8px; }
-    .person-head h2 { margin: 0; flex: 1; }
+    .person-head h2 { margin: 0; flex: 1; font-size: 1.3rem; font-weight: 500; }
     .tree-box { display: flex; flex-direction: column; gap: 16px; align-items: center; }
     .gen { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
     .node {
@@ -1505,8 +1630,32 @@ export class FamilyTreePanel extends LitElement {
     .import-counts li { justify-content: space-between; }
     .gen .person-card { max-width: 280px; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
-    .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+    .event-form input, .event-form select { width: auto; min-width: 120px; flex: 1; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 12px;
+      padding: 48px 16px;
+      color: var(--secondary-text-color);
+    }
+    .empty-state .brand-logo { width: 56px; height: 56px; color: var(--primary-color); }
+    .empty-state p { margin: 0; max-width: 28rem; }
+    .empty-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 8px; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      border: 0;
+    }
+    .req { color: var(--error-color, #c62828); }
     .md-btn {
       display: inline-flex;
       align-items: center;
@@ -1638,7 +1787,8 @@ export class FamilyTreePanel extends LitElement {
       gap: 12px;
       margin-top: 4px;
     }
-    @media (max-width: 600px) {
+    @media (max-width: 720px) {
+      .shell { padding: 12px 16px 40px; }
       .stats-row { grid-template-columns: 1fr; }
       .kv { grid-template-columns: 1fr; }
       .row2 { grid-template-columns: 1fr; }

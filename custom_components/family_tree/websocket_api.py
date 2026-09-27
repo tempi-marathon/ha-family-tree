@@ -502,7 +502,7 @@ async def ws_settings(
         vol.Required("type"): f"{DOMAIN}/persons/save",
         # Never use key "id" here — it collides with the websocket message id (int).
         vol.Optional("person_id"): str,
-        vol.Optional("given_names", default=""): _bounded_string(MAX_NAME),
+        vol.Required("given_names"): _bounded_string(MAX_NAME, allow_empty=False),
         vol.Optional("call_name", default=""): _bounded_string(MAX_NAME),
         vol.Optional("surname_prefix", default=""): _bounded_string(MAX_NAME),
         vol.Optional("surname", default=""): _bounded_string(MAX_NAME),
@@ -527,6 +527,7 @@ async def ws_persons_save(
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
+        given_names = (msg.get("given_names") or "").strip()
         person_id = msg.get("person_id")
         if person_id:
             existing = coordinator.repo.get_person(person_id, include_deleted=True)
@@ -534,7 +535,7 @@ async def ws_persons_save(
                 raise LookupError("Person not found")
             person = Person(
                 id=existing.id,
-                given_names=msg.get("given_names") or "",
+                given_names=given_names,
                 call_name=msg.get("call_name") or "",
                 surname_prefix=msg.get("surname_prefix") or "",
                 surname=msg.get("surname") or "",
@@ -550,7 +551,7 @@ async def ws_persons_save(
             if coordinator.repo.count_persons() >= MAX_PERSONS:
                 raise OverflowError(f"Maximum of {MAX_PERSONS} persons reached")
             person = Person(
-                given_names=msg.get("given_names") or "",
+                given_names=given_names,
                 call_name=msg.get("call_name") or "",
                 surname_prefix=msg.get("surname_prefix") or "",
                 surname=msg.get("surname") or "",
