@@ -156,10 +156,10 @@ function icon(path: string) {
   return html`<svg class="mdi" viewBox="0 0 24 24" aria-hidden="true"><path d=${path}></path></svg>`;
 }
 
-function brandLogo(hass?: HomeAssistant) {
+function brandLogo(hass?: HomeAssistant, alt = "") {
   const dark = Boolean(hass?.themes?.darkMode);
   const src = dark ? BRAND_LOGO_DARK_URL : BRAND_LOGO_URL;
-  return html`<img class="brand-logo" src=${src} alt="" width="40" height="40" />`;
+  return html`<img class="brand-logo" src=${src} alt=${alt} height="36" />`;
 }
 
 function mdButton(
@@ -227,6 +227,7 @@ export class FamilyTreePanel extends LitElement {
   @state() private _lineage: MyLineageDto | null = null;
   @state() private _isMobile = false;
   @state() private _rowMenu: string | null = null;
+  @state() private _rowMenuUp = false;
   @state() private _collapsed: Record<string, boolean> = {};
   @state() private _editingEventId: string | null = null;
   @state() private _relationTarget: RelationTarget | null = null;
@@ -604,6 +605,11 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _lineageStar(personId: string, personName?: string) {
+    if (personId === this._myLinkedPersonId()) {
+      return html`<span class="lineage-star" title=${this._tt("lineage_me")}
+        >${icon(MDI_STAR)}</span
+      >`;
+    }
     const rel = this._lineageRel(personId);
     if (!rel) return nothing;
     return html`<span
@@ -1043,12 +1049,12 @@ export class FamilyTreePanel extends LitElement {
   private _renderEmptyCta() {
     if (!this._canWrite()) {
       return html`<div class="empty-state">
-        ${brandLogo(this.hass)}
+        ${brandLogo(this.hass, this._tt("brand"))}
         <p>${this._tt("no_people")}</p>
       </div>`;
     }
     return html`<div class="empty-state">
-      ${brandLogo(this.hass)}
+      ${brandLogo(this.hass, this._tt("brand"))}
       <p>${this._tt("empty_cta_hint")}</p>
       <div class="empty-actions">
         ${mdButton(this._tt("add_person"), {
@@ -1220,10 +1226,7 @@ export class FamilyTreePanel extends LitElement {
                 ${icon(MDI_MENU)}
               </button>`
             : nothing}
-          <div class="brand">
-            <span class="brand-mark">${brandLogo(this.hass)}</span>
-            <span class="brand-text">${this._tt("brand")}</span>
-          </div>
+          <div class="brand">${brandLogo(this.hass, this._tt("brand"))}</div>
           <nav class="tabs">
             <button class=${this._view === "dashboard" ? "active" : ""} @click=${() => this._setView("dashboard")}>
               ${this._tt("nav_dashboard")}
@@ -1672,13 +1675,22 @@ export class FamilyTreePanel extends LitElement {
                 aria-label=${this._tt("actions")}
                 @click=${(e: Event) => {
                   e.stopPropagation();
-                  this._rowMenu = menuOpen ? null : p.id;
+                  if (menuOpen) {
+                    this._rowMenu = null;
+                    return;
+                  }
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  this._rowMenuUp = rect.bottom + 130 > window.innerHeight;
+                  this._rowMenu = p.id;
                 }}
               >
                 ${icon(MDI_DOTS_VERTICAL)}
               </button>
               ${menuOpen
-                ? html`<div class="row-menu" @click=${(e: Event) => e.stopPropagation()}>
+                ? html`<div
+                    class="row-menu${this._rowMenuUp ? " row-menu--up" : ""}"
+                    @click=${(e: Event) => e.stopPropagation()}
+                  >
                     <button type="button" @click=${() => {
                       this._rowMenu = null;
                       void this._openPerson(p.id);
@@ -1987,127 +1999,135 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
+  private _renderRelPersonCard(
+    node: Record<string, unknown>,
+    opts: { onRemove?: () => void } = {},
+  ) {
+    const id = String(node.id || "");
+    return html`<div class="rel-person-wrap">
+      ${this._renderPersonCard(node)}
+      ${opts.onRemove
+        ? html`<div class="rel-person-actions">
+            <button type="button" class="linkish" @click=${() => id && this._openPerson(id)}>
+              ${this._tt("details")}
+            </button>
+            <button type="button" class="linkish danger" @click=${opts.onRemove}>
+              ${this._tt("delete")}
+            </button>
+          </div>`
+        : nothing}
+    </div>`;
+  }
+
   private _renderRelationshipsTab(d: PersonDetail) {
     const tree = d.tree;
     const parents = (tree?.parents || []) as Array<Record<string, unknown>>;
     const partners = (tree?.partners || []) as TreeUnion[];
     const write = this._canWrite();
-    return html`
-      <section class="rel-section block">
-        <div class="section-head">
-          <h3>${this._tt("section_parents")}</h3>
-          ${write
-            ? html`<span class="row-actions">
-                <button type="button" class="linkish" @click=${() => this._openParentsDialog()}>
-                  ${this._tt("add_parents")}
-                </button>
-                <button type="button" class="linkish" @click=${() => this._openPickPerson("father")}>
-                  ${this._tt("link_existing_person")}
-                </button>
-              </span>`
-            : nothing}
-        </div>
+    const canAddParents = write && parents.length < 2;
+
+    const parentsBody = html`
+      ${canAddParents
+        ? html`<div class="section-head">
+            <button type="button" class="linkish" @click=${() => this._openParentsDialog()}>
+              ${this._tt("add_parents")}
+            </button>
+          </div>`
+        : nothing}
+      <div class="card-list rel-card-list">
         ${parents.length
-          ? html`<ul class="plain rel-list">
-              ${parents.map(
-                (parent) => html`<li>
-                  <button type="button" class="linkish" @click=${() => this._openPerson(String(parent.id))}>
-                    ${String(parent.name || parent.id)}
-                  </button>
-                  ${write && parent.link_id
-                    ? html`<button
-                        type="button"
-                        class="linkish danger"
-                        @click=${() => this._removeParentLink(String(parent.link_id))}
-                      >
-                        ${this._tt("delete")}
-                      </button>`
-                    : nothing}
-                </li>`,
-              )}
-            </ul>`
+          ? parents.map((parent) =>
+              this._renderRelPersonCard(parent, {
+                onRemove:
+                  write && parent.link_id
+                    ? () => void this._removeParentLink(String(parent.link_id))
+                    : undefined,
+              }),
+            )
           : html`<p class="muted">—</p>`}
-      </section>
-      <section class="rel-section block">
-        <div class="section-head">
-          <h3>${this._tt("section_partners")}</h3>
-          ${write
-            ? html`<span class="row-actions">
-                <button
-                  type="button"
-                  class="linkish"
-                  @click=${() =>
-                    this._openAddRelation({ kind: "partner", personId: d.person.id })}
-                >
-                  ${this._tt("add_partner")}
-                </button>
-                <button type="button" class="linkish" @click=${() => this._openPickPerson("partner")}>
-                  ${this._tt("link_existing_person")}
-                </button>
-              </span>`
-            : nothing}
-        </div>
-        ${partners.length
-          ? html`<div class="card-list">
-              ${partners.map(
-                (u) => html`<div class="rel-union-card">
-                  <div class="rel-union-head">
-                    <strong>
-                      ${(u.partners || [])
-                        .map((pt) => String((pt as Record<string, unknown>).name || ""))
-                        .filter(Boolean)
-                        .join(" & ") || this._tt("partners")}
-                    </strong>
-                    ${write
-                      ? html`<span class="row-actions">
-                          <button
-                            type="button"
-                            class="linkish"
-                            @click=${() => this._openUnionEdit(u.union_id)}
-                          >
-                            ${this._tt("edit")}
-                          </button>
-                          <button
-                            type="button"
-                            class="linkish danger"
-                            @click=${() => this._deleteUnion(u.union_id)}
-                          >
-                            ${this._tt("delete")}
-                          </button>
-                        </span>`
-                      : nothing}
-                  </div>
-                  ${u.marriage_date
-                    ? html`<div class="muted">${this._tt("event_marriage")}: ${u.marriage_date}</div>`
+      </div>
+    `;
+
+    const partnersBody = html`
+      ${write
+        ? html`<div class="section-head">
+            <button
+              type="button"
+              class="linkish"
+              @click=${() => this._openAddRelation({ kind: "partner", personId: d.person.id })}
+            >
+              ${this._tt("add_partner")}
+            </button>
+            <button type="button" class="linkish" @click=${() => this._openPickPerson("partner")}>
+              ${this._tt("link_existing_person")}
+            </button>
+          </div>`
+        : nothing}
+      ${partners.length
+        ? html`<div class="card-list">
+            ${partners.map(
+              (u) => html`<div class="rel-union-card">
+                <div class="rel-union-head">
+                  <strong>
+                    ${(u.partners || [])
+                      .map((pt) => String((pt as Record<string, unknown>).name || ""))
+                      .filter(Boolean)
+                      .join(" & ") || this._tt("partners")}
+                  </strong>
+                  ${write
+                    ? html`<span class="row-actions">
+                        <button
+                          type="button"
+                          class="linkish"
+                          @click=${() => this._openUnionEdit(u.union_id)}
+                        >
+                          ${this._tt("edit")}
+                        </button>
+                        <button
+                          type="button"
+                          class="linkish danger"
+                          @click=${() => this._deleteUnion(u.union_id)}
+                        >
+                          ${this._tt("delete")}
+                        </button>
+                      </span>`
                     : nothing}
-                  ${u.divorce_date
-                    ? html`<div class="muted">${this._tt("event_divorce")}: ${u.divorce_date}</div>`
-                    : nothing}
-                  ${u.known_children_count != null
-                    ? html`<div class="muted">
-                        ${this._tt("known_children")}: ${u.known_children_count}
-                      </div>`
-                    : nothing}
-                  ${(u.children || []).length
-                    ? html`<ul class="plain">
-                        ${u.children.map(
-                          (c) => html`<li>
-                            <button
-                              type="button"
-                              class="linkish"
-                              @click=${() => this._openPerson(String((c as Record<string, unknown>).id))}
-                            >
-                              ${String((c as Record<string, unknown>).name || "")}
-                            </button>
-                          </li>`,
+                </div>
+                ${u.marriage_date
+                  ? html`<div class="muted">${this._tt("event_marriage")}: ${u.marriage_date}</div>`
+                  : nothing}
+                ${u.divorce_date
+                  ? html`<div class="muted">${this._tt("event_divorce")}: ${u.divorce_date}</div>`
+                  : nothing}
+                ${u.known_children_count != null
+                  ? html`<div class="muted">
+                      ${this._tt("known_children")}: ${u.known_children_count}
+                    </div>`
+                  : nothing}
+                <div class="rel-card-list">
+                  ${(u.partners || []).map((partner) =>
+                    this._renderPersonCard(partner as Record<string, unknown>),
+                  )}
+                </div>
+                ${(u.children || []).length
+                  ? html`<div class="rel-union-children">
+                      <span class="muted">${this._tt("children")}</span>
+                      <div class="rel-card-list">
+                        ${u.children.map((c) =>
+                          this._renderPersonCard(c as Record<string, unknown>),
                         )}
-                      </ul>`
-                    : nothing}
-                </div>`,
-              )}
-            </div>`
-          : html`<p class="muted">—</p>`}
-      </section>
+                      </div>
+                    </div>`
+                  : nothing}
+              </div>`,
+            )}
+          </div>`
+        : html`<p class="muted">—</p>`}
+    `;
+
+    return html`
+      ${this._renderCollapsibleSection("rel-parents", this._tt("section_parents"), parentsBody)}
+      ${this._renderCollapsibleSection("rel-partners", this._tt("section_partners"), partnersBody)}
     `;
   }
 
@@ -2152,22 +2172,28 @@ export class FamilyTreePanel extends LitElement {
     `;
   }
 
-  private _grandparentPairs(
-    tree: PersonDetail["tree"],
-  ): Array<{ label: string; nodes: Array<Record<string, unknown>> }> {
+  private _allGrandparents(tree: PersonDetail["tree"]): Array<Record<string, unknown>> {
     if (!tree?.grandparents) return [];
-    const parents = tree.parents || [];
-    const pairs: Array<{ label: string; nodes: Array<Record<string, unknown>> }> = [];
-    for (const parent of parents) {
-      const gp = tree.grandparents[String(parent.id)] || [];
-      if (gp.length) {
-        pairs.push({
-          label: String(parent.name || parent.id),
-          nodes: gp as Array<Record<string, unknown>>,
-        });
+    const seen = new Set<string>();
+    const all: Array<Record<string, unknown>> = [];
+    for (const parent of tree.parents || []) {
+      for (const gp of tree.grandparents[String(parent.id)] || []) {
+        const node = gp as Record<string, unknown>;
+        const id = String(node.id || "");
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          all.push(node);
+        }
       }
     }
-    return pairs;
+    return all;
+  }
+
+  private _renderGenRow(label: string, content: unknown) {
+    return html`<div class="gen-row">
+      <span class="gen-label muted">${label}</span>
+      <div class="gen">${content}</div>
+    </div>`;
   }
 
   private _renderTreeTab(d: PersonDetail) {
@@ -2176,7 +2202,7 @@ export class FamilyTreePanel extends LitElement {
     const partners = (tree?.partners || []) as TreeUnion[];
     const unionIdx = Math.min(this._treeUnion, Math.max(0, partners.length - 1));
     const activeUnion = partners[unionIdx];
-    const gpPairs = this._grandparentPairs(tree);
+    const grandparents = this._allGrandparents(tree);
     const siblingCount = Number(tree?.person?.sibling_count || tree?.siblings?.length || 0);
     const focusNode = {
       id: p.id,
@@ -2195,46 +2221,43 @@ export class FamilyTreePanel extends LitElement {
       knownCount != null && knownCount > unionChildren.length
         ? knownCount - unionChildren.length
         : 0;
+    const parentNodes = (tree?.parents || []) as Array<Record<string, unknown>>;
+    const canAddParents = this._canWrite() && parentNodes.length < 2;
+
     return html`
       <div class="tree-box view-tree">
-        ${gpPairs.length
-          ? html`<div class="gen grandparents">
-              ${gpPairs.map(
-                (pair) => html`<div class="gp-pair">
-                  ${pair.nodes.map((n) => this._renderPersonCard(n))}
-                </div>`,
-              )}
-            </div>`
-          : this._canWrite() && !(tree?.parents || []).length
-            ? html`<div class="gen">
-                <button type="button" class="add-slot" @click=${() =>
-                  this._openAddRelation({ kind: "parent", personId: p.id })}>
+        ${grandparents.length
+          ? this._renderGenRow(
+              this._tt("grandparents"),
+              grandparents.map((n) => this._renderPersonCard(n)),
+            )
+          : nothing}
+        ${this._renderGenRow(
+          this._tt("parents"),
+          html`
+            ${parentNodes.map((n) => this._renderPersonCard(n))}
+            ${canAddParents
+              ? html`<button type="button" class="add-slot" @click=${() =>
+                  this._openParentsDialog()}>
                   ${icon(MDI_PLUS)} ${this._tt("add_parents")}
-                </button>
-              </div>`
-            : nothing}
-        <div class="gen">
-          <span class="muted">${this._tt("parents")}</span>
-          ${(tree?.parents || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
-          ${this._canWrite() && !(tree?.parents || []).length
-            ? html`<button type="button" class="add-slot" @click=${() =>
-                this._openAddRelation({ kind: "parent", personId: p.id })}>
-                ${icon(MDI_PLUS)} ${this._tt("add_parents")}
-              </button>`
-            : nothing}
-        </div>
-        <div class="gen focus">
-          ${this._renderPersonCard(focusNode, {
-            footer:
-              siblingCount > 0
-                ? `+${siblingCount} ${this._tt("siblings_count")}`
-                : undefined,
-          })}
-          ${siblingCount > 0
-            ? html`<button type="button" class="linkish" @click=${() => this._openSiblingsDialog()}>
-                ${this._tt("view_siblings")}
-              </button>`
-            : nothing}
+                </button>`
+              : nothing}
+          `,
+        )}
+        <div class="gen-row gen-row--focus">
+          <div class="gen focus">
+            ${this._renderPersonCard(focusNode, {
+              footer:
+                siblingCount > 0
+                  ? `+${siblingCount} ${this._tt("siblings_count")}`
+                  : undefined,
+            })}
+            ${siblingCount > 0
+              ? html`<button type="button" class="linkish" @click=${() => this._openSiblingsDialog()}>
+                  ${this._tt("view_siblings")}
+                </button>`
+              : nothing}
+          </div>
         </div>
         ${partners.length
           ? html`<div class="union-tabs">
@@ -2253,9 +2276,9 @@ export class FamilyTreePanel extends LitElement {
                     )}
                   </div>`
                 : nothing}
-              <div class="gen">
-                <span class="muted">${this._tt("partners")}</span>
-                ${(activeUnion?.partners || []).map((partner) =>
+              ${this._renderGenRow(
+                this._tt("partners"),
+                (activeUnion?.partners || []).map((partner) =>
                   this._renderPersonCard(partner as Record<string, unknown>, {
                     subtitle: [
                       activeUnion.marriage_date,
@@ -2265,41 +2288,42 @@ export class FamilyTreePanel extends LitElement {
                       .filter(Boolean)
                       .join(" · "),
                   }),
-                )}
-              </div>
-              <div class="gen">
-                <span class="muted">${this._tt("children")}</span>
-                ${unionChildren.map((n) =>
-                  this._renderPersonCard(n as Record<string, unknown>),
-                )}
-                ${unknownCount > 0
-                  ? html`<div class="unknown-children muted">
-                      ${unknownCount} ${this._tt("unknown_children")}
-                    </div>`
-                  : nothing}
-                ${this._canWrite()
-                  ? html`<button type="button" class="add-slot" @click=${() =>
-                      this._openAddRelation({
-                        kind: "child",
-                        personId: p.id,
-                        unionId: activeUnion?.union_id,
-                        coParentId: String(
-                          (activeUnion?.partners?.[0] as Record<string, unknown> | undefined)?.id ||
-                            "",
-                        ),
-                      })}>
-                      ${icon(MDI_PLUS)} ${this._tt("add_child")}
-                    </button>`
-                  : nothing}
-              </div>
+                ),
+              )}
+              ${this._renderGenRow(
+                this._tt("children"),
+                html`
+                  ${unionChildren.map((n) => this._renderPersonCard(n as Record<string, unknown>))}
+                  ${unknownCount > 0
+                    ? html`<div class="unknown-children muted">
+                        ${unknownCount} ${this._tt("unknown_children")}
+                      </div>`
+                    : nothing}
+                  ${this._canWrite()
+                    ? html`<button type="button" class="add-slot" @click=${() =>
+                        this._openAddRelation({
+                          kind: "child",
+                          personId: p.id,
+                          unionId: activeUnion?.union_id,
+                          coParentId: String(
+                            (activeUnion?.partners?.[0] as Record<string, unknown> | undefined)
+                              ?.id || "",
+                          ),
+                        })}>
+                        ${icon(MDI_PLUS)} ${this._tt("add_child")}
+                      </button>`
+                    : nothing}
+                `,
+              )}
             </div>`
           : this._canWrite()
-            ? html`<div class="gen">
-                <button type="button" class="add-slot" @click=${() =>
+            ? this._renderGenRow(
+                this._tt("partners"),
+                html`<button type="button" class="add-slot" @click=${() =>
                   this._openAddRelation({ kind: "partner", personId: p.id })}>
                   ${icon(MDI_PLUS)} ${this._tt("add_partner")}
-                </button>
-              </div>`
+                </button>`,
+              )
             : nothing}
       </div>
     `;
@@ -2788,26 +2812,36 @@ export class FamilyTreePanel extends LitElement {
                         })}
                     />
                   </label>`
-                : nothing}`
-            : html`<label
-                >${this._tt("date")}
-                <input
-                  type="date"
-                  title=${this._tt("date")}
-                  .value=${this._eventForm.date_iso || ""}
-                  @input=${(e: Event) =>
-                    (this._eventForm = {
-                      ...this._eventForm,
-                      date_iso: (e.target as HTMLInputElement).value,
-                    })}
-                />
-              </label>`}
-          <button
-            type="button"
-            class="linkish date-mode-toggle"
-            @click=${() => this._toggleEventDateMode()}>
-            ${advancedDate ? this._tt("date_simple") : this._tt("date_advanced")}
-          </button>
+                : nothing}
+              <button
+                type="button"
+                class="linkish date-mode-toggle align-input"
+                @click=${() => this._toggleEventDateMode()}
+              >
+                ${this._tt("date_simple")}
+              </button>`
+            : html`<div class="date-input-row">
+                <label class="date-label-grow"
+                  >${this._tt("date")}
+                  <input
+                    type="date"
+                    title=${this._tt("date")}
+                    .value=${this._eventForm.date_iso || ""}
+                    @input=${(e: Event) =>
+                      (this._eventForm = {
+                        ...this._eventForm,
+                        date_iso: (e.target as HTMLInputElement).value,
+                      })}
+                  />
+                </label>
+                <button
+                  type="button"
+                  class="linkish date-mode-toggle"
+                  @click=${() => this._toggleEventDateMode()}
+                >
+                  ${this._tt("date_advanced")}
+                </button>
+              </div>`}
         </div>
         <label class="place-field"
           >${this._fieldLabel(this._tt("place"))}
@@ -3146,20 +3180,11 @@ export class FamilyTreePanel extends LitElement {
     .brand {
       display: flex;
       align-items: center;
-      gap: 10px;
       min-width: 0;
-      font-size: 1.3rem;
-      font-weight: 500;
-      letter-spacing: 0.01em;
-    }
-    .brand-mark {
-      display: flex;
-      flex-shrink: 0;
-      color: var(--primary-color);
     }
     .brand-logo {
-      width: 36px;
       height: 36px;
+      width: auto;
       display: block;
       object-fit: contain;
     }
@@ -3354,11 +3379,16 @@ export class FamilyTreePanel extends LitElement {
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
     .event-date-field {
-      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px;
       flex: 1; min-width: 200px;
     }
     .event-date-field input { flex: 1; min-width: 140px; width: auto; }
-    .date-mode-toggle { font-size: 0.85em; white-space: nowrap; }
+    .date-input-row {
+      display: flex; align-items: flex-end; gap: 8px; flex: 1; min-width: 200px;
+    }
+    .date-label-grow { flex: 1; min-width: 140px; }
+    .date-mode-toggle { font-size: 0.85em; white-space: nowrap; flex-shrink: 0; }
+    .date-mode-toggle.align-input { margin-bottom: 2px; }
     .event-form input, .event-form select { width: auto; min-width: 120px; flex: 1; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
     .empty-state {
@@ -3370,7 +3400,7 @@ export class FamilyTreePanel extends LitElement {
       padding: 48px 16px;
       color: var(--secondary-text-color);
     }
-    .empty-state .brand-logo { width: 56px; height: 56px; color: var(--primary-color); }
+    .empty-state .brand-logo { height: 56px; width: auto; }
     .empty-state p { margin: 0; max-width: 28rem; }
     .empty-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 8px; }
     .sr-only {
@@ -3606,7 +3636,7 @@ export class FamilyTreePanel extends LitElement {
       gap: 6px;
       margin-bottom: 12px;
     }
-    .table-wrap { overflow-x: auto; margin-bottom: 16px; }
+    .table-wrap { overflow-x: auto; overflow-y: visible; margin-bottom: 16px; }
     .people-table {
       width: 100%;
       border-collapse: collapse;
@@ -3673,6 +3703,11 @@ export class FamilyTreePanel extends LitElement {
       flex-direction: column;
       padding: 4px;
     }
+    .row-menu--up {
+      top: auto;
+      bottom: 100%;
+      margin-bottom: 4px;
+    }
     .row-menu button {
       appearance: none;
       border: none;
@@ -3719,7 +3754,43 @@ export class FamilyTreePanel extends LitElement {
     }
     .collapse-body { padding: 0 14px 14px; }
     .view-tree { align-items: stretch; width: 100%; }
-    .gp-pair { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .gen-row {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      width: 100%;
+      padding-left: 6.5rem;
+      box-sizing: border-box;
+    }
+    .gen-row--focus { padding-left: 0; }
+    .gen-label {
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 6rem;
+      text-align: left;
+      font-size: 0.85rem;
+    }
+    .rel-card-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .rel-person-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 280px;
+    }
+    .rel-person-wrap .person-card { width: 100%; }
+    .rel-person-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      padding: 0 4px;
+    }
+    .rel-union-children { margin-top: 8px; }
     .union-tabs { width: 100%; }
     .add-slot {
       appearance: none;
