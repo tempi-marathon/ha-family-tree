@@ -87,6 +87,18 @@ def descendants(
     return result
 
 
+def lineage_map(db: Database, person_id: str) -> dict[str, dict[str, Any]]:
+    """All biological ancestors and descendants keyed by id (for lineage stars)."""
+    out: dict[str, dict[str, Any]] = {}
+    for relative in ancestors(db, person_id):
+        out[relative["id"]] = {"type": "ancestor", "generation": relative["generation"]}
+    for relative in descendants(db, person_id):
+        out.setdefault(
+            relative["id"], {"type": "descendant", "generation": relative["generation"]}
+        )
+    return out
+
+
 def lineage_relation(
     db: Database,
     from_person_id: str,

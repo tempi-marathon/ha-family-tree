@@ -224,3 +224,60 @@ describe("filterAndSortPeople", () => {
     expect(byUpdated.map((p) => p.id)).toEqual(["b", "a"]);
   });
 });
+
+describe("filterAndSortPeople column sorting", () => {
+  const vital = (sort_date: string) => ({
+    type: "birth",
+    date_text: sort_date.slice(0, 4),
+    date_qualifier: "exact",
+    sort_date,
+    place_name: null,
+  });
+  const people: PersonDto[] = [
+    {
+      ...person({ id: "a", given_names: "Anna", surname: "Molenschot" }),
+      birth: vital("1859-12-08"),
+      father: { id: "f1", name: "Johannes Molenschot" },
+      children_count: 0,
+    },
+    {
+      ...person({ id: "b", given_names: "Ad", surname: "Molenschot" }),
+      birth: vital("1941-04-26"),
+      father: { id: "f2", name: "Marinus Molenschot" },
+      children_count: 1,
+    },
+    {
+      ...person({ id: "c", given_names: "Adriaen", surname: "Molenschot" }),
+      birth: null,
+      father: null,
+      children_count: 8,
+    },
+  ];
+
+  it("sorts by birth date with blanks last in both directions", () => {
+    const asc = filterAndSortPeople(people, { ...baseFilters, sort: "birth" });
+    expect(asc.map((p) => p.id)).toEqual(["a", "b", "c"]);
+    const desc = filterAndSortPeople(people, {
+      ...baseFilters,
+      sort: "birth",
+      sortDir: "desc",
+    });
+    expect(desc.map((p) => p.id)).toEqual(["b", "a", "c"]);
+  });
+
+  it("sorts by father name and children count", () => {
+    const byFather = filterAndSortPeople(people, { ...baseFilters, sort: "father" });
+    expect(byFather.map((p) => p.id)).toEqual(["a", "b", "c"]);
+    const byChildren = filterAndSortPeople(people, {
+      ...baseFilters,
+      sort: "children",
+      sortDir: "desc",
+    });
+    expect(byChildren.map((p) => p.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("sorts by display name", () => {
+    const byName = filterAndSortPeople(people, { ...baseFilters, sort: "name" });
+    expect(byName.map((p) => p.id)).toEqual(["b", "c", "a"]);
+  });
+});

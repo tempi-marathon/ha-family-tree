@@ -71,6 +71,12 @@ class EventType(StrEnum):
     RESIDENCE = "residence"
 
 
+# Life events a person can only have once.
+UNIQUE_PERSON_EVENT_TYPES: frozenset[EventType] = frozenset(
+    {EventType.BIRTH, EventType.BAPTISM, EventType.DEATH, EventType.BURIAL}
+)
+
+
 class DateQualifier(StrEnum):
     """GEDCOM-style date qualifier."""
 

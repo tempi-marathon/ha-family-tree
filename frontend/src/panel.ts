@@ -6,12 +6,17 @@ import { property, state } from "lit/decorators.js";
 import {
   type GazetteerHit,
   type EventDto,
+  type MyLineageDto,
   type PersonDetail,
   type PersonDto,
   type StatsDto,
+  type TreeUnion,
+  addParentChild,
+  claimUserLink,
   deleteEvent,
   deletePerson,
   gazetteerStatus,
+  getMyLineage,
   getPerson,
   getSettings,
   getStats,
@@ -23,11 +28,21 @@ import {
   saveEvent,
   savePerson,
   savePlace,
+  saveUnion,
   searchGazetteer,
   setUserLink,
   subscribeRevision,
   type SettingsDto,
 } from "./api";
+import {
+  FORM_QUALIFIERS,
+  type DateQualifier,
+  buildGedcomDate,
+  formatDeathCell,
+  formatEventDate,
+  formatLifespan,
+  gedcomToForm,
+} from "./date_format";
 import { daysUntilLabel, formatGedcomDate, formatLifespanLine } from "./dates_view";
 import { formatHassError } from "./errors";
 import { type LocaleKey, t } from "./i18n";
@@ -35,7 +50,9 @@ import {
   loadPanelViewState,
   savePanelViewState,
   sortedOptionList,
+  type PanelSort,
   type PanelView,
+  type SortDir,
 } from "./panel_view_state";
 import {
   filterAndSortPeople,
@@ -59,9 +76,29 @@ const MDI_DELETE =
   "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z";
 const MDI_PLUS =
   "M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z";
+const MDI_GENDER_MALE =
+  "M9,9C10.29,9 11.5,9.41 12.47,10.11L17.58,5H13V3H21V11H19V6.41L13.89,11.5C14.59,12.5 15,13.7 15,15A6,6 0 0,1 9,21A6,6 0 0,1 3,15A6,6 0 0,1 9,9M9,11A4,4 0 0,0 5,15A4,4 0 0,0 9,19A4,4 0 0,0 13,15A4,4 0 0,0 9,11Z";
+const MDI_GENDER_FEMALE =
+  "M12,4A6,6 0 0,1 18,10C18,12.97 15.84,15.44 13,15.92V18H15V20H13V22H11V20H9V18H11V15.92C8.16,15.44 6,12.97 6,10A6,6 0 0,1 12,4M12,6A4,4 0 0,0 8,10A4,4 0 0,0 12,14A4,4 0 0,0 16,10A4,4 0 0,0 12,6Z";
+const MDI_STAR =
+  "M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z";
+const MDI_STAR_OUTLINE =
+  "M12,15.39L8.24,17.66L9.23,13.38L5.91,10.5L10.29,10.13L12,6.09L13.71,10.13L18.09,10.5L14.77,13.38L15.76,17.66M22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27L18.18,21L16.54,13.97L22,9.24Z";
+const MDI_DOTS_VERTICAL =
+  "M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z";
+const MDI_MENU_DOWN = "M7,10L12,15L17,10H7Z";
+const MDI_MENU_UP = "M7,15L12,10L17,15H7Z";
+const MDI_CHEVRON_DOWN =
+  "M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z";
+const MDI_CHEVRON_RIGHT =
+  "M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z";
 
-type PersonTab = "details" | "relationships" | "tree" | "sources";
-type DialogMode = "person" | "event" | "import";
+type PersonTab = "details" | "tree" | "sources";
+type DialogMode = "person" | "event" | "import" | "siblings";
+type RelationTarget =
+  | { kind: "parent"; personId: string }
+  | { kind: "partner"; personId: string }
+  | { kind: "child"; personId: string; unionId?: string; coParentId?: string };
 
 const EVENT_TYPE_KEYS: Record<string, LocaleKey> = {
   birth: "event_birth",
@@ -72,7 +109,26 @@ const EVENT_TYPE_KEYS: Record<string, LocaleKey> = {
   residence: "event_residence",
   marriage: "event_marriage",
   divorce: "event_divorce",
+  partnership: "event_partnership",
 };
+
+/** Person-subject event types offered in the event form (marriage etc. live on unions). */
+const PERSON_EVENT_TYPES = ["birth", "baptism", "occupation", "residence", "death", "burial"];
+/** Mirrors backend UNIQUE_PERSON_EVENT_TYPES. */
+const UNIQUE_PERSON_EVENT_TYPES = new Set(["birth", "baptism", "death", "burial"]);
+
+const QUALIFIER_KEYS: Record<DateQualifier, LocaleKey> = {
+  exact: "qual_exact",
+  about: "qual_about",
+  before: "qual_before",
+  after: "qual_after",
+  between: "qual_between",
+  from_to: "qual_from_to",
+  estimated: "qual_estimated",
+  calculated: "qual_calculated",
+};
+
+const MOBILE_QUERY = "(max-width: 720px)";
 
 function icon(path: string) {
   return html`<svg class="mdi" viewBox="0 0 24 24" aria-hidden="true"><path d=${path}></path></svg>`;
@@ -163,8 +219,21 @@ export class FamilyTreePanel extends LitElement {
   @state() private _importFile: File | null = null;
   @state() private _importReport: Record<string, number> | null = null;
   @state() private _importPhase: "" | "preview" | "importing" | "done" = "";
+  @state() private _sort: PanelSort = "surname";
+  @state() private _sortDir: SortDir = "asc";
+  @state() private _lineage: MyLineageDto | null = null;
+  @state() private _isMobile = false;
+  @state() private _rowMenu: string | null = null;
+  @state() private _collapsed: Record<string, boolean> = {};
+  @state() private _editingEventId: string | null = null;
+  @state() private _relationTarget: RelationTarget | null = null;
+  @state() private _treeUnion = 0;
+  @state() private _meQuery = "";
+  @state() private _meCreateOpen = false;
+  @state() private _meForm: Record<string, string> = {};
 
   private _unsub: (() => void) | null = null;
+  private _mql: MediaQueryList | null = null;
   private _connected = false;
   private _viewHydrated = false;
   private _charts: Chart[] = [];
@@ -176,6 +245,12 @@ export class FamilyTreePanel extends LitElement {
     this._connected = true;
     this._restoreViewState();
     window.addEventListener("keydown", this._onWindowKeyDown);
+    window.addEventListener("click", this._onWindowClick);
+    if (typeof window.matchMedia === "function") {
+      this._mql = window.matchMedia(MOBILE_QUERY);
+      this._isMobile = this._mql.matches;
+      this._mql.addEventListener("change", this._onMediaChange);
+    }
     void this._connect();
   }
 
@@ -183,6 +258,9 @@ export class FamilyTreePanel extends LitElement {
     super.disconnectedCallback();
     this._connected = false;
     window.removeEventListener("keydown", this._onWindowKeyDown);
+    window.removeEventListener("click", this._onWindowClick);
+    this._mql?.removeEventListener("change", this._onMediaChange);
+    this._mql = null;
     this._unsub?.();
     this._unsub = null;
     this._destroyCharts();
@@ -192,11 +270,21 @@ export class FamilyTreePanel extends LitElement {
     if (changed.has("hass") && this.hass && !this._unsub && this._connected) {
       void this._connect();
     }
-    if (this._view === "dashboard" && this._stats) {
+    if (this._view !== "dashboard" || this._loading) {
+      if (this._chartsStatsKey) {
+        this._chartsStatsKey = "";
+        this._destroyCharts();
+      }
+      return;
+    }
+    if (this._stats) {
       const key = JSON.stringify(this._stats);
       if (key !== this._chartsStatsKey) {
-        this._chartsStatsKey = key;
-        this.updateComplete.then(() => this._renderCharts());
+        this.updateComplete.then(() => {
+          // Only remember the key once canvases existed and charts were drawn;
+          // otherwise the next update (e.g. after loading ends) must retry.
+          if (this._renderCharts()) this._chartsStatsKey = key;
+        });
       }
     }
   }
@@ -222,6 +310,8 @@ export class FamilyTreePanel extends LitElement {
     this._search = saved.search;
     this._filterLiving = saved.filterLiving;
     this._filterSex = saved.filterSex;
+    this._sort = saved.sort;
+    this._sortDir = saved.sortDir;
     this._familyShortcut = saved.familyShortcut;
     this._filterPlace = saved.filterPlace;
     this._dateFrom = saved.dateFrom;
@@ -239,7 +329,8 @@ export class FamilyTreePanel extends LitElement {
         search: this._search,
         filterLiving: this._filterLiving,
         filterSex: this._filterSex,
-        sort: "surname",
+        sort: this._sort,
+        sortDir: this._sortDir,
         view: this._view,
         familyShortcut: this._familyShortcut,
         filterPlace: this._filterPlace,
@@ -274,7 +365,7 @@ export class FamilyTreePanel extends LitElement {
     if (!this.hass) return;
     try {
       const trashed = this._view === "trash";
-      const [list, stats, settings] = await Promise.all([
+      const [list, stats, settings, lineage] = await Promise.all([
         listPersons(this.hass, {
           trashed,
           // Full tree — filters apply client-side (ready-home pattern).
@@ -282,11 +373,13 @@ export class FamilyTreePanel extends LitElement {
         }),
         getStats(this.hass),
         getSettings(this.hass),
+        getMyLineage(this.hass).catch(() => null),
       ]);
       this._people = list.persons;
       this._total = list.total;
       this._stats = stats;
       this._settings = settings;
+      this._lineage = lineage;
       if (this._detail) {
         this._detail = await getPerson(this.hass, this._detail.person.id);
       }
@@ -298,6 +391,7 @@ export class FamilyTreePanel extends LitElement {
 
   private get _activeFilterCount(): number {
     let n = 0;
+    if (this._filterSex) n += 1;
     if (this._familyShortcut) n += 1;
     if (this._filterPlace) n += 1;
     if (this._dateFrom) n += 1;
@@ -306,6 +400,7 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _resetFilters = () => {
+    this._filterSex = "";
     this._familyShortcut = "";
     this._filterPlace = "";
     this._dateFrom = "";
@@ -313,11 +408,36 @@ export class FamilyTreePanel extends LitElement {
     this._persistViewState();
   };
 
+  private _clearAllFilters = () => {
+    this._search = "";
+    this._filterLiving = "all";
+    this._resetFilters();
+  };
+
   private _onWindowKeyDown = (ev: KeyboardEvent) => {
-    if (ev.key === "Escape" && this._dialogOpen) {
-      this._dialogOpen = false;
+    if (ev.key === "Escape") {
+      if (this._rowMenu) this._rowMenu = null;
+      else if (this._dialogOpen) this._dialogOpen = false;
     }
   };
+
+  private _onWindowClick = () => {
+    if (this._rowMenu) this._rowMenu = null;
+  };
+
+  private _onMediaChange = (ev: MediaQueryListEvent) => {
+    this._isMobile = ev.matches;
+  };
+
+  private _toggleSort(sort: PanelSort) {
+    if (this._sort === sort) {
+      this._sortDir = this._sortDir === "asc" ? "desc" : "asc";
+    } else {
+      this._sort = sort;
+      this._sortDir = "asc";
+    }
+    this._persistViewState();
+  }
 
   private _setView(view: PanelView) {
     this._view = view;
@@ -338,7 +458,8 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _openCreate() {
+  private _openCreate(clearRelation = true) {
+    if (clearRelation) this._relationTarget = null;
     this._editing = null;
     this._dialogMode = "person";
     this._error = "";
@@ -372,8 +493,151 @@ export class FamilyTreePanel extends LitElement {
 
   private _openAddEvent() {
     this._dialogMode = "event";
-    this._eventForm = { event_type: "birth", date_text: "", place: "", description: "" };
+    this._editingEventId = null;
+    this._eventForm = {
+      event_type: "birth",
+      date_qualifier: "exact",
+      date_first: "",
+      date_second: "",
+      place: "",
+      description: "",
+    };
     this._dialogOpen = true;
+  }
+
+  private _openEditEvent(ev: EventDto) {
+    const form = gedcomToForm(ev.date_text);
+    this._dialogMode = "event";
+    this._editingEventId = ev.id;
+    this._eventForm = {
+      event_type: ev.type,
+      date_qualifier: form.qualifier,
+      date_first: form.first,
+      date_second: form.second,
+      place: ev.place_name || "",
+      description: ev.description || "",
+    };
+    this._dialogOpen = true;
+  }
+
+  private _openAddRelation(target: RelationTarget) {
+    this._relationTarget = target;
+    this._openCreate(false);
+  }
+
+  private _openSiblingsDialog() {
+    this._dialogMode = "siblings";
+    this._dialogOpen = true;
+  }
+
+  private _myLinkedPersonId(): string | null {
+    return this._lineage?.person_id ?? null;
+  }
+
+  private _lineageRel(personId: string) {
+    return this._lineage?.relatives?.[personId] ?? null;
+  }
+
+  private _lineageTooltip(personId: string): string {
+    const rel = this._lineageRel(personId);
+    const anchor = this._lineage?.person_name;
+    if (!rel || !anchor) return "";
+    const gen = rel.generation;
+    const ord =
+      gen === 1 ? "1st" : gen === 2 ? "2nd" : gen === 3 ? "3rd" : `${gen}th`;
+    const kind =
+      rel.type === "ancestor"
+        ? this._tt("lineage_ancestor")
+        : this._tt("lineage_descendant");
+    return `${ord} ${kind} ${this._tt("lineage_of")} ${anchor}`;
+  }
+
+  private _lineageStar(personId: string) {
+    const rel = this._lineageRel(personId);
+    if (!rel) return nothing;
+    return html`<span class="lineage-star" title=${this._lineageTooltip(personId)}
+      >${icon(MDI_STAR)}</span>`;
+  }
+
+  private _sexBadge(sex: string) {
+    const cls =
+      sex === "male" ? "sex-male" : sex === "female" ? "sex-female" : "sex-other";
+    const iconPath =
+      sex === "male"
+        ? MDI_GENDER_MALE
+        : sex === "female"
+          ? MDI_GENDER_FEMALE
+          : MDI_ACCOUNT;
+    const key = `sex_${sex}` as LocaleKey;
+    const label = this._tt(key) !== key ? this._tt(key) : sex;
+    return html`<span class="sex-badge ${cls}">${icon(iconPath)} ${label}</span>`;
+  }
+
+  private _sortIcon(sort: PanelSort) {
+    if (this._sort !== sort) return nothing;
+    return icon(this._sortDir === "asc" ? MDI_MENU_UP : MDI_MENU_DOWN);
+  }
+
+  private _sortTh(label: string, sort: PanelSort) {
+    return html`<th>
+      <button type="button" class="sort-btn" @click=${() => this._toggleSort(sort)}>
+        ${label} ${this._sortIcon(sort)}
+      </button>
+    </th>`;
+  }
+
+  private _personLink(ref: { id: string; name: string } | null | undefined) {
+    if (!ref) return html`<span class="muted">—</span>`;
+    return html`<button type="button" class="linkish" @click=${() => this._openPerson(ref.id)}>
+      ${ref.name}
+    </button>`;
+  }
+
+  private _toggleSection(key: string) {
+    this._collapsed = { ...this._collapsed, [key]: !this._collapsed[key] };
+  }
+
+  private _sectionOpen(key: string, defaultOpen = true): boolean {
+    if (key in this._collapsed) return !this._collapsed[key];
+    return defaultOpen;
+  }
+
+  private _usedUniqueEventTypes(): Set<string> {
+    if (!this._detail) return new Set();
+    const editing = this._editingEventId;
+    return new Set(
+      this._detail.events
+        .filter((e) => UNIQUE_PERSON_EVENT_TYPES.has(e.type))
+        .filter((e) => e.id !== editing)
+        .map((e) => e.type),
+    );
+  }
+
+  private _professionFromEvents(events: EventDto[]): string {
+    const occ = events
+      .filter((e) => e.type === "occupation")
+      .sort((a, b) => (a.sort_date || "").localeCompare(b.sort_date || ""));
+    if (!occ.length) return "";
+    return occ[occ.length - 1].description || "";
+  }
+
+  private _mePersonMatches(): PersonDto[] {
+    const q = this._meQuery.trim().toLowerCase();
+    if (!q) return [];
+    return this._people
+      .filter((p) => {
+        const hay = [
+          p.given_names,
+          p.call_name,
+          p.surname_prefix,
+          p.surname,
+          personDisplayName(p),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, 12);
   }
 
   private async _savePerson() {
@@ -399,7 +663,25 @@ export class FamilyTreePanel extends LitElement {
         payload.person_id = this._editing.id;
       }
       const { person } = await savePerson(this.hass, payload);
+      const target = this._relationTarget;
+      this._relationTarget = null;
       this._dialogOpen = false;
+      if (target) {
+        if (target.kind === "parent") {
+          await addParentChild(this.hass, {
+            parent_id: person.id,
+            child_id: target.personId,
+          });
+        } else if (target.kind === "child") {
+          await addParentChild(this.hass, {
+            parent_id: target.personId,
+            child_id: person.id,
+            union_id: target.unionId,
+          });
+        } else if (target.kind === "partner") {
+          await saveUnion(this.hass, { partner_ids: [target.personId, person.id] });
+        }
+      }
       await this._refreshAll();
       await this._openPerson(person.id);
     } catch (err) {
@@ -459,16 +741,28 @@ export class FamilyTreePanel extends LitElement {
           placeId = place.id;
         }
       }
+      const qualifier = (this._eventForm.date_qualifier || "exact") as DateQualifier;
+      const built = buildGedcomDate(
+        qualifier,
+        this._eventForm.date_first || "",
+        this._eventForm.date_second || "",
+      );
+      if (built.error) {
+        this._error = this._tt("date_invalid");
+        return;
+      }
       await saveEvent(this.hass, {
+        ...(this._editingEventId ? { event_id: this._editingEventId } : {}),
         subject_type: "person",
         subject_id: this._detail.person.id,
         event_type: this._eventForm.event_type || "birth",
-        date_text: this._eventForm.date_text || "",
+        date_text: built.value,
         place: this._eventForm.place || undefined,
         description: this._eventForm.description || "",
         place_id: placeId,
       });
       this._eventForm = {};
+      this._editingEventId = null;
       this._dialogOpen = false;
       this._detail = await getPerson(this.hass, this._detail.person.id);
     } catch (err) {
@@ -646,9 +940,11 @@ export class FamilyTreePanel extends LitElement {
     this._charts = [];
   }
 
-  private _renderCharts() {
+  /** Draw dashboard charts; returns false if no chart canvas was mounted yet. */
+  private _renderCharts(): boolean {
     this._destroyCharts();
-    if (!this._stats) return;
+    if (!this._stats) return false;
+    const expected = this.renderRoot.querySelectorAll(".chart-wrap canvas").length;
     const make = (
       canvasId: string,
       type: "bar" | "doughnut",
@@ -716,6 +1012,7 @@ export class FamilyTreePanel extends LitElement {
       this._stats.places_of_birth.labels,
       this._stats.places_of_birth.values,
     );
+    return expected > 0 && this._charts.length === expected;
   }
 
   private get _filteredPeople(): PersonDto[] {
@@ -723,7 +1020,8 @@ export class FamilyTreePanel extends LitElement {
       search: this._search,
       filterLiving: this._filterLiving,
       filterSex: this._filterSex,
-      sort: "surname",
+      sort: this._sort,
+      sortDir: this._sortDir,
       familyShortcut: this._familyShortcut,
       filterPlace: this._filterPlace,
       dateFrom: this._dateFrom,
@@ -867,6 +1165,81 @@ export class FamilyTreePanel extends LitElement {
     `;
   }
 
+  private _activeFilterChips() {
+    const chips: Array<{ label: string; clear: () => void }> = [];
+    if (this._search.trim()) {
+      chips.push({
+        label: `${this._tt("filter_search")}: ${this._search.trim()}`,
+        clear: () => {
+          this._search = "";
+          this._persistViewState();
+        },
+      });
+    }
+    if (this._filterLiving !== "all") {
+      chips.push({
+        label:
+          this._filterLiving === "living"
+            ? this._tt("filter_living")
+            : this._tt("filter_deceased"),
+        clear: () => {
+          this._filterLiving = "all";
+          this._persistViewState();
+        },
+      });
+    }
+    if (this._filterSex) {
+      const key = `sex_${this._filterSex}` as LocaleKey;
+      chips.push({
+        label: this._tt(key) !== key ? this._tt(key) : this._filterSex,
+        clear: () => {
+          this._filterSex = "";
+          this._persistViewState();
+        },
+      });
+    }
+    if (this._familyShortcut) {
+      chips.push({
+        label: `${this._tt("filter_family")}: ${this._familyShortcut}`,
+        clear: () => {
+          this._familyShortcut = "";
+          this._persistViewState();
+        },
+      });
+    }
+    if (this._filterPlace) {
+      const place = placeOptionsFromPeople(this._people).find(
+        (p) => p.id === this._filterPlace,
+      );
+      chips.push({
+        label: `${this._tt("place")}: ${place?.label || this._filterPlace}`,
+        clear: () => {
+          this._filterPlace = "";
+          this._persistViewState();
+        },
+      });
+    }
+    if (this._dateFrom) {
+      chips.push({
+        label: `${this._tt("filter_date_from")}: ${this._dateFrom}`,
+        clear: () => {
+          this._dateFrom = "";
+          this._persistViewState();
+        },
+      });
+    }
+    if (this._dateTo) {
+      chips.push({
+        label: `${this._tt("filter_date_to")}: ${this._dateTo}`,
+        clear: () => {
+          this._dateTo = "";
+          this._persistViewState();
+        },
+      });
+    }
+    return chips;
+  }
+
   private _renderPeopleList() {
     const people = this._filteredPeople;
     const families = sortedOptionList(
@@ -875,6 +1248,8 @@ export class FamilyTreePanel extends LitElement {
     );
     const places = placeOptionsFromPeople(this._people);
     const showFilters = this._view !== "trash";
+    const chips = this._activeFilterChips();
+    const lang = this.hass?.language;
     return html`
       <div class="toolbar">
         <input
@@ -922,6 +1297,20 @@ export class FamilyTreePanel extends LitElement {
       </div>
       ${showFilters && this._filtersOpen
         ? html`<div class="filters">
+            <select
+              aria-label=${this._tt("sex")}
+              .value=${this._filterSex}
+              @change=${(e: Event) => {
+                this._filterSex = (e.target as HTMLSelectElement).value;
+                this._persistViewState();
+              }}
+            >
+              <option value="">${this._tt("filter_all_sexes")}</option>
+              <option value="male">${this._tt("sex_male")}</option>
+              <option value="female">${this._tt("sex_female")}</option>
+              <option value="intersex">${this._tt("sex_intersex")}</option>
+              <option value="unknown">${this._tt("sex_unknown")}</option>
+            </select>
             <select
               aria-label=${this._tt("filter_family")}
               .value=${this._familyShortcut}
@@ -977,32 +1366,145 @@ export class FamilyTreePanel extends LitElement {
               : nothing}
           </div>`
         : nothing}
+      ${chips.length
+        ? html`<div class="filter-chips">
+            ${chips.map(
+              (c) => html`<button type="button" class="chip on" @click=${c.clear}>
+                ${c.label} ×
+              </button>`,
+            )}
+            <button type="button" class="chip" @click=${this._clearAllFilters}>
+              ${this._tt("filter_clear_all")}
+            </button>
+          </div>`
+        : nothing}
       <p class="muted">${people.length} / ${this._total}</p>
       ${people.length === 0
-        ? this._view === "trash" || this._search || this._filterLiving !== "all" || this._filterSex
+        ? this._view === "trash" ||
+          this._search ||
+          this._filterLiving !== "all" ||
+          this._filterSex ||
+          chips.length
           ? html`<p>${this._tt("no_people")}</p>`
           : this._renderEmptyCta()
-        : html`<ul class="people">
-            ${people.map(
-              (p) => html`<li>
-                <button class="person-row" @click=${() =>
-                  this._view === "trash" ? nothing : this._openPerson(p.id)}>
-                  ${icon(MDI_ACCOUNT)}
-                  <span>
-                    <strong>${personDisplayName(p)}</strong>
-                    <span class="muted">${p.sex}${p.is_living ? "" : " · †"}</span>
-                  </span>
-                </button>
-                ${this._view === "trash" && this._canWrite()
-                  ? html`<span class="row-actions">
-                      <button @click=${() => this._restore(p.id)}>${this._tt("restore")}</button>
-                      <button class="danger" @click=${() => this._purge(p.id)}>${this._tt("purge")}</button>
-                    </span>`
-                  : nothing}
-              </li>`,
-            )}
-          </ul>`}
+        : this._isMobile
+          ? html`<div class="card-list people-cards">
+              ${people.map((p) => this._renderPeopleCard(p, lang))}
+            </div>`
+          : html`<div class="table-wrap">
+              <table class="people-table">
+                <thead>
+                  <tr>
+                    ${this._sortTh(this._tt("col_name"), "name")}
+                    ${this._sortTh(this._tt("col_birth"), "birth")}
+                    ${this._sortTh(this._tt("col_death"), "death")}
+                    ${this._sortTh(this._tt("sex"), "sex")}
+                    ${this._sortTh(this._tt("father"), "father")}
+                    ${this._sortTh(this._tt("mother"), "mother")}
+                    ${this._sortTh(this._tt("col_children"), "children")}
+                    <th>${this._tt("col_lineage")}</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${people.map((p) => this._renderPeopleRow(p, lang))}
+                </tbody>
+              </table>
+            </div>`}
     `;
+  }
+
+  private _renderPeopleCard(p: PersonDto, lang?: string) {
+    const birth = formatEventDate(p.birth, lang);
+    const death = formatDeathCell(p.birth, p.death, p.is_living, lang);
+    const parents = [p.father?.name, p.mother?.name].filter(Boolean).join(" · ");
+    return html`
+      <button type="button" class="person-card" @click=${() => this._openPerson(p.id)}>
+        <div class="person-card-head">
+          <div class="person-card-title">${personDisplayName(p)}</div>
+          ${this._lineageStar(p.id)}
+        </div>
+        <div class="person-card-meta">${this._sexBadge(p.sex)}</div>
+        ${birth ? html`<div class="person-card-meta">${birth}</div>` : nothing}
+        ${death ? html`<div class="person-card-meta">${death}</div>` : nothing}
+        ${parents ? html`<div class="person-card-meta">${parents}</div>` : nothing}
+        ${(p.children_count ?? 0) > 0
+          ? html`<div class="person-card-footer">
+              ${p.children_count} ${this._tt("children").toLowerCase()}
+            </div>`
+          : nothing}
+      </button>
+    `;
+  }
+
+  private _renderPeopleRow(p: PersonDto, lang?: string) {
+    const birth = formatEventDate(p.birth, lang);
+    const death = formatDeathCell(p.birth, p.death, p.is_living, lang);
+    const menuOpen = this._rowMenu === p.id;
+    return html`<tr>
+      <td>
+        <button type="button" class="linkish name-cell" @click=${() => this._openPerson(p.id)}>
+          ${personDisplayName(p)}
+        </button>
+      </td>
+      <td><span class="date-badge">${birth || "—"}</span></td>
+      <td><span class="date-badge">${death || "—"}</span></td>
+      <td>${this._sexBadge(p.sex)}</td>
+      <td>${this._personLink(p.father)}</td>
+      <td>${this._personLink(p.mother)}</td>
+      <td class="num">${p.children_count ?? 0}</td>
+      <td class="center">${this._lineageStar(p.id)}</td>
+      <td class="menu-cell">
+        ${this._view === "trash" && this._canWrite()
+          ? html`<span class="row-actions">
+              <button @click=${() => this._restore(p.id)}>${this._tt("restore")}</button>
+              <button class="danger" @click=${() => this._purge(p.id)}>${this._tt("purge")}</button>
+            </span>`
+          : html`<div class="row-menu-wrap">
+              <button
+                type="button"
+                class="icon-btn sm"
+                aria-label=${this._tt("actions")}
+                @click=${(e: Event) => {
+                  e.stopPropagation();
+                  this._rowMenu = menuOpen ? null : p.id;
+                }}
+              >
+                ${icon(MDI_DOTS_VERTICAL)}
+              </button>
+              ${menuOpen
+                ? html`<div class="row-menu" @click=${(e: Event) => e.stopPropagation()}>
+                    <button type="button" @click=${() => {
+                      this._rowMenu = null;
+                      void this._openPerson(p.id);
+                    }}>${this._tt("details")}</button>
+                    <button type="button" @click=${() => {
+                      this._rowMenu = null;
+                      void this._openPerson(p.id).then(() => {
+                        this._personTab = "tree";
+                      });
+                    }}>${this._tt("tree")}</button>
+                    ${this._canWrite()
+                      ? html`<button type="button" class="danger" @click=${() => {
+                          this._rowMenu = null;
+                          void this._deletePersonById(p.id);
+                        }}>${this._tt("delete")}</button>`
+                      : nothing}
+                  </div>`
+                : nothing}
+            </div>`}
+      </td>
+    </tr>`;
+  }
+
+  private async _deletePersonById(id: string) {
+    if (!this.hass || !this._canWrite()) return;
+    try {
+      await deletePerson(this.hass, id);
+      await this._refreshAll();
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
   }
 
   private _eventTypeLabel(type: string): string {
@@ -1049,18 +1551,225 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _renderEventCard(ev: EventDto) {
-    const canDelete = this._canWrite() && ev.subject_type === "person";
+    const canEdit = this._canWrite() && ev.subject_type === "person";
+    const lang = this.hass?.language;
     return html`
       <div class="event-card">
         <div class="event-card-head">
           <strong>${this._eventTypeLabel(ev.type)}</strong>
-          ${canDelete
-            ? html`<button class="linkish danger" @click=${() => this._deleteEvent(ev.id)}>${this._tt("delete")}</button>`
+          ${canEdit
+            ? html`<span class="row-actions">
+                <button class="linkish" @click=${() => this._openEditEvent(ev)}>${this._tt("edit")}</button>
+                <button class="linkish danger" @click=${() => this._deleteEvent(ev.id)}>${this._tt("delete")}</button>
+              </span>`
             : nothing}
         </div>
-        <div class="event-card-meta">${formatGedcomDate(ev.date_text)}</div>
+        <div class="event-card-meta">${formatEventDate(ev, lang) || formatGedcomDate(ev.date_text)}</div>
         ${ev.place_name ? html`<div class="event-card-meta">${ev.place_name}</div>` : nothing}
         ${ev.description ? html`<div class="event-card-desc">${ev.description}</div>` : nothing}
+      </div>
+    `;
+  }
+
+  private _renderCollapsibleSection(
+    key: string,
+    title: string,
+    body: unknown,
+    defaultOpen = true,
+  ) {
+    const open = this._sectionOpen(key, defaultOpen);
+    return html`<section class="collapse">
+      <button type="button" class="collapse-head" @click=${() => this._toggleSection(key)}>
+        <span>${title}</span>
+        ${icon(open ? MDI_CHEVRON_DOWN : MDI_CHEVRON_RIGHT)}
+      </button>
+      ${open ? html`<div class="collapse-body">${body}</div>` : nothing}
+    </section>`;
+  }
+
+  private _renderPersonDetailsTab(d: PersonDetail) {
+    const p = d.person;
+    const lang = this.hass?.language;
+    const profession = this._professionFromEvents(d.events);
+    const personal = html`<dl class="kv">
+      <dt>${this._tt("given_names")}</dt><dd>${p.given_names || "—"}</dd>
+      <dt>${this._tt("call_name")}</dt><dd>${p.call_name || "—"}</dd>
+      <dt>${this._tt("surname_prefix")}</dt><dd>${p.surname_prefix || "—"}</dd>
+      <dt>${this._tt("surname")}</dt><dd>${p.surname || "—"}</dd>
+      <dt>${this._tt("sex")}</dt><dd>${this._sexBadge(p.sex)}</dd>
+      ${profession
+        ? html`<dt>${this._tt("profession")}</dt><dd>${profession}</dd>`
+        : nothing}
+      <dt>${this._tt("lifespan")}</dt>
+      <dd>${formatLifespan(p.birth, p.death, p.is_living, lang) || "—"}</dd>
+      <dt>${this._tt("notes")}</dt><dd>${p.notes || "—"}</dd>
+    </dl>`;
+    const events = html`
+      <div class="section-head">
+        ${this._canWrite()
+          ? html`<button class="primary" @click=${() => this._openAddEvent()}>${icon(MDI_PLUS)} ${this._tt("add_event")}</button>`
+          : nothing}
+      </div>
+      <div class="card-list">
+        ${d.events.map((ev: EventDto) => this._renderEventCard(ev))}
+        ${d.events.length === 0 ? html`<p class="muted">—</p>` : nothing}
+      </div>
+    `;
+    return html`
+      ${this._renderCollapsibleSection("personal", this._tt("section_personal"), personal)}
+      ${this._renderCollapsibleSection("events", this._tt("events"), events)}
+    `;
+  }
+
+  private _grandparentPairs(
+    tree: PersonDetail["tree"],
+  ): Array<{ label: string; nodes: Array<Record<string, unknown>> }> {
+    if (!tree?.grandparents) return [];
+    const parents = tree.parents || [];
+    const pairs: Array<{ label: string; nodes: Array<Record<string, unknown>> }> = [];
+    for (const parent of parents) {
+      const gp = tree.grandparents[String(parent.id)] || [];
+      if (gp.length) {
+        pairs.push({
+          label: String(parent.name || parent.id),
+          nodes: gp as Array<Record<string, unknown>>,
+        });
+      }
+    }
+    return pairs;
+  }
+
+  private _renderTreeTab(d: PersonDetail) {
+    const p = d.person;
+    const tree = d.tree;
+    const partners = (tree?.partners || []) as TreeUnion[];
+    const unionIdx = Math.min(this._treeUnion, Math.max(0, partners.length - 1));
+    const activeUnion = partners[unionIdx];
+    const gpPairs = this._grandparentPairs(tree);
+    const siblingCount = Number(tree?.person?.sibling_count || tree?.siblings?.length || 0);
+    const focusNode = {
+      id: p.id,
+      name: personDisplayName(p),
+      given_names: p.given_names,
+      call_name: p.call_name,
+      surname_prefix: p.surname_prefix,
+      surname: p.surname,
+      is_living: p.is_living,
+      sibling_count: siblingCount,
+      ...(tree?.person || {}),
+    };
+    const unionChildren = activeUnion?.children || [];
+    const knownCount = activeUnion?.known_children_count;
+    const unknownCount =
+      knownCount != null && knownCount > unionChildren.length
+        ? knownCount - unionChildren.length
+        : 0;
+    return html`
+      <div class="tree-box view-tree">
+        ${gpPairs.length
+          ? html`<div class="gen grandparents">
+              ${gpPairs.map(
+                (pair) => html`<div class="gp-pair">
+                  ${pair.nodes.map((n) => this._renderPersonCard(n))}
+                </div>`,
+              )}
+            </div>`
+          : this._canWrite() && !(tree?.parents || []).length
+            ? html`<div class="gen">
+                <button type="button" class="add-slot" @click=${() =>
+                  this._openAddRelation({ kind: "parent", personId: p.id })}>
+                  ${icon(MDI_PLUS)} ${this._tt("add_parents")}
+                </button>
+              </div>`
+            : nothing}
+        <div class="gen">
+          <span class="muted">${this._tt("parents")}</span>
+          ${(tree?.parents || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
+          ${this._canWrite() && !(tree?.parents || []).length
+            ? html`<button type="button" class="add-slot" @click=${() =>
+                this._openAddRelation({ kind: "parent", personId: p.id })}>
+                ${icon(MDI_PLUS)} ${this._tt("add_parents")}
+              </button>`
+            : nothing}
+        </div>
+        <div class="gen focus">
+          ${this._renderPersonCard(focusNode, {
+            footer:
+              siblingCount > 0
+                ? `+${siblingCount} ${this._tt("siblings_count")}`
+                : undefined,
+          })}
+          ${this._lineageStar(p.id)}
+          ${siblingCount > 0
+            ? html`<button type="button" class="linkish" @click=${() => this._openSiblingsDialog()}>
+                ${this._tt("view_siblings")}
+              </button>`
+            : nothing}
+        </div>
+        ${partners.length
+          ? html`<div class="union-tabs">
+              ${partners.length > 1
+                ? html`<div class="subtabs">
+                    ${partners.map(
+                      (u, i) => html`<button
+                        class=${i === unionIdx ? "active" : ""}
+                        @click=${() => (this._treeUnion = i)}
+                      >
+                        ${(u.partners || [])
+                          .map((pt) => String((pt as Record<string, unknown>).name || ""))
+                          .filter(Boolean)
+                          .join(" & ") || `${this._tt("partners")} ${i + 1}`}
+                      </button>`,
+                    )}
+                  </div>`
+                : nothing}
+              <div class="gen">
+                <span class="muted">${this._tt("partners")}</span>
+                ${(activeUnion?.partners || []).map((partner) =>
+                  this._renderPersonCard(partner as Record<string, unknown>, {
+                    subtitle: [
+                      activeUnion.marriage_date,
+                      activeUnion.marriage_place,
+                    ]
+                      .filter(Boolean)
+                      .join(" · "),
+                  }),
+                )}
+              </div>
+              <div class="gen">
+                <span class="muted">${this._tt("children")}</span>
+                ${unionChildren.map((n) =>
+                  this._renderPersonCard(n as Record<string, unknown>),
+                )}
+                ${unknownCount > 0
+                  ? html`<div class="unknown-children muted">
+                      ${unknownCount} ${this._tt("unknown_children")}
+                    </div>`
+                  : nothing}
+                ${this._canWrite()
+                  ? html`<button type="button" class="add-slot" @click=${() =>
+                      this._openAddRelation({
+                        kind: "child",
+                        personId: p.id,
+                        unionId: activeUnion?.union_id,
+                        coParentId: String(
+                          (activeUnion?.partners?.[0] as Record<string, unknown> | undefined)?.id ||
+                            "",
+                        ),
+                      })}>
+                      ${icon(MDI_PLUS)} ${this._tt("add_child")}
+                    </button>`
+                  : nothing}
+              </div>
+            </div>`
+          : this._canWrite()
+            ? html`<div class="gen">
+                <button type="button" class="add-slot" @click=${() =>
+                  this._openAddRelation({ kind: "partner", personId: p.id })}>
+                  ${icon(MDI_PLUS)} ${this._tt("add_partner")}
+                </button>
+              </div>`
+            : nothing}
       </div>
     `;
   }
@@ -1068,119 +1777,181 @@ export class FamilyTreePanel extends LitElement {
   private _renderPerson() {
     const d = this._detail!;
     const p = d.person;
-    const tree = d.tree;
     return html`
       <div class="person-head">
-        <button class="linkish" @click=${() => this._setView("people")}>← ${this._tt("nav_people")}</button>
-        <h2>${personDisplayName(p)}</h2>
+        <nav class="breadcrumb">
+          <button class="linkish" @click=${() => this._setView("people")}>${this._tt("nav_people")}</button>
+          <span class="muted">›</span>
+          <span>${personDisplayName(p)}</span>
+        </nav>
+        <h2>${personDisplayName(p)} ${this._lineageStar(p.id)}</h2>
         <div class="row-actions">
           ${this._canWrite()
             ? html`
-                <button @click=${() => this._openEdit(p)}>${this._tt("details")}</button>
+                <button @click=${() => this._openEdit(p)}>${this._tt("edit")}</button>
+                <button @click=${() => {
+                  this._personTab = "tree";
+                }}>${this._tt("tree")}</button>
                 <button class="danger" @click=${() => this._deleteCurrent()}>${this._tt("delete")}</button>
               `
             : nothing}
         </div>
       </div>
       <div class="subtabs">
-        ${(["details", "relationships", "tree", "sources"] as PersonTab[]).map(
+        ${(["details", "tree", "sources"] as PersonTab[]).map(
           (tab) => html`<button class=${this._personTab === tab ? "active" : ""}
             @click=${() => (this._personTab = tab)}>${this._tt(tab)}</button>`,
         )}
       </div>
       ${this._personTab === "details"
-        ? html`<dl class="kv">
-            <dt>${this._tt("given_names")}</dt><dd>${p.given_names || "—"}</dd>
-            <dt>${this._tt("call_name")}</dt><dd>${p.call_name || "—"}</dd>
-            <dt>${this._tt("surname_prefix")}</dt><dd>${p.surname_prefix || "—"}</dd>
-            <dt>${this._tt("surname")}</dt><dd>${p.surname || "—"}</dd>
-            <dt>${this._tt("sex")}</dt><dd>${p.sex}</dd>
-            <dt>${this._tt("deceased")}</dt><dd>${p.is_living ? "—" : "†"}</dd>
-            <dt>${this._tt("notes")}</dt><dd>${p.notes || "—"}</dd>
-          </dl>
-          <div class="section-head">
-            <h3>${this._tt("events")}</h3>
-            ${this._canWrite()
-              ? html`<button class="primary" @click=${() => this._openAddEvent()}>${icon(MDI_PLUS)} ${this._tt("add_event")}</button>`
-              : nothing}
-          </div>
-          <div class="card-list">
-            ${d.events.map((ev: EventDto) => this._renderEventCard(ev))}
-            ${d.events.length === 0 ? html`<p class="muted">—</p>` : nothing}
-          </div>`
-        : this._personTab === "relationships"
-          ? html`
-              <h3>${this._tt("parents")}</h3>
-              <div class="card-list">
-                ${(tree?.parents || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
-              </div>
-              <h3>${this._tt("partners")}</h3>
-              <div class="card-list">
-                ${(tree?.partners || []).flatMap((union) => {
-                  const u = union as Record<string, unknown>;
-                  const partners = (u.partners as Array<Record<string, unknown>>) || [];
-                  const marr = [u.marriage_date, u.marriage_place].filter(Boolean).join(" · ");
-                  return partners.map((partner) =>
-                    this._renderPersonCard(partner, {
-                      subtitle: marr
-                        ? `${this._tt("event_marriage")}: ${marr}`
-                        : typeof u.type === "string"
-                          ? String(u.type)
-                          : undefined,
-                    }),
-                  );
-                })}
-              </div>
-              <h3>${this._tt("siblings")}</h3>
-              <div class="card-list">
-                ${(tree?.siblings || []).map((s) => this._renderPersonCard(s as Record<string, unknown>))}
-              </div>
-              <h3>${this._tt("children")}</h3>
-              <div class="card-list">
-                ${(tree?.children || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
-              </div>
-            `
-          : this._personTab === "tree"
-            ? html`<div class="tree-box">
-                <div class="gen">
-                  <span class="muted">${this._tt("parents")}</span>
-                  ${(tree?.parents || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
-                </div>
-                <div class="gen focus">
-                  ${this._renderPersonCard({
-                    id: p.id,
-                    name: personDisplayName(p),
-                    given_names: p.given_names,
-                    call_name: p.call_name,
-                    surname_prefix: p.surname_prefix,
-                    surname: p.surname,
-                    is_living: p.is_living,
-                    ...(tree?.person || {}),
-                  })}
-                </div>
-                <div class="gen">
-                  <span class="muted">${this._tt("children")}</span>
-                  ${(tree?.children || []).map((n) => this._renderPersonCard(n as Record<string, unknown>))}
-                </div>
-              </div>`
-            : html`<ul class="plain">
-                ${(d.citations || []).map(
-                  (c) => html`<li>
-                    <strong>${c.source_title || "Source"}</strong>
-                    ${c.source_url
-                      ? html`<a href=${String(c.source_url)} target="_blank" rel="noopener">${c.source_url}</a>`
-                      : nothing}
-                    ${c.detail ? html`<span class="muted"> — ${c.detail}</span>` : nothing}
-                  </li>`,
-                )}
-                ${(d.citations || []).length === 0 ? html`<li class="muted">—</li>` : nothing}
-              </ul>`}
+        ? this._renderPersonDetailsTab(d)
+        : this._personTab === "tree"
+          ? this._renderTreeTab(d)
+          : html`<ul class="plain">
+              ${(d.citations || []).map(
+                (c) => html`<li>
+                  <strong>${c.source_title || "Source"}</strong>
+                  ${c.source_url
+                    ? html`<a href=${String(c.source_url)} target="_blank" rel="noopener">${c.source_url}</a>`
+                    : nothing}
+                  ${c.detail ? html`<span class="muted"> — ${c.detail}</span>` : nothing}
+                </li>`,
+              )}
+              ${(d.citations || []).length === 0 ? html`<li class="muted">—</li>` : nothing}
+            </ul>`}
     `;
+  }
+
+  private async _claimMe(personId: string | null) {
+    if (!this.hass) return;
+    try {
+      await claimUserLink(this.hass, { person_id: personId });
+      this._lineage = await getMyLineage(this.hass);
+      await this._loadSettingsExtras();
+      this._meQuery = "";
+      this._error = "";
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
+  }
+
+  private async _createAndClaimMe() {
+    if (!this.hass) return;
+    const given = (this._meForm.given_names || "").trim();
+    if (!given) {
+      this._error = this._tt("field_required");
+      return;
+    }
+    try {
+      await claimUserLink(this.hass, {
+        create: {
+          given_names: given,
+          surname_prefix: this._meForm.surname_prefix || "",
+          surname: this._meForm.surname || "",
+          sex: this._meForm.sex || "unknown",
+          birth_date_text: this._meForm.birth_date_text || "",
+        },
+      });
+      this._lineage = await getMyLineage(this.hass);
+      await this._refreshAll();
+      this._meCreateOpen = false;
+      this._meForm = {};
+      this._error = "";
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
+  }
+
+  private _renderMeCard() {
+    const userName = this.hass?.user?.name || this.hass?.user?.id || "—";
+    const linked = this._lineage?.person_name;
+    const matches = this._mePersonMatches();
+    return html`<section class="block me-card">
+      <h3>${this._tt("this_is_me")}</h3>
+      <p class="muted">${userName}</p>
+      ${linked
+        ? html`<p>
+            <strong>${linked}</strong>
+            <button type="button" class="linkish" @click=${() => void this._claimMe(null)}>
+              ${this._tt("unlink_me")}
+            </button>
+          </p>`
+        : html`<p class="muted">${this._tt("not_linked")}</p>`}
+      <label>
+        ${this._tt("search_person")}
+        <input
+          type="search"
+          .value=${this._meQuery}
+          placeholder=${this._tt("search_placeholder")}
+          @input=${(e: Event) => (this._meQuery = (e.target as HTMLInputElement).value)}
+        />
+      </label>
+      ${matches.length
+        ? html`<ul class="plain me-hits">
+            ${matches.map(
+              (p) => html`<li>
+                <button type="button" class="linkish" @click=${() => void this._claimMe(p.id)}>
+                  <strong>${personDisplayName(p)}</strong>
+                  <span class="muted">
+                    ${formatLifespan(p.birth, p.death, p.is_living, this.hass?.language)}
+                    ${[p.father?.name, p.mother?.name].filter(Boolean).join(" · ")}
+                  </span>
+                </button>
+              </li>`,
+            )}
+          </ul>`
+        : this._meQuery.trim()
+          ? html`<p class="muted">${this._tt("no_people")}</p>`
+          : nothing}
+      ${!linked
+        ? html`<button type="button" class="linkish" @click=${() => (this._meCreateOpen = !this._meCreateOpen)}>
+            ${this._tt("create_my_person")}
+          </button>`
+        : nothing}
+      ${this._meCreateOpen
+        ? html`<div class="inline-form me-create">
+            <input
+              placeholder=${this._tt("given_names")}
+              .value=${this._meForm.given_names || ""}
+              @input=${(e: Event) =>
+                (this._meForm = {
+                  ...this._meForm,
+                  given_names: (e.target as HTMLInputElement).value,
+                })}
+            />
+            <input
+              placeholder=${this._tt("surname")}
+              .value=${this._meForm.surname || ""}
+              @input=${(e: Event) =>
+                (this._meForm = {
+                  ...this._meForm,
+                  surname: (e.target as HTMLInputElement).value,
+                })}
+            />
+            <select
+              .value=${this._meForm.sex || "unknown"}
+              @change=${(e: Event) =>
+                (this._meForm = {
+                  ...this._meForm,
+                  sex: (e.target as HTMLSelectElement).value,
+                })}
+            >
+              <option value="male">${this._tt("sex_male")}</option>
+              <option value="female">${this._tt("sex_female")}</option>
+              <option value="unknown">${this._tt("sex_unknown")}</option>
+            </select>
+            <button type="button" @click=${() => void this._createAndClaimMe()}>
+              ${this._tt("save")}
+            </button>
+          </div>`
+        : nothing}
+    </section>`;
   }
 
   private _renderSettings() {
     const countries = (this._gazetteer?.countries as Array<Record<string, unknown>>) || [];
     return html`
+      ${this._renderMeCard()}
       <section class="block">
         <h3>${this._tt("import_gedcom")} / ${this._tt("export_gedcom")}</h3>
         ${this._canWrite()
@@ -1285,11 +2056,17 @@ export class FamilyTreePanel extends LitElement {
     const dialogTitle =
       mode === "import"
         ? this._tt("import_preview")
-        : mode === "event"
-          ? this._tt("add_event")
-          : this._editing
-            ? personDisplayName(this._editing)
-            : this._tt("add_person");
+        : mode === "siblings"
+          ? this._tt("siblings")
+          : mode === "event"
+            ? this._editingEventId
+              ? this._tt("edit_event")
+              : this._tt("add_event")
+            : this._editing
+              ? personDisplayName(this._editing)
+              : this._relationTarget
+                ? this._tt("add_person")
+                : this._tt("add_person");
 
     const personBody = html`
       <div class="form-section">
@@ -1397,6 +2174,10 @@ export class FamilyTreePanel extends LitElement {
       </div>
     `;
 
+    const usedTypes = this._usedUniqueEventTypes();
+    const needsSecondDate =
+      this._eventForm.date_qualifier === "between" ||
+      this._eventForm.date_qualifier === "from_to";
     const eventBody = html`
       <div class="form-section">
         <label
@@ -1409,25 +2190,56 @@ export class FamilyTreePanel extends LitElement {
                 event_type: (e.target as HTMLSelectElement).value,
               })}
           >
-            <option value="birth">${this._tt("event_birth")}</option>
-            <option value="death">${this._tt("event_death")}</option>
-            <option value="baptism">${this._tt("event_baptism")}</option>
-            <option value="burial">${this._tt("event_burial")}</option>
-            <option value="occupation">${this._tt("event_occupation")}</option>
-            <option value="residence">${this._tt("event_residence")}</option>
+            ${PERSON_EVENT_TYPES.map((t) => {
+              const disabled =
+                UNIQUE_PERSON_EVENT_TYPES.has(t) && usedTypes.has(t);
+              return html`<option value=${t} ?disabled=${disabled}>
+                ${this._eventTypeLabel(t)}${disabled ? ` (${this._tt("already_added")})` : ""}
+              </option>`;
+            })}
+          </select>
+        </label>
+        <label
+          >${this._tt("date_qualifier")}
+          <select
+            .value=${this._eventForm.date_qualifier || "exact"}
+            @change=${(e: Event) =>
+              (this._eventForm = {
+                ...this._eventForm,
+                date_qualifier: (e.target as HTMLSelectElement).value,
+              })}
+          >
+            ${FORM_QUALIFIERS.map(
+              (q) => html`<option value=${q}>${this._tt(QUALIFIER_KEYS[q])}</option>`,
+            )}
           </select>
         </label>
         <label
           >${this._tt("date")}
           <input
-            .value=${this._eventForm.date_text || ""}
+            .value=${this._eventForm.date_first || ""}
+            placeholder=${this._tt("date_hint")}
             @input=${(e: Event) =>
               (this._eventForm = {
                 ...this._eventForm,
-                date_text: (e.target as HTMLInputElement).value,
+                date_first: (e.target as HTMLInputElement).value,
               })}
           />
         </label>
+        ${needsSecondDate
+          ? html`<label
+              >${this._tt("date_second")}
+              <input
+                .value=${this._eventForm.date_second || ""}
+                placeholder=${this._tt("date_hint")}
+                @input=${(e: Event) =>
+                  (this._eventForm = {
+                    ...this._eventForm,
+                    date_second: (e.target as HTMLInputElement).value,
+                  })}
+              />
+            </label>`
+          : nothing}
         <label
           >${this._tt("place")}
           <input
@@ -1453,6 +2265,15 @@ export class FamilyTreePanel extends LitElement {
       </div>
     `;
 
+    const siblingsBody = html`<div class="card-list">
+      ${(this._detail?.tree?.siblings || []).map((s) =>
+        this._renderPersonCard(s as Record<string, unknown>),
+      )}
+      ${!(this._detail?.tree?.siblings || []).length
+        ? html`<p class="muted">—</p>`
+        : nothing}
+    </div>`;
+
     const actions =
       mode === "import"
         ? html`
@@ -1468,19 +2289,24 @@ export class FamilyTreePanel extends LitElement {
                 })
               : nothing}
           `
-        : mode === "event"
-          ? html`
-              ${mdButton(this._tt("cancel"), {
-                variant: "text",
-                onClick: this._closeDialog,
-              })}
-              ${mdButton(this._tt("save"), {
-                variant: "filled",
-                disabled: this._saving,
-                onClick: () => void this._saveEvent(),
-              })}
-            `
-          : html`
+        : mode === "siblings"
+          ? mdButton(this._tt("close"), {
+              variant: "text",
+              onClick: this._closeDialog,
+            })
+          : mode === "event"
+            ? html`
+                ${mdButton(this._tt("cancel"), {
+                  variant: "text",
+                  onClick: this._closeDialog,
+                })}
+                ${mdButton(this._tt("save"), {
+                  variant: "filled",
+                  disabled: this._saving,
+                  onClick: () => void this._saveEvent(),
+                })}
+              `
+            : html`
               ${mdButton(this._tt(write ? "cancel" : "close"), {
                 variant: "text",
                 onClick: this._closeDialog,
@@ -1518,9 +2344,11 @@ export class FamilyTreePanel extends LitElement {
 
           ${mode === "import"
             ? this._renderImportDialogBody()
-            : mode === "event"
-              ? eventBody
-              : personBody}
+            : mode === "siblings"
+              ? siblingsBody
+              : mode === "event"
+                ? eventBody
+                : personBody}
 
           ${this._error && mode !== "import"
             ? html`<div class="error" role="alert">${this._error}</div>`
@@ -1682,14 +2510,25 @@ export class FamilyTreePanel extends LitElement {
     }
     .toolbar input[type="search"], .toolbar select, .filters select, .filters input[type="date"],
     .inline-form input, .inline-form select,
-    .dialog input, .dialog select, .dialog textarea {
-      font: inherit; padding: 8px 10px;
+    .dialog input, .dialog select, .dialog textarea,
+    .me-card input, .me-card select {
+      font: inherit;
+      padding: 8px 12px;
+      min-height: 40px;
       border-radius: var(--ha-border-radius-lg, 12px);
       border: 1px solid var(--divider-color);
       background: var(--card-background-color, var(--primary-background-color));
       color: var(--primary-text-color);
       box-sizing: border-box;
       width: 100%;
+    }
+    select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23666' d='M1.41 0L6 4.58 10.59 0 12 1.41 6 7.41 0 1.41z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 36px;
     }
     .toolbar input[type="search"] { flex: 1; min-width: 160px; width: auto; }
     .toolbar select, .filters select, .filters input[type="date"] { width: auto; }
@@ -1913,6 +2752,147 @@ export class FamilyTreePanel extends LitElement {
       gap: 12px;
       margin-top: 4px;
     }
+    .filter-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .table-wrap { overflow-x: auto; margin-bottom: 16px; }
+    .people-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    .people-table th, .people-table td {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--divider-color);
+      text-align: left;
+      vertical-align: middle;
+    }
+    .people-table th { color: var(--secondary-text-color); font-weight: 500; }
+    .sort-btn {
+      appearance: none;
+      border: none;
+      background: none;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0;
+    }
+    .people-table .num, .people-table .center { text-align: center; }
+    .date-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: var(--ha-border-radius-pill, 9999px);
+      background: var(--secondary-background-color);
+      font-size: 0.88em;
+      white-space: nowrap;
+    }
+    .sex-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: var(--ha-border-radius-pill, 9999px);
+      font-size: 0.85em;
+      white-space: nowrap;
+    }
+    .sex-badge svg { width: 14px; height: 14px; }
+    .sex-male { background: color-mix(in srgb, #2196f3 15%, transparent); color: #1565c0; }
+    .sex-female { background: color-mix(in srgb, #e91e63 15%, transparent); color: #ad1457; }
+    .sex-other { background: var(--secondary-background-color); }
+    .lineage-star { color: var(--primary-color); display: inline-flex; }
+    .lineage-star svg { width: 16px; height: 16px; }
+    .name-cell { font-weight: 500; }
+    .menu-cell { width: 40px; position: relative; }
+    .row-menu-wrap { position: relative; }
+    .icon-btn.sm { width: 32px; height: 32px; }
+    .row-menu {
+      position: absolute;
+      right: 0;
+      top: 100%;
+      z-index: 5;
+      min-width: 140px;
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color);
+      border-radius: var(--ha-border-radius-md, 8px);
+      box-shadow: var(--ha-card-box-shadow, 0 4px 16px rgba(0,0,0,.12));
+      display: flex;
+      flex-direction: column;
+      padding: 4px;
+    }
+    .row-menu button {
+      appearance: none;
+      border: none;
+      background: none;
+      text-align: left;
+      padding: 8px 10px;
+      font: inherit;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .row-menu button:hover { background: var(--secondary-background-color); }
+    .people-cards .person-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.9rem;
+      margin-bottom: 4px;
+    }
+    .collapse {
+      border: 1px solid var(--divider-color);
+      border-radius: var(--ha-border-radius-lg, 12px);
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    .collapse-head {
+      appearance: none;
+      border: none;
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      background: var(--card-background-color, #fff);
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      color: inherit;
+    }
+    .collapse-body { padding: 0 14px 14px; }
+    .view-tree { align-items: stretch; width: 100%; }
+    .gp-pair { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .union-tabs { width: 100%; }
+    .add-slot {
+      appearance: none;
+      border: 1px dashed var(--divider-color);
+      background: transparent;
+      color: var(--primary-color);
+      border-radius: var(--ha-border-radius-lg, 12px);
+      padding: 12px 16px;
+      cursor: pointer;
+      font: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .unknown-children {
+      padding: 8px 12px;
+      border: 1px dashed var(--divider-color);
+      border-radius: var(--ha-border-radius-md, 8px);
+    }
+    .me-hits li { flex-direction: column; align-items: flex-start; }
+    .me-create { margin-top: 8px; }
     @media (max-width: 720px) {
       .shell { padding: 12px 16px 40px; }
       .stats-row { grid-template-columns: 1fr; }
