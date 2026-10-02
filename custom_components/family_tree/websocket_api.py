@@ -138,7 +138,9 @@ async def ws_subscribe(
         vol.Optional("sex"): vol.In([s.value for s in Sex]),
         vol.Optional("living"): bool,
         vol.Optional("trashed", default=False): bool,
-        vol.Optional("limit", default=50): vol.All(int, vol.Range(min=1, max=200)),
+        vol.Optional("limit", default=MAX_PERSONS): vol.All(
+            int, vol.Range(min=1, max=MAX_PERSONS)
+        ),
         vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
         **_OPTIONAL_ENTRY,
     }
@@ -148,7 +150,7 @@ async def ws_persons_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
     coordinator = _coordinator(hass, msg)
-    limit = _cap(msg.get("limit"), 50, 200)
+    limit = _cap(msg.get("limit"), MAX_PERSONS, MAX_PERSONS)
 
     def _run() -> dict[str, Any]:
         persons, total = coordinator.repo.list_persons(
@@ -159,9 +161,15 @@ async def ws_persons_list(
             limit=limit,
             offset=int(msg.get("offset") or 0),
         )
+        life_by_id = coordinator.repo.life_events_for_persons([p.id for p in persons])
         return {
             "persons": [
-                {**p.to_dict(), "display_name": display_name(p)} for p in persons
+                {
+                    **p.to_dict(),
+                    "display_name": display_name(p),
+                    "life_events": life_by_id.get(p.id, []),
+                }
+                for p in persons
             ],
             "total": total,
         }

@@ -125,6 +125,78 @@ class Repository:
         )
         return [_row_person(r) for r in rows], int(total["c"] if total else 0)
 
+    def life_events_for_persons(
+        self, person_ids: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Batch birth/death/marriage summaries for list filtering.
+
+        Marriage events are stored on unions and mapped via union_partners.
+        """
+        if not person_ids:
+            return {}
+        out: dict[str, list[dict[str, Any]]] = {pid: [] for pid in person_ids}
+        placeholders = ",".join("?" * len(person_ids))
+
+        def _place_name(name: Any, admin1: Any, country: Any) -> str | None:
+            label = (name or "").strip()
+            if not label:
+                return None
+            extra = [p for p in [(admin1 or "").strip(), (country or "").strip()] if p]
+            return f"{label}, {', '.join(extra)}" if extra else label
+
+        person_rows = self.db.fetchall(
+            f"SELECT e.subject_id AS person_id, e.type, e.sort_date, e.place_id, "
+            f"pl.name AS place_name, pl.admin1, pl.country "
+            f"FROM events e "
+            f"LEFT JOIN places pl ON pl.id = e.place_id AND pl.deleted_at IS NULL "
+            f"WHERE e.deleted_at IS NULL AND e.subject_type = 'person' "
+            f"AND e.type IN ('birth', 'death') "
+            f"AND e.subject_id IN ({placeholders})",
+            person_ids,
+        )
+        for row in person_rows:
+            pid = str(row["person_id"])
+            if pid not in out:
+                continue
+            out[pid].append(
+                {
+                    "type": str(row["type"]),
+                    "sort_date": row["sort_date"],
+                    "place_id": row["place_id"],
+                    "place_name": _place_name(
+                        row["place_name"], row["admin1"], row["country"]
+                    ),
+                }
+            )
+
+        marriage_rows = self.db.fetchall(
+            f"SELECT up.person_id AS person_id, e.type, e.sort_date, e.place_id, "
+            f"pl.name AS place_name, pl.admin1, pl.country "
+            f"FROM events e "
+            f"INNER JOIN union_partners up ON up.union_id = e.subject_id "
+            f"LEFT JOIN places pl ON pl.id = e.place_id AND pl.deleted_at IS NULL "
+            f"WHERE e.deleted_at IS NULL AND e.subject_type = 'union' "
+            f"AND e.type = 'marriage' "
+            f"AND up.person_id IN ({placeholders})",
+            person_ids,
+        )
+        for row in marriage_rows:
+            pid = str(row["person_id"])
+            if pid not in out:
+                continue
+            out[pid].append(
+                {
+                    "type": "marriage",
+                    "sort_date": row["sort_date"],
+                    "place_id": row["place_id"],
+                    "place_name": _place_name(
+                        row["place_name"], row["admin1"], row["country"]
+                    ),
+                }
+            )
+
+        return out
+
     def get_person(self, person_id: str, *, include_deleted: bool = False) -> Person | None:
         if include_deleted:
             row = self.db.fetchone("SELECT * FROM persons WHERE id = ?", (person_id,))

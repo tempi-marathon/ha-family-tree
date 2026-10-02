@@ -2,6 +2,13 @@
 
 import type { HomeAssistant } from "./types";
 
+export interface LifeEventDto {
+  type: "birth" | "death" | "marriage" | string;
+  sort_date: string | null;
+  place_id: string | null;
+  place_name: string | null;
+}
+
 export interface PersonDto {
   id: string;
   given_names: string;
@@ -15,6 +22,8 @@ export interface PersonDto {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+  /** Present on persons/list for client-side place/date filters. */
+  life_events?: LifeEventDto[];
 }
 
 export interface EventDto {

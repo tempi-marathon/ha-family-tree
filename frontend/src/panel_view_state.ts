@@ -10,6 +10,10 @@ export interface PanelViewState {
   sort: PanelSort;
   view: PanelView;
   familyShortcut: string;
+  filterPlace: string;
+  dateFrom: string;
+  dateTo: string;
+  filtersOpen: boolean;
 }
 
 export const DEFAULT_PANEL_VIEW: PanelViewState = {
@@ -19,6 +23,10 @@ export const DEFAULT_PANEL_VIEW: PanelViewState = {
   sort: "surname",
   view: "dashboard",
   familyShortcut: "",
+  filterPlace: "",
+  dateFrom: "",
+  dateTo: "",
+  filtersOpen: false,
 };
 
 const STORAGE_PREFIX = "family_tree.panel.view";
@@ -57,6 +65,10 @@ export function loadPanelViewState(
       sort: (SORTS.has(sort) ? sort : "surname") as PanelSort,
       view: (VIEWS.has(view) ? view : "dashboard") as PanelView,
       familyShortcut: asString(parsed.familyShortcut, ""),
+      filterPlace: asString(parsed.filterPlace, ""),
+      dateFrom: asString(parsed.dateFrom, ""),
+      dateTo: asString(parsed.dateTo, ""),
+      filtersOpen: Boolean(parsed.filtersOpen),
     };
   } catch {
     return { ...DEFAULT_PANEL_VIEW };
@@ -74,4 +86,23 @@ export function savePanelViewState(
   } catch {
     // Quota / private mode — ignore.
   }
+}
+
+/** Deduplicate options (case-insensitive) and sort by localeCompare. */
+export function sortedOptionList(
+  options: string[],
+  current = "",
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of [...options, current]) {
+    const v = value?.trim();
+    if (!v) continue;
+    const key = v.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+  }
+  out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return out;
 }

@@ -34,9 +34,14 @@ import { type LocaleKey, t } from "./i18n";
 import {
   loadPanelViewState,
   savePanelViewState,
+  sortedOptionList,
   type PanelView,
 } from "./panel_view_state";
-import { filterAndSortPeople, personDisplayName } from "./people_view";
+import {
+  filterAndSortPeople,
+  personDisplayName,
+  placeOptionsFromPeople,
+} from "./people_view";
 import { nodeName } from "./tree_view";
 import type { HomeAssistant } from "./types";
 
@@ -131,6 +136,10 @@ export class FamilyTreePanel extends LitElement {
   @state() private _filterLiving = "all";
   @state() private _filterSex = "";
   @state() private _familyShortcut = "";
+  @state() private _filterPlace = "";
+  @state() private _dateFrom = "";
+  @state() private _dateTo = "";
+  @state() private _filtersOpen = false;
   @state() private _people: PersonDto[] = [];
   @state() private _total = 0;
   @state() private _stats: StatsDto | null = null;
@@ -214,6 +223,10 @@ export class FamilyTreePanel extends LitElement {
     this._filterLiving = saved.filterLiving;
     this._filterSex = saved.filterSex;
     this._familyShortcut = saved.familyShortcut;
+    this._filterPlace = saved.filterPlace;
+    this._dateFrom = saved.dateFrom;
+    this._dateTo = saved.dateTo;
+    this._filtersOpen = saved.filtersOpen;
     this._view = saved.view === "person" ? "people" : saved.view;
     this._viewHydrated = true;
   }
@@ -229,6 +242,10 @@ export class FamilyTreePanel extends LitElement {
         sort: "surname",
         view: this._view,
         familyShortcut: this._familyShortcut,
+        filterPlace: this._filterPlace,
+        dateFrom: this._dateFrom,
+        dateTo: this._dateTo,
+        filtersOpen: this._filtersOpen,
       },
       this._entryId(),
     );
@@ -259,16 +276,9 @@ export class FamilyTreePanel extends LitElement {
       const trashed = this._view === "trash";
       const [list, stats, settings] = await Promise.all([
         listPersons(this.hass, {
-          search: this._search,
-          living:
-            this._filterLiving === "living"
-              ? true
-              : this._filterLiving === "deceased"
-                ? false
-                : undefined,
-          sex: this._filterSex || undefined,
           trashed,
-          limit: 200,
+          // Full tree — filters apply client-side (ready-home pattern).
+          limit: 5000,
         }),
         getStats(this.hass),
         getSettings(this.hass),
@@ -285,6 +295,23 @@ export class FamilyTreePanel extends LitElement {
       this._error = formatHassError(err);
     }
   }
+
+  private get _activeFilterCount(): number {
+    let n = 0;
+    if (this._familyShortcut) n += 1;
+    if (this._filterPlace) n += 1;
+    if (this._dateFrom) n += 1;
+    if (this._dateTo) n += 1;
+    return n;
+  }
+
+  private _resetFilters = () => {
+    this._familyShortcut = "";
+    this._filterPlace = "";
+    this._dateFrom = "";
+    this._dateTo = "";
+    this._persistViewState();
+  };
 
   private _onWindowKeyDown = (ev: KeyboardEvent) => {
     if (ev.key === "Escape" && this._dialogOpen) {
@@ -698,6 +725,9 @@ export class FamilyTreePanel extends LitElement {
       filterSex: this._filterSex,
       sort: "surname",
       familyShortcut: this._familyShortcut,
+      filterPlace: this._filterPlace,
+      dateFrom: this._dateFrom,
+      dateTo: this._dateTo,
     });
   }
 
@@ -839,6 +869,12 @@ export class FamilyTreePanel extends LitElement {
 
   private _renderPeopleList() {
     const people = this._filteredPeople;
+    const families = sortedOptionList(
+      this._settings?.family_shortcuts || [],
+      this._familyShortcut,
+    );
+    const places = placeOptionsFromPeople(this._people);
+    const showFilters = this._view !== "trash";
     return html`
       <div class="toolbar">
         <input
@@ -848,7 +884,6 @@ export class FamilyTreePanel extends LitElement {
           @input=${(e: Event) => {
             this._search = (e.target as HTMLInputElement).value;
             this._persistViewState();
-            void this._refreshAll();
           }}
         />
         <select
@@ -856,13 +891,28 @@ export class FamilyTreePanel extends LitElement {
           @change=${(e: Event) => {
             this._filterLiving = (e.target as HTMLSelectElement).value;
             this._persistViewState();
-            void this._refreshAll();
           }}
         >
           <option value="all">${this._tt("filter_all")}</option>
           <option value="living">${this._tt("filter_living")}</option>
           <option value="deceased">${this._tt("filter_deceased")}</option>
         </select>
+        ${showFilters
+          ? html`<button
+              type="button"
+              class="filters-btn ${this._filtersOpen || this._activeFilterCount
+                ? "active"
+                : ""}"
+              @click=${() => {
+                this._filtersOpen = !this._filtersOpen;
+                this._persistViewState();
+              }}
+            >
+              ${this._tt("filters")}${this._activeFilterCount
+                ? html` (${this._activeFilterCount})`
+                : nothing}
+            </button>`
+          : nothing}
         ${this._canWrite() && this._view !== "trash"
           ? mdButton(this._tt("add_person"), {
               variant: "filled",
@@ -870,6 +920,63 @@ export class FamilyTreePanel extends LitElement {
             })
           : nothing}
       </div>
+      ${showFilters && this._filtersOpen
+        ? html`<div class="filters">
+            <select
+              aria-label=${this._tt("filter_family")}
+              .value=${this._familyShortcut}
+              @change=${(e: Event) => {
+                this._familyShortcut = (e.target as HTMLSelectElement).value;
+                this._persistViewState();
+              }}
+            >
+              <option value="">${this._tt("filter_all_families")}</option>
+              ${families.map(
+                (f) => html`<option value=${f}>${f}</option>`,
+              )}
+            </select>
+            <select
+              aria-label=${this._tt("place")}
+              .value=${this._filterPlace}
+              @change=${(e: Event) => {
+                this._filterPlace = (e.target as HTMLSelectElement).value;
+                this._persistViewState();
+              }}
+            >
+              <option value="">${this._tt("filter_all_places")}</option>
+              ${places.map(
+                (p) => html`<option value=${p.id}>${p.label}</option>`,
+              )}
+            </select>
+            <label class="date-filter">
+              <span class="muted">${this._tt("filter_date_from")}</span>
+              <input
+                type="date"
+                .value=${this._dateFrom}
+                @change=${(e: Event) => {
+                  this._dateFrom = (e.target as HTMLInputElement).value;
+                  this._persistViewState();
+                }}
+              />
+            </label>
+            <label class="date-filter">
+              <span class="muted">${this._tt("filter_date_to")}</span>
+              <input
+                type="date"
+                .value=${this._dateTo}
+                @change=${(e: Event) => {
+                  this._dateTo = (e.target as HTMLInputElement).value;
+                  this._persistViewState();
+                }}
+              />
+            </label>
+            ${this._activeFilterCount
+              ? html`<button type="button" @click=${this._resetFilters}>
+                  ${this._tt("filter_reset")}
+                </button>`
+              : nothing}
+          </div>`
+        : nothing}
       <p class="muted">${people.length} / ${this._total}</p>
       ${people.length === 0
         ? this._view === "trash" || this._search || this._filterLiving !== "all" || this._filterSex
@@ -1573,7 +1680,8 @@ export class FamilyTreePanel extends LitElement {
     .toolbar {
       display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center;
     }
-    .toolbar input[type="search"], .toolbar select, .inline-form input, .inline-form select,
+    .toolbar input[type="search"], .toolbar select, .filters select, .filters input[type="date"],
+    .inline-form input, .inline-form select,
     .dialog input, .dialog select, .dialog textarea {
       font: inherit; padding: 8px 10px;
       border-radius: var(--ha-border-radius-lg, 12px);
@@ -1584,7 +1692,23 @@ export class FamilyTreePanel extends LitElement {
       width: 100%;
     }
     .toolbar input[type="search"] { flex: 1; min-width: 160px; width: auto; }
-    .toolbar select { width: auto; }
+    .toolbar select, .filters select, .filters input[type="date"] { width: auto; }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .filters-btn.active {
+      border-color: var(--primary-color);
+      color: var(--primary-color);
+    }
+    .date-filter {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
     .subtabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
     .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 0 0 16px; }
     .kv dt { color: var(--secondary-text-color); }

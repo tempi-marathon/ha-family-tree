@@ -10,7 +10,6 @@ build/
 venv/
 .env
 .python-version
-.laravel-tmp/
 
 # Testing / coverage
 .coverage
