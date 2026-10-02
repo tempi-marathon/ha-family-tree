@@ -167,3 +167,35 @@ def test_events_save_rejects_duplicate_unique_type(repo: Repository) -> None:
     _call(ws.ws_events_save, admin, {**base, "event_type": "residence"})
     _call(ws.ws_events_save, admin, {**base, "event_type": "residence"})
     assert len(admin.errors) == 1
+
+
+def test_persons_get_includes_vital_summaries(repo: Repository) -> None:
+    p = repo.add_person(Person(given_names="Ada", is_living=False))
+    repo.add_event(
+        Event(
+            subject_type=SubjectType.PERSON,
+            subject_id=p.id,
+            type=EventType.BIRTH,
+            date_text="12 JAN 1900",
+            sort_date="1900-01-12",
+        )
+    )
+    repo.add_event(
+        Event(
+            subject_type=SubjectType.PERSON,
+            subject_id=p.id,
+            type=EventType.DEATH,
+            date_text="ABT 1980",
+            sort_date="1980-01-01",
+        )
+    )
+    admin = _FakeConnection("admin", is_admin=True)
+    _call(
+        ws.ws_persons_get,
+        admin,
+        {"type": "family_tree/persons/get", "person_id": p.id},
+    )
+    assert not admin.errors
+    person = admin.results[-1]["person"]
+    assert person["birth"]["sort_date"] == "1900-01-12"
+    assert person["death"]["sort_date"] == "1980-01-01"
