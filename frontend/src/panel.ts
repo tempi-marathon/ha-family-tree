@@ -102,6 +102,7 @@ const MDI_CHEVRON_DOWN =
   "M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z";
 const MDI_CHEVRON_RIGHT =
   "M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z";
+const MDI_BOOKMARK_OUTLINE =
   "M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5A2,2 0 0,0 17,3Z";
 
 const BRAND_LOGO_URL = "/api/family_tree/brand/logo.png";
@@ -240,8 +241,11 @@ export class FamilyTreePanel extends LitElement {
   @state() private _pickPersonQuery = "";
   @state() private _pickPersonRole: "partner" | "father" | "mother" | null = null;
   @state() private _parentsForm: Record<string, string> = {};
+  @state() private _placeSuggestions: PlaceDto[] = [];
+  @state() private _placeSuggestOpen = false;
 
   private _unsub: (() => void) | null = null;
+  private _placeSearchTimer: ReturnType<typeof setTimeout> | null = null;
   private _mql: MediaQueryList | null = null;
   private _connected = false;
   private _viewHydrated = false;
@@ -609,7 +613,12 @@ export class FamilyTreePanel extends LitElement {
     >`;
   }
 
-
+  private _deceasedIcon(isLiving: boolean) {
+    if (isLiving) return nothing;
+    return html`<span class="deceased-icon" title=${this._tt("deceased")}
+      >${icon(MDI_BOOKMARK_OUTLINE)}</span
+    >`;
+  }
 
   private _childrenCountLabel(count: number): string {
     if (count === 1) return `1 ${this._tt("child")}`;
@@ -662,8 +671,26 @@ export class FamilyTreePanel extends LitElement {
     return parts.length ? parts : html`<span class="muted">—</span>`;
   }
 
+  private _truncatePlaceLabel(label: string): string {
+    const comma = label.indexOf(",");
+    return comma > 0 ? label.slice(0, comma).trim() : label;
+  }
 
-
+  private _schedulePlaceSearch(value: string) {
+    if (this._placeSearchTimer) clearTimeout(this._placeSearchTimer);
+    const q = value.trim();
+    if (!q || !this.hass) {
+      this._placeSuggestions = [];
+      this._placeSuggestOpen = false;
+      return;
+    }
+    this._placeSearchTimer = setTimeout(() => {
+      void listPlaces(this.hass, { search: q, limit: 8 }).then((res) => {
+        this._placeSuggestions = res.places;
+        this._placeSuggestOpen = res.places.length > 0;
+      });
+    }, 250);
+  }
 
   private _sexBadge(sex: string) {
     const cls =
@@ -1125,7 +1152,12 @@ export class FamilyTreePanel extends LitElement {
             plugins: {
               legend: {
                 display: type === "doughnut",
-                labels: { color },
+                position: "bottom",
+                labels: {
+                  color,
+                  boxWidth: 12,
+                  padding: 8,
+                },
               },
             },
             scales:
@@ -1153,7 +1185,7 @@ export class FamilyTreePanel extends LitElement {
     make(
       "ft-places",
       "doughnut",
-      this._stats.places_of_birth.labels,
+      this._stats.places_of_birth.labels.map((l) => this._truncatePlaceLabel(l)),
       this._stats.places_of_birth.values,
     );
     return expected > 0 && this._charts.length === expected;
@@ -1294,15 +1326,31 @@ export class FamilyTreePanel extends LitElement {
         </div>
         <div class="block">
           <h3>${this._tt("upcoming_anniversaries")}</h3>
+          <p class="muted anniversaries-hint">${this._tt("anniversaries_hint")}</p>
           <ul class="plain">
             ${anniversaries.length
-              ? anniversaries.slice(0, 8).map(
-                  (u) => html`<li>
-                    ${((u.names as string[]) || []).join(" & ")}
-                    <span class="muted">${daysUntilLabel(Number(u.days_until), this._tt("days"))}</span>
-                  </li>`,
-                )
-              : html`<li class="muted">—</li>`}
+              ? anniversaries.slice(0, 8).map((u) => {
+                  const names = (u.names as string[]) || [];
+                  const label = names.join(" & ");
+                  const years = u.years != null ? this._tt("anniversary_years").replace("%s", String(u.years)) : "";
+                  const match = names[0]
+                    ? this._people.find(
+                        (p) =>
+                          personDisplayName(p).toLowerCase() === names[0].toLowerCase(),
+                      )
+                    : undefined;
+                  return html`<li>
+                    ${match
+                      ? html`<button class="linkish" @click=${() => this._openPerson(match.id)}>
+                          ${label}
+                        </button>`
+                      : html`<span>${label}</span>`}
+                    <span class="muted">
+                      ${years ? `${years} · ` : ""}${daysUntilLabel(Number(u.days_until), this._tt("days"))}
+                    </span>
+                  </li>`;
+                })
+              : html`<li class="muted">${this._tt("no_anniversaries")}</li>`}
           </ul>
         </div>
       </section>`}
@@ -1567,7 +1615,7 @@ export class FamilyTreePanel extends LitElement {
         <button type="button" class="person-card" @click=${() => this._openPerson(p.id)}>
           <div class="person-card-head">
             <div class="person-card-title">
-              ${personDisplayName(p)}
+              ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
             </div>
             ${this._lineageStar(p.id, personDisplayName(p))}
           </div>
@@ -1700,7 +1748,7 @@ export class FamilyTreePanel extends LitElement {
     return html`
       <button type="button" class="person-card" @click=${() => id && this._openPerson(id)}>
         <div class="person-card-head">
-          <div class="person-card-title">${title}</div>
+          <div class="person-card-title">${this._deceasedIcon(isLiving)} ${title}</div>
           ${id ? this._lineageStar(id, title) : nothing}
         </div>
         ${formal && formal !== title
@@ -2269,7 +2317,7 @@ export class FamilyTreePanel extends LitElement {
           <span>${personDisplayName(p)}</span>
         </nav>
         <h2>
-          ${personDisplayName(p)}
+          ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
           ${this._lineageStar(p.id, personDisplayName(p))}
         </h2>
       </div>
@@ -2761,16 +2809,41 @@ export class FamilyTreePanel extends LitElement {
             ${advancedDate ? this._tt("date_simple") : this._tt("date_advanced")}
           </button>
         </div>
-        <label
+        <label class="place-field"
           >${this._fieldLabel(this._tt("place"))}
           <input
             .value=${this._eventForm.place || ""}
-            @input=${(e: Event) =>
-              (this._eventForm = {
-                ...this._eventForm,
-                place: (e.target as HTMLInputElement).value,
-              })}
+            @input=${(e: Event) => {
+              const value = (e.target as HTMLInputElement).value;
+              this._eventForm = { ...this._eventForm, place: value };
+              this._schedulePlaceSearch(value);
+            }}
+            @focus=${() => {
+              if (this._placeSuggestions.length) this._placeSuggestOpen = true;
+            }}
+            @blur=${() => {
+              setTimeout(() => {
+                this._placeSuggestOpen = false;
+              }, 150);
+            }}
           />
+          ${this._placeSuggestOpen && this._placeSuggestions.length
+            ? html`<ul class="place-suggest">
+                ${this._placeSuggestions.map(
+                  (pl) => html`<li>
+                    <button
+                      type="button"
+                      @mousedown=${() => {
+                        this._eventForm = { ...this._eventForm, place: pl.name };
+                        this._placeSuggestOpen = false;
+                      }}
+                    >
+                      ${pl.name}
+                    </button>
+                  </li>`,
+                )}
+              </ul>`
+            : nothing}
         </label>
         <label
           >${this._tt("description")}
@@ -3322,6 +3395,12 @@ export class FamilyTreePanel extends LitElement {
     .dialog textarea.invalid {
       border-color: var(--error-color);
     }
+    .deceased-icon {
+      color: var(--secondary-text-color);
+      display: inline-flex;
+      vertical-align: middle;
+    }
+    .deceased-icon svg { width: 14px; height: 14px; }
     .person-card-head {
       display: flex;
       align-items: center;
@@ -3361,6 +3440,34 @@ export class FamilyTreePanel extends LitElement {
       align-items: flex-start;
       gap: 8px;
     }
+    .place-field { position: relative; }
+    .place-suggest {
+      position: absolute;
+      z-index: 2;
+      left: 0;
+      right: 0;
+      margin: 2px 0 0;
+      padding: 0;
+      list-style: none;
+      background: var(--card-background-color, #fff);
+      border: 1px solid var(--divider-color);
+      border-radius: var(--ha-border-radius-md, 8px);
+      box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0,0,0,0.12));
+      max-height: 180px;
+      overflow: auto;
+    }
+    .place-suggest button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 8px 12px;
+      border: none;
+      background: none;
+      font: inherit;
+      cursor: pointer;
+    }
+    .place-suggest button:hover { background: var(--secondary-background-color); }
+    .anniversaries-hint { margin: 0 0 8px; font-size: 0.85rem; }
     .union-tabs .gen + .gen { margin-top: 16px; }
     .md-btn {
       display: inline-flex;
@@ -3636,7 +3743,13 @@ export class FamilyTreePanel extends LitElement {
     .me-create { margin-top: 8px; }
     @media (max-width: 720px) {
       .shell { padding: 12px 16px 40px; }
-      .stats-row { grid-template-columns: 1fr; }
+      .stats-row {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .stat { padding: 8px 6px; }
+      .stat-n { font-size: 1.15rem; }
+      .stat-label { font-size: 0.7rem; }
       .kv { grid-template-columns: 1fr; }
       .row2 { grid-template-columns: 1fr; }
       .subtabs-actions { width: 100%; justify-content: flex-end; }
