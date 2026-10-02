@@ -58,6 +58,7 @@ class Repository:
     def __init__(self, db: Database) -> None:
         self.db = db
         self._listeners: list[Listener] = []
+        self._batch_depth = 0
 
     def add_listener(self, listener: Listener) -> Callable[[], None]:
         self._listeners.append(listener)
@@ -73,6 +74,9 @@ class Repository:
             listener()
 
     def _mutate(self, fn: Callable[[], Any]) -> Any:
+        # Nested writes inside import_batch reuse the outer transaction.
+        if getattr(self, "_batch_depth", 0) > 0:
+            return fn()
         with self.db.transaction():
             result = fn()
             self.db.bump_revision()
@@ -881,4 +885,12 @@ class Repository:
 
     def import_batch(self, fn: Callable[[], Any]) -> Any:
         """Run multiple writes in one transaction + single revision bump."""
-        return self._mutate(fn)
+        self._batch_depth = getattr(self, "_batch_depth", 0) + 1
+        try:
+            with self.db.transaction():
+                result = fn()
+                self.db.bump_revision()
+        finally:
+            self._batch_depth -= 1
+        self._notify()
+        return result
