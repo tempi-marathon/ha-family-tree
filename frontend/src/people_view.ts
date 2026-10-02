@@ -1,13 +1,14 @@
 /** Pure people list filtering / sorting helpers. */
 
 import type { LifeEventDto, PersonDto } from "./api";
-import type { PanelSort } from "./panel_view_state";
+import type { PanelSort, SortDir } from "./panel_view_state";
 
 export interface PeopleViewFilters {
   search: string;
   filterLiving: string;
   filterSex: string;
   sort: PanelSort;
+  sortDir?: SortDir;
   familyShortcut: string;
   filterPlace: string;
   dateFrom: string;
@@ -117,23 +118,58 @@ export function filterAndSortPeople(
     return hay.includes(search);
   });
 
+  const dir = filters.sortDir === "desc" ? -1 : 1;
   list = [...list].sort((a, b) => {
-    if (filters.sort === "name") {
-      return personDisplayName(a).localeCompare(personDisplayName(b), undefined, {
-        sensitivity: "base",
-      });
-    }
-    if (filters.sort === "updated") {
-      return (b.updated_at || "").localeCompare(a.updated_at || "");
-    }
-    // surname (Dutch: bare surname, then given)
-    const sa = (a.surname || "").toLowerCase();
-    const sb = (b.surname || "").toLowerCase();
-    if (sa !== sb) return sa.localeCompare(sb);
-    return (a.given_names || "").localeCompare(b.given_names || "", undefined, {
-      sensitivity: "base",
-    });
+    const primary = comparePeople(a, b, filters.sort, dir);
+    return primary !== 0 ? primary : compareSurname(a, b);
   });
 
   return list;
+}
+
+function text(a: string | null | undefined, b: string | null | undefined): number {
+  return (a || "").localeCompare(b || "", undefined, { sensitivity: "base" });
+}
+
+function compareSurname(a: PersonDto, b: PersonDto): number {
+  // Dutch convention: bare surname, then given names.
+  return text(a.surname, b.surname) || text(a.given_names, b.given_names);
+}
+
+/** Missing values always sort last, whatever the direction. */
+function withBlanksLast<T>(
+  a: T | null | undefined,
+  b: T | null | undefined,
+  cmp: (x: T, y: T) => number,
+  dir: number,
+): number {
+  const aBlank = a === null || a === undefined || a === "";
+  const bBlank = b === null || b === undefined || b === "";
+  if (aBlank && bBlank) return 0;
+  if (aBlank) return 1;
+  if (bBlank) return -1;
+  return cmp(a as T, b as T) * dir;
+}
+
+function comparePeople(a: PersonDto, b: PersonDto, sort: PanelSort, dir: number): number {
+  switch (sort) {
+    case "name":
+      return text(personDisplayName(a), personDisplayName(b)) * dir;
+    case "updated":
+      return (b.updated_at || "").localeCompare(a.updated_at || "") * dir;
+    case "birth":
+      return withBlanksLast(a.birth?.sort_date, b.birth?.sort_date, (x, y) => x.localeCompare(y), dir);
+    case "death":
+      return withBlanksLast(a.death?.sort_date, b.death?.sort_date, (x, y) => x.localeCompare(y), dir);
+    case "sex":
+      return text(a.sex, b.sex) * dir;
+    case "father":
+      return withBlanksLast(a.father?.name, b.father?.name, text, dir);
+    case "mother":
+      return withBlanksLast(a.mother?.name, b.mother?.name, text, dir);
+    case "children":
+      return ((a.children_count ?? 0) - (b.children_count ?? 0)) * dir;
+    default:
+      return compareSurname(a, b) * dir;
+  }
 }

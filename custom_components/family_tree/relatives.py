@@ -176,6 +176,10 @@ def tree_for(repo: Repository, person_id: str) -> dict[str, Any] | None:
         grandparents[parent["id"]] = parents_of(repo, parent["id"])
 
     siblings = siblings_of(repo, person_id)
+    children = children_of(repo, person_id)
+    partners = partners_of(repo, person_id)
+    _assign_children_to_unions(repo, partners, children)
+    assigned = {c["id"] for union in partners for c in union["children"]}
     return {
         "person": {
             **_person_summary(repo, person),
@@ -183,10 +187,36 @@ def tree_for(repo: Repository, person_id: str) -> dict[str, Any] | None:
         },
         "parents": parent_links,
         "grandparents": grandparents,
-        "partners": partners_of(repo, person_id),
-        "children": children_of(repo, person_id),
+        "partners": partners,
+        "children": children,
+        "children_without_union": [c for c in children if c["id"] not in assigned],
         "siblings": siblings,
     }
+
+
+def _assign_children_to_unions(
+    repo: Repository,
+    unions: list[dict[str, Any]],
+    children: list[dict[str, Any]],
+) -> None:
+    """Nest each child under its union (explicit union_id, else shared co-parent)."""
+    co_parents: dict[str, set[str]] = {}
+    for child in children:
+        if not child.get("union_id"):
+            co_parents[child["id"]] = {
+                link.parent_id for link in repo.list_parents(child["id"])
+            }
+    for union in unions:
+        partner_ids = {p["id"] for p in union["partners"]}
+        union["children"] = [
+            child
+            for child in children
+            if child.get("union_id") == union["union_id"]
+            or (
+                not child.get("union_id")
+                and partner_ids & co_parents.get(child["id"], set())
+            )
+        ]
 
 
 def living_persons(db: Database) -> list[Person]:

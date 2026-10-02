@@ -15,6 +15,7 @@ from .models import (
     ParentChild,
     Person,
     Place,
+    Sex,
     Source,
     SubjectType,
     Union,
@@ -22,6 +23,7 @@ from .models import (
     UserLink,
     new_id,
 )
+from .names import display_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +32,56 @@ Listener = Callable[[], None]
 
 def _now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+EVENT_TYPE_ORDER: tuple[str, ...] = (
+    "birth",
+    "baptism",
+    "marriage",
+    "partnership",
+    "residence",
+    "occupation",
+    "divorce",
+    "death",
+    "burial",
+)
+
+_EVENT_ORDER_SQL = (
+    "CASE type "
+    + " ".join(f"WHEN '{t}' THEN {i}" for i, t in enumerate(EVENT_TYPE_ORDER))
+    + f" ELSE {len(EVENT_TYPE_ORDER)} END"
+)
+
+
+def event_sort_key(event: dict[str, Any]) -> tuple[int, str, int]:
+    """Chronological order: dated first, then sort_date, then life-course type order."""
+    sort_date = event.get("sort_date") or ""
+    event_type = str(event.get("type") or "")
+    type_rank = (
+        EVENT_TYPE_ORDER.index(event_type)
+        if event_type in EVENT_TYPE_ORDER
+        else len(EVENT_TYPE_ORDER)
+    )
+    return (0 if sort_date else 1, sort_date, type_rank)
+
+
+def vital_summary(life_events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pick birth (fallback baptism) and death (fallback burial) from life events."""
+
+    def _first(*types: str) -> dict[str, Any] | None:
+        for event_type in types:
+            for event in life_events:
+                if event.get("type") == event_type:
+                    return {
+                        "type": event_type,
+                        "date_text": event.get("date_text") or "",
+                        "date_qualifier": event.get("date_qualifier") or "exact",
+                        "sort_date": event.get("sort_date"),
+                        "place_name": event.get("place_name"),
+                    }
+        return None
+
+    return {"birth": _first("birth", "baptism"), "death": _first("death", "burial")}
 
 
 def _row_person(row: Any) -> Person:
@@ -146,12 +198,14 @@ class Repository:
 
         person_rows = self.db.fetchall(
             f"SELECT e.subject_id AS person_id, e.type, e.sort_date, e.place_id, "
+            f"e.date_text, e.date_qualifier, "
             f"pl.name AS place_name, pl.admin1, pl.country "
             f"FROM events e "
             f"LEFT JOIN places pl ON pl.id = e.place_id AND pl.deleted_at IS NULL "
             f"WHERE e.deleted_at IS NULL AND e.subject_type = 'person' "
-            f"AND e.type IN ('birth', 'death') "
-            f"AND e.subject_id IN ({placeholders})",
+            f"AND e.type IN ('birth', 'baptism', 'death', 'burial') "
+            f"AND e.subject_id IN ({placeholders}) "
+            f"ORDER BY e.sort_date IS NULL, e.sort_date",
             person_ids,
         )
         for row in person_rows:
@@ -162,6 +216,8 @@ class Repository:
                 {
                     "type": str(row["type"]),
                     "sort_date": row["sort_date"],
+                    "date_text": row["date_text"] or "",
+                    "date_qualifier": row["date_qualifier"] or "exact",
                     "place_id": row["place_id"],
                     "place_name": _place_name(
                         row["place_name"], row["admin1"], row["country"]
@@ -171,6 +227,7 @@ class Repository:
 
         marriage_rows = self.db.fetchall(
             f"SELECT up.person_id AS person_id, e.type, e.sort_date, e.place_id, "
+            f"e.date_text, e.date_qualifier, "
             f"pl.name AS place_name, pl.admin1, pl.country "
             f"FROM events e "
             f"INNER JOIN union_partners up ON up.union_id = e.subject_id "
@@ -188,6 +245,8 @@ class Repository:
                 {
                     "type": "marriage",
                     "sort_date": row["sort_date"],
+                    "date_text": row["date_text"] or "",
+                    "date_qualifier": row["date_qualifier"] or "exact",
                     "place_id": row["place_id"],
                     "place_name": _place_name(
                         row["place_name"], row["admin1"], row["country"]
@@ -195,6 +254,70 @@ class Repository:
                 }
             )
 
+        return out
+
+    def family_summaries_for_persons(
+        self, person_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Batch father/mother and children count for the people overview."""
+        if not person_ids:
+            return {}
+        out: dict[str, dict[str, Any]] = {
+            pid: {"father": None, "mother": None, "children_count": 0}
+            for pid in person_ids
+        }
+        placeholders = ",".join("?" * len(person_ids))
+
+        parent_rows = self.db.fetchall(
+            f"SELECT pc.child_id, pc.type AS link_type, p.id, p.given_names, "
+            f"p.call_name, p.surname_prefix, p.surname, p.sex "
+            f"FROM parent_child pc "
+            f"JOIN persons p ON p.id = pc.parent_id AND p.deleted_at IS NULL "
+            f"WHERE pc.child_id IN ({placeholders}) "
+            f"ORDER BY CASE WHEN pc.type = 'biological' THEN 0 ELSE 1 END",
+            person_ids,
+        )
+        undetermined: dict[str, list[dict[str, str]]] = {}
+        for row in parent_rows:
+            pid = str(row["child_id"])
+            summary = out.get(pid)
+            if summary is None:
+                continue
+            parent = Person(
+                id=row["id"],
+                given_names=row["given_names"] or "",
+                call_name=row["call_name"] or "",
+                surname_prefix=row["surname_prefix"] or "",
+                surname=row["surname"] or "",
+            )
+            ref = {"id": parent.id, "name": display_name(parent)}
+            if row["sex"] == Sex.MALE.value:
+                if summary["father"] is None:
+                    summary["father"] = ref
+            elif row["sex"] == Sex.FEMALE.value:
+                if summary["mother"] is None:
+                    summary["mother"] = ref
+            else:
+                undetermined.setdefault(pid, []).append(ref)
+        for pid, refs in undetermined.items():
+            summary = out[pid]
+            for ref in refs:
+                if summary["father"] is None:
+                    summary["father"] = ref
+                elif summary["mother"] is None:
+                    summary["mother"] = ref
+
+        child_rows = self.db.fetchall(
+            f"SELECT pc.parent_id, COUNT(DISTINCT pc.child_id) AS c "
+            f"FROM parent_child pc "
+            f"JOIN persons ch ON ch.id = pc.child_id AND ch.deleted_at IS NULL "
+            f"WHERE pc.parent_id IN ({placeholders}) GROUP BY pc.parent_id",
+            person_ids,
+        )
+        for row in child_rows:
+            pid = str(row["parent_id"])
+            if pid in out:
+                out[pid]["children_count"] = int(row["c"])
         return out
 
     def get_person(self, person_id: str, *, include_deleted: bool = False) -> Person | None:
@@ -581,10 +704,26 @@ class Repository:
     ) -> list[Event]:
         rows = self.db.fetchall(
             "SELECT * FROM events WHERE subject_type=? AND subject_id=? "
-            "AND deleted_at IS NULL ORDER BY sort_date IS NULL, sort_date, type",
+            "AND deleted_at IS NULL "
+            f"ORDER BY sort_date IS NULL, sort_date, {_EVENT_ORDER_SQL}",
             (subject_type.value, subject_id),
         )
         return [_row_event(r) for r in rows]
+
+    def has_event(
+        self,
+        subject_type: SubjectType,
+        subject_id: str,
+        event_type: str,
+        *,
+        exclude_id: str | None = None,
+    ) -> bool:
+        row = self.db.fetchone(
+            "SELECT 1 FROM events WHERE subject_type=? AND subject_id=? AND type=? "
+            "AND deleted_at IS NULL AND id != ? LIMIT 1",
+            (subject_type.value, subject_id, event_type, exclude_id or ""),
+        )
+        return row is not None
 
     def list_events_by_type(self, event_type: str) -> list[Event]:
         rows = self.db.fetchall(
@@ -845,6 +984,25 @@ class Repository:
             return link
 
         return self._mutate(_do)
+
+    def clear_user_link(self, ha_user_id: str) -> bool:
+        def _do() -> bool:
+            cur = self.db.execute(
+                "DELETE FROM user_links WHERE ha_user_id=?", (ha_user_id,)
+            )
+            return cur.rowcount > 0
+
+        return self._mutate(_do)
+
+    def user_link_for_person(self, person_id: str) -> UserLink | None:
+        row = self.db.fetchone(
+            "SELECT * FROM user_links WHERE person_id=? LIMIT 1", (person_id,)
+        )
+        if not row:
+            return None
+        return UserLink(
+            id=row["id"], ha_user_id=row["ha_user_id"], person_id=row["person_id"]
+        )
 
     def get_user_link(self, ha_user_id: str) -> UserLink | None:
         row = self.db.fetchone(

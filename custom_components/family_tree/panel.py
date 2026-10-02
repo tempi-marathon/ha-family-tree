@@ -15,6 +15,7 @@ from .const import (
     PANEL_FILENAME,
     PANEL_ICON,
     PANEL_MODULE_URL,
+    PANEL_SOURCEMAP_URL,
     PANEL_TITLE,
     PANEL_URL_PATH,
     PANEL_WEBCOMPONENT,
@@ -58,6 +59,15 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
             cache_headers=False,
         )
     ]
+    sourcemap_path = DIST_DIR / f"{PANEL_FILENAME}.map"
+    if sourcemap_path.is_file():
+        static_paths.append(
+            StaticPathConfig(
+                url_path=PANEL_SOURCEMAP_URL,
+                path=str(sourcemap_path),
+                cache_headers=False,
+            )
+        )
     if BRAND_DIR.is_dir():
         static_paths.append(
             StaticPathConfig(

@@ -1,6 +1,16 @@
 /** Persist Family Tree panel search / filters across remounts. */
 
-export type PanelSort = "name" | "surname" | "updated";
+export type PanelSort =
+  | "name"
+  | "surname"
+  | "updated"
+  | "birth"
+  | "death"
+  | "sex"
+  | "father"
+  | "mother"
+  | "children";
+export type SortDir = "asc" | "desc";
 export type PanelView = "dashboard" | "people" | "trash" | "settings" | "person";
 
 export interface PanelViewState {
@@ -8,6 +18,7 @@ export interface PanelViewState {
   filterLiving: string;
   filterSex: string;
   sort: PanelSort;
+  sortDir: SortDir;
   view: PanelView;
   familyShortcut: string;
   filterPlace: string;
@@ -21,6 +32,7 @@ export const DEFAULT_PANEL_VIEW: PanelViewState = {
   filterLiving: "all",
   filterSex: "",
   sort: "surname",
+  sortDir: "asc",
   view: "dashboard",
   familyShortcut: "",
   filterPlace: "",
@@ -30,7 +42,17 @@ export const DEFAULT_PANEL_VIEW: PanelViewState = {
 };
 
 const STORAGE_PREFIX = "family_tree.panel.view";
-const SORTS: ReadonlySet<string> = new Set(["name", "surname", "updated"]);
+const SORTS: ReadonlySet<string> = new Set([
+  "name",
+  "surname",
+  "updated",
+  "birth",
+  "death",
+  "sex",
+  "father",
+  "mother",
+  "children",
+]);
 const VIEWS: ReadonlySet<string> = new Set([
   "dashboard",
   "people",
@@ -63,6 +85,7 @@ export function loadPanelViewState(
       filterLiving: asString(parsed.filterLiving, "all"),
       filterSex: asString(parsed.filterSex, ""),
       sort: (SORTS.has(sort) ? sort : "surname") as PanelSort,
+      sortDir: parsed.sortDir === "desc" ? "desc" : "asc",
       view: (VIEWS.has(view) ? view : "dashboard") as PanelView,
       familyShortcut: asString(parsed.familyShortcut, ""),
       filterPlace: asString(parsed.filterPlace, ""),
