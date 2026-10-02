@@ -214,8 +214,21 @@ async def ws_persons_get(
         events.extend(union_events_for_person(coordinator.repo, person.id))
         events.sort(key=event_sort_key)
         citations = coordinator.repo.list_citations(SubjectType.PERSON, person.id)
+        life_events = [
+            {
+                "type": e.type,
+                "date_text": e.date_text,
+                "sort_date": e.sort_date,
+                "place_id": e.place_id,
+            }
+            for e in coordinator.repo.list_events(SubjectType.PERSON, person.id)
+        ]
         return {
-            "person": {**person.to_dict(), "display_name": display_name(person)},
+            "person": {
+                **person.to_dict(),
+                "display_name": display_name(person),
+                **vital_summary(life_events),
+            },
             "events": events,
             "citations": citations,
             "tree": tree_for(coordinator.repo, person.id),

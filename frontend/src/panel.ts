@@ -98,6 +98,10 @@ const MDI_CHEVRON_DOWN =
   "M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z";
 const MDI_CHEVRON_RIGHT =
   "M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z";
+  "M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5A2,2 0 0,0 17,3Z";
+
+const BRAND_LOGO_URL = "/api/family_tree/brand/logo.png";
+const BRAND_LOGO_DARK_URL = "/api/family_tree/brand/dark_logo.png";
 
 type PersonTab = "details" | "tree" | "sources";
 type DialogMode = "person" | "event" | "import" | "siblings";
@@ -140,29 +144,10 @@ function icon(path: string) {
   return html`<svg class="mdi" viewBox="0 0 24 24" aria-hidden="true"><path d=${path}></path></svg>`;
 }
 
-/** Circular emblem: trunk + canopy of head-circles (family tree). */
-function brandMark() {
-  return html`
-    <svg class="brand-logo" viewBox="0 0 40 40" aria-hidden="true">
-      <circle class="brand-logo-badge" cx="20" cy="20" r="18.5" />
-      <path
-        class="brand-logo-trunk"
-        d="M18.4 31.6h3.2l-.4-8.2c1.4-1.2 3.8-3.2 5.6-4.4l-.9-1.3c-1.5 1-3.5 2.6-4.7 3.8V14.8h-1.4v6.7c-1.2-1.2-3.2-2.8-4.7-3.8l-.9 1.3c1.8 1.2 4.2 3.2 5.6 4.4l-.4 8.2z"
-        fill="currentColor"
-      />
-      <circle cx="20" cy="10.8" r="3.15" fill="currentColor" />
-      <circle cx="12.8" cy="13.4" r="2.55" fill="currentColor" />
-      <circle cx="27.2" cy="13.4" r="2.55" fill="currentColor" />
-      <circle cx="9.2" cy="18.4" r="2.2" fill="currentColor" />
-      <circle cx="30.8" cy="18.4" r="2.2" fill="currentColor" />
-      <circle cx="15.4" cy="17.2" r="2.1" fill="currentColor" />
-      <circle cx="24.6" cy="17.2" r="2.1" fill="currentColor" />
-      <circle cx="20" cy="15.6" r="2.35" fill="currentColor" />
-      <circle cx="12.2" cy="22.6" r="1.75" fill="currentColor" />
-      <circle cx="27.8" cy="22.6" r="1.75" fill="currentColor" />
-      <circle cx="20" cy="21.4" r="1.9" fill="currentColor" />
-    </svg>
-  `;
+function brandLogo(hass?: HomeAssistant) {
+  const dark = Boolean(hass?.themes?.darkMode);
+  const src = dark ? BRAND_LOGO_DARK_URL : BRAND_LOGO_URL;
+  return html`<img class="brand-logo" src=${src} alt="" width="40" height="40" />`;
 }
 
 function mdButton(
@@ -237,6 +222,8 @@ export class FamilyTreePanel extends LitElement {
   @state() private _meQuery = "";
   @state() private _meCreateOpen = false;
   @state() private _meForm: Record<string, string> = {};
+  @state() private _fieldErrors: Record<string, string> = {};
+  @state() private _importFileName = "";
 
   private _unsub: (() => void) | null = null;
   private _mql: MediaQueryList | null = null;
@@ -459,9 +446,18 @@ export class FamilyTreePanel extends LitElement {
       this._view = "person";
       this._personTab = "details";
       this._persistViewState();
+      this._scrollMainToTop();
     } catch (err) {
       this._error = formatHassError(err);
     }
+  }
+
+  private _scrollMainToTop() {
+    requestAnimationFrame(() => {
+      const main = this.renderRoot.querySelector(".main");
+      main?.scrollTo?.({ top: 0, behavior: "instant" as ScrollBehavior });
+      window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+    });
   }
 
   private _openCreate(clearRelation = true) {
@@ -469,6 +465,7 @@ export class FamilyTreePanel extends LitElement {
     this._editing = null;
     this._dialogMode = "person";
     this._error = "";
+    this._fieldErrors = {};
     this._form = {
       given_names: "",
       call_name: "",
@@ -485,6 +482,7 @@ export class FamilyTreePanel extends LitElement {
     this._editing = person;
     this._dialogMode = "person";
     this._error = "";
+    this._fieldErrors = {};
     this._form = {
       given_names: person.given_names || "",
       call_name: person.call_name || "",
@@ -550,26 +548,107 @@ export class FamilyTreePanel extends LitElement {
     return this._lineage?.relatives?.[personId] ?? null;
   }
 
-  private _lineageTooltip(personId: string): string {
+  private _ordinal(n: number): string {
+    const lang = (this.hass?.language || "en").toLowerCase();
+    if (lang.startsWith("nl")) {
+      return `${n}e`;
+    }
+    if (n % 10 === 1 && n % 100 !== 11) return `${n}st`;
+    if (n % 10 === 2 && n % 100 !== 12) return `${n}nd`;
+    if (n % 10 === 3 && n % 100 !== 13) return `${n}rd`;
+    return `${n}th`;
+  }
+
+  private _personNameById(personId: string): string {
+    const fromList = this._people.find((p) => p.id === personId);
+    if (fromList) return personDisplayName(fromList);
+    if (this._detail?.person.id === personId) {
+      return personDisplayName(this._detail.person);
+    }
+    return personId;
+  }
+
+  private _lineageTooltip(personId: string, personName?: string): string {
     const rel = this._lineageRel(personId);
     const anchor = this._lineage?.person_name;
     if (!rel || !anchor) return "";
-    const gen = rel.generation;
-    const ord =
-      gen === 1 ? "1st" : gen === 2 ? "2nd" : gen === 3 ? "3rd" : `${gen}th`;
+    const name = personName || this._personNameById(personId);
+    const ord = this._ordinal(rel.generation);
     const kind =
       rel.type === "ancestor"
         ? this._tt("lineage_ancestor")
         : this._tt("lineage_descendant");
-    return `${ord} ${kind} ${this._tt("lineage_of")} ${anchor}`;
+    const args = [name, ord, kind, anchor];
+    let i = 0;
+    return this._tt("lineage_tooltip").replace(/%s/g, () => args[i++] || "");
   }
 
-  private _lineageStar(personId: string) {
+  private _lineageStar(personId: string, personName?: string) {
     const rel = this._lineageRel(personId);
     if (!rel) return nothing;
-    return html`<span class="lineage-star" title=${this._lineageTooltip(personId)}
-      >${icon(MDI_STAR)}</span>`;
+    return html`<span
+      class="lineage-star"
+      title=${this._lineageTooltip(personId, personName)}
+      >${icon(MDI_STAR)}</span
+    >`;
   }
+
+
+
+  private _childrenCountLabel(count: number): string {
+    if (count === 1) return `1 ${this._tt("child")}`;
+    return `${count} ${this._tt("children").toLowerCase()}`;
+  }
+
+  private _fieldLabel(text: string, required = false) {
+    return html`<span class="field-label"
+      >${text}${required
+        ? html`<span class="req" aria-hidden="true">*</span>`
+        : nothing}</span
+    >`;
+  }
+
+  private _fieldError(key: string) {
+    const msg = this._fieldErrors[key];
+    return msg ? html`<div class="field-error">${msg}</div>` : nothing;
+  }
+
+  private _fieldInvalid(key: string): boolean {
+    return Boolean(this._fieldErrors[key]);
+  }
+
+  private _onPersonField(key: string, e: Event) {
+    const value = (e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement)
+      .value;
+    this._form = { ...this._form, [key]: value };
+    if (this._fieldErrors[key]) {
+      const next = { ...this._fieldErrors };
+      delete next[key];
+      this._fieldErrors = next;
+    }
+  }
+
+  private _validatePersonForm(): Record<string, string> {
+    const errors: Record<string, string> = {};
+    if (!(this._form.given_names || "").trim()) {
+      errors.given_names = this._tt("field_required");
+    }
+    return errors;
+  }
+
+  private _parentsCell(p: PersonDto) {
+    const parts: unknown[] = [];
+    if (p.father) parts.push(this._personLink(p.father));
+    if (p.mother) {
+      if (parts.length) parts.push(html`<span class="muted"> · </span>`);
+      parts.push(this._personLink(p.mother));
+    }
+    return parts.length ? parts : html`<span class="muted">—</span>`;
+  }
+
+
+
+
 
   private _sexBadge(sex: string) {
     const cls =
@@ -654,11 +733,10 @@ export class FamilyTreePanel extends LitElement {
 
   private async _savePerson() {
     if (!this.hass || !this._canWrite()) return;
+    const errors = this._validatePersonForm();
+    this._fieldErrors = errors;
+    if (Object.keys(errors).length) return;
     const given = (this._form.given_names || "").trim();
-    if (!given) {
-      this._error = this._tt("field_required");
-      return;
-    }
     this._saving = true;
     this._error = "";
     try {
@@ -705,6 +783,8 @@ export class FamilyTreePanel extends LitElement {
 
   private async _deleteCurrent() {
     if (!this.hass || !this._detail || !this._canWrite()) return;
+    const name = personDisplayName(this._detail.person);
+    if (!confirm(this._tt("confirm_delete_person").replace("%s", name))) return;
     try {
       await deletePerson(this.hass, this._detail.person.id);
       this._detail = null;
@@ -727,6 +807,9 @@ export class FamilyTreePanel extends LitElement {
 
   private async _purge(id: string) {
     if (!this.hass || !this._canWrite()) return;
+    const person = this._people.find((p) => p.id === id);
+    const name = person ? personDisplayName(person) : id;
+    if (!confirm(this._tt("confirm_purge_person").replace("%s", name))) return;
     try {
       await purgePerson(this.hass, id);
       await this._refreshAll();
@@ -831,6 +914,7 @@ export class FamilyTreePanel extends LitElement {
   private async _previewGedcom(file: File) {
     if (!this.hass || !this._canWrite()) return;
     this._importFile = file;
+    this._importFileName = file.name;
     this._importPhase = "preview";
     this._importReport = null;
     this._importStatus = this._tt("loading");
@@ -868,6 +952,7 @@ export class FamilyTreePanel extends LitElement {
 
   private async _importGedcom(file: File) {
     if (!this.hass || !this._canWrite()) return;
+    if (!this._importFileName) this._importFileName = file.name;
     this._importPhase = "importing";
     this._importStatus = this._tt("importing");
     this._dialogMode = "import";
@@ -910,18 +995,18 @@ export class FamilyTreePanel extends LitElement {
   private _onGedcomFileChange(e: Event) {
     const file = (e.target as HTMLInputElement).files?.[0];
     (e.target as HTMLInputElement).value = "";
-    if (file) void this._importGedcom(file);
+    if (file) void this._previewGedcom(file);
   }
 
   private _renderEmptyCta() {
     if (!this._canWrite()) {
       return html`<div class="empty-state">
-        ${brandMark()}
+        ${brandLogo(this.hass)}
         <p>${this._tt("no_people")}</p>
       </div>`;
     }
     return html`<div class="empty-state">
-      ${brandMark()}
+      ${brandLogo(this.hass)}
       <p>${this._tt("empty_cta_hint")}</p>
       <div class="empty-actions">
         ${mdButton(this._tt("add_person"), {
@@ -1089,7 +1174,7 @@ export class FamilyTreePanel extends LitElement {
               </button>`
             : nothing}
           <div class="brand">
-            <span class="brand-mark">${brandMark()}</span>
+            <span class="brand-mark">${brandLogo(this.hass)}</span>
             <span class="brand-text">${this._tt("brand")}</span>
           </div>
           <nav class="tabs">
@@ -1443,8 +1528,7 @@ export class FamilyTreePanel extends LitElement {
                     ${this._sortTh(this._tt("col_birth"), "birth")}
                     ${this._sortTh(this._tt("col_death"), "death")}
                     ${this._sortTh(this._tt("sex"), "sex")}
-                    ${this._sortTh(this._tt("father"), "father")}
-                    ${this._sortTh(this._tt("mother"), "mother")}
+                    <th>${this._tt("col_parents")}</th>
                     ${this._sortTh(this._tt("col_children"), "children")}
                     <th>${this._tt("col_lineage")}</th>
                     <th></th>
@@ -1462,22 +1546,37 @@ export class FamilyTreePanel extends LitElement {
     const birth = formatEventDate(p.birth, lang);
     const death = formatDeathCell(p.birth, p.death, p.is_living, lang);
     const parents = [p.father?.name, p.mother?.name].filter(Boolean).join(" · ");
+    const isTrash = this._view === "trash";
     return html`
-      <button type="button" class="person-card" @click=${() => this._openPerson(p.id)}>
-        <div class="person-card-head">
-          <div class="person-card-title">${personDisplayName(p)}</div>
-          ${this._lineageStar(p.id)}
-        </div>
-        <div class="person-card-meta">${this._sexBadge(p.sex)}</div>
-        ${birth ? html`<div class="person-card-meta">${birth}</div>` : nothing}
-        ${death ? html`<div class="person-card-meta">${death}</div>` : nothing}
-        ${parents ? html`<div class="person-card-meta">${parents}</div>` : nothing}
-        ${(p.children_count ?? 0) > 0
-          ? html`<div class="person-card-footer">
-              ${p.children_count} ${this._tt("children").toLowerCase()}
+      <div class="person-card-wrap">
+        <button type="button" class="person-card" @click=${() => this._openPerson(p.id)}>
+          <div class="person-card-head">
+            <div class="person-card-title">
+              ${personDisplayName(p)}
+            </div>
+            ${this._lineageStar(p.id, personDisplayName(p))}
+          </div>
+          <div class="person-card-meta">${this._sexBadge(p.sex)}</div>
+          ${birth ? html`<div class="person-card-meta">${birth}</div>` : nothing}
+          ${death ? html`<div class="person-card-meta">${death}</div>` : nothing}
+          ${parents ? html`<div class="person-card-meta">${parents}</div>` : nothing}
+          ${(p.children_count ?? 0) > 0
+            ? html`<div class="person-card-footer">
+                ${this._childrenCountLabel(p.children_count ?? 0)}
+              </div>`
+            : nothing}
+        </button>
+        ${isTrash && this._canWrite()
+          ? html`<div class="card-actions">
+              <button type="button" @click=${() => this._restore(p.id)}>
+                ${this._tt("restore")}
+              </button>
+              <button type="button" class="danger" @click=${() => this._purge(p.id)}>
+                ${this._tt("purge")}
+              </button>
             </div>`
           : nothing}
-      </button>
+      </div>
     `;
   }
 
@@ -1494,8 +1593,7 @@ export class FamilyTreePanel extends LitElement {
       <td><span class="date-badge">${birth || "—"}</span></td>
       <td><span class="date-badge">${death || "—"}</span></td>
       <td>${this._sexBadge(p.sex)}</td>
-      <td>${this._personLink(p.father)}</td>
-      <td>${this._personLink(p.mother)}</td>
+      <td>${this._parentsCell(p)}</td>
       <td class="num">${p.children_count ?? 0}</td>
       <td class="center">${this._lineageStar(p.id)}</td>
       <td class="menu-cell">
@@ -1543,6 +1641,9 @@ export class FamilyTreePanel extends LitElement {
 
   private async _deletePersonById(id: string) {
     if (!this.hass || !this._canWrite()) return;
+    const person = this._people.find((p) => p.id === id);
+    const name = person ? personDisplayName(person) : id;
+    if (!confirm(this._tt("confirm_delete_person").replace("%s", name))) return;
     try {
       await deletePerson(this.hass, id);
       await this._refreshAll();
@@ -1580,9 +1681,13 @@ export class FamilyTreePanel extends LitElement {
     const footer =
       opts.footer ||
       (siblingCount > 0 ? `+${siblingCount} ${this._tt("siblings_count")}` : "");
+    const isLiving = node.is_living !== false;
     return html`
       <button type="button" class="person-card" @click=${() => id && this._openPerson(id)}>
-        <div class="person-card-title">${title}</div>
+        <div class="person-card-head">
+          <div class="person-card-title">${title}</div>
+          ${id ? this._lineageStar(id, title) : nothing}
+        </div>
         ${formal && formal !== title
           ? html`<div class="person-card-formal">${formal}</div>`
           : nothing}
@@ -1651,12 +1756,17 @@ export class FamilyTreePanel extends LitElement {
     const events = html`
       <div class="section-head">
         ${this._canWrite()
-          ? html`<button class="primary" @click=${() => this._openAddEvent()}>${icon(MDI_PLUS)} ${this._tt("add_event")}</button>`
+          ? mdButton(`+ ${this._tt("add_event")}`, {
+              variant: "filled",
+              onClick: () => this._openAddEvent(),
+            })
           : nothing}
       </div>
       <div class="card-list">
         ${d.events.map((ev: EventDto) => this._renderEventCard(ev))}
-        ${d.events.length === 0 ? html`<p class="muted">—</p>` : nothing}
+        ${d.events.length === 0
+          ? html`<p class="muted">—</p>`
+          : nothing}
       </div>
     `;
     return html`
@@ -1743,7 +1853,6 @@ export class FamilyTreePanel extends LitElement {
                 ? `+${siblingCount} ${this._tt("siblings_count")}`
                 : undefined,
           })}
-          ${this._lineageStar(p.id)}
           ${siblingCount > 0
             ? html`<button type="button" class="linkish" @click=${() => this._openSiblingsDialog()}>
                 ${this._tt("view_siblings")}
@@ -1821,6 +1930,7 @@ export class FamilyTreePanel extends LitElement {
   private _renderPerson() {
     const d = this._detail!;
     const p = d.person;
+    const tabs: PersonTab[] = ["details", "tree", "sources"];
     return html`
       <div class="person-head">
         <nav class="breadcrumb">
@@ -1828,30 +1938,30 @@ export class FamilyTreePanel extends LitElement {
           <span class="muted">›</span>
           <span>${personDisplayName(p)}</span>
         </nav>
-        <h2>${personDisplayName(p)} ${this._lineageStar(p.id)}</h2>
-        <div class="row-actions">
-          ${this._canWrite()
-            ? html`
-                <button @click=${() => this._openEdit(p)}>${this._tt("edit")}</button>
-                <button @click=${() => {
-                  this._personTab = "tree";
-                }}>${this._tt("tree")}</button>
-                <button class="danger" @click=${() => this._deleteCurrent()}>${this._tt("delete")}</button>
-              `
-            : nothing}
-        </div>
+        <h2>
+          ${personDisplayName(p)}
+          ${this._lineageStar(p.id, personDisplayName(p))}
+        </h2>
       </div>
-      <div class="subtabs">
-        ${(["details", "tree", "sources"] as PersonTab[]).map(
-          (tab) => html`<button class=${this._personTab === tab ? "active" : ""}
-            @click=${() => (this._personTab = tab)}>${this._tt(tab)}</button>`,
-        )}
+      <div class="subtabs person-subtabs">
+        <div class="subtabs-left">
+          ${tabs.map(
+            (tab) => html`<button class=${this._personTab === tab ? "active" : ""}
+              @click=${() => (this._personTab = tab)}>${this._tt(tab)}</button>`,
+          )}
+        </div>
+        ${this._canWrite()
+          ? html`<div class="subtabs-actions">
+              <button @click=${() => this._openEdit(p)}>${this._tt("edit")}</button>
+              <button class="danger" @click=${() => this._deleteCurrent()}>${this._tt("delete")}</button>
+            </div>`
+          : nothing}
       </div>
       ${this._personTab === "details"
         ? this._renderPersonDetailsTab(d)
         : this._personTab === "tree"
-          ? this._renderTreeTab(d)
-          : html`<ul class="plain">
+            ? this._renderTreeTab(d)
+            : html`<ul class="plain">
               ${(d.citations || []).map(
                 (c) => html`<li>
                   <strong>${c.source_title || "Source"}</strong>
@@ -2065,9 +2175,11 @@ export class FamilyTreePanel extends LitElement {
 
   private _closeDialog = () => {
     this._dialogOpen = false;
+    this._fieldErrors = {};
     if (this._dialogMode === "import" && this._importPhase !== "importing") {
       this._importPhase = "";
       this._importFile = null;
+      this._importFileName = "";
       this._importReport = null;
       this._importStatus = "";
     }
@@ -2079,9 +2191,14 @@ export class FamilyTreePanel extends LitElement {
     if (phase === "importing" || (phase === "preview" && !this._importReport && this._importStatus)) {
       return html`<p class="muted">${this._importStatus || this._tt("importing")}</p>`;
     }
+    const done = phase === "done";
     return html`
-      <p class="muted">${this._importFile?.name || ""}</p>
-      ${this._replaceImport
+      ${done
+        ? html`<p>${this._tt("import_complete_hint")}</p>`
+        : this._importFileName
+          ? html`<p class="muted">${this._importFileName}</p>`
+          : nothing}
+      ${!done && this._replaceImport
         ? html`<p class="error" role="alert">${this._tt("replace_warning")}</p>`
         : nothing}
       <ul class="plain import-counts">
@@ -2099,45 +2216,40 @@ export class FamilyTreePanel extends LitElement {
     const mode = this._dialogMode;
     const dialogTitle =
       mode === "import"
-        ? this._tt("import_preview")
+        ? this._importPhase === "done"
+          ? this._tt("import_complete")
+          : this._tt("import_preview")
         : mode === "siblings"
-          ? this._tt("siblings")
-          : mode === "event"
-            ? this._editingEventId
-              ? this._tt("edit_event")
-              : this._tt("add_event")
-            : this._editing
-              ? personDisplayName(this._editing)
-              : this._relationTarget
-                ? this._tt("add_person")
-                : this._tt("add_person");
+                ? this._tt("siblings")
+                : mode === "event"
+                  ? this._editingEventId
+                    ? this._tt("edit_event")
+                    : this._tt("add_event")
+                  : this._editing
+                    ? personDisplayName(this._editing)
+                    : this._relationTarget
+                      ? this._tt("add_person")
+                      : this._tt("add_person");
 
     const personBody = html`
       <div class="form-section">
         <div class="form-section-title">${this._tt("details")}</div>
         <label
-          >${this._tt("given_names")} <span class="req">*</span>
+          >${this._fieldLabel(this._tt("given_names"), write)}
           <input
+            class=${this._fieldInvalid("given_names") ? "invalid" : ""}
             .value=${this._form.given_names || ""}
             ?disabled=${!write}
-            required
-            @input=${(e: Event) =>
-              (this._form = {
-                ...this._form,
-                given_names: (e.target as HTMLInputElement).value,
-              })}
+            @input=${(e: Event) => this._onPersonField("given_names", e)}
           />
+          ${this._fieldError("given_names")}
         </label>
         <label
-          >${this._tt("call_name")}
+          >${this._fieldLabel(this._tt("call_name"))}
           <input
             .value=${this._form.call_name || ""}
             ?disabled=${!write}
-            @input=${(e: Event) =>
-              (this._form = {
-                ...this._form,
-                call_name: (e.target as HTMLInputElement).value,
-              })}
+            @input=${(e: Event) => this._onPersonField("call_name", e)}
           />
         </label>
         <div class="row2">
@@ -2310,7 +2422,7 @@ export class FamilyTreePanel extends LitElement {
           </button>
         </div>
         <label
-          >${this._tt("place")}
+          >${this._fieldLabel(this._tt("place"))}
           <input
             .value=${this._eventForm.place || ""}
             @input=${(e: Event) =>
@@ -2414,10 +2526,10 @@ export class FamilyTreePanel extends LitElement {
           ${mode === "import"
             ? this._renderImportDialogBody()
             : mode === "siblings"
-              ? siblingsBody
-              : mode === "event"
-                ? eventBody
-                : personBody}
+                    ? siblingsBody
+                    : mode === "event"
+                      ? eventBody
+                      : personBody}
 
           ${this._error && mode !== "import"
             ? html`<div class="error" role="alert">${this._error}</div>`
@@ -2471,9 +2583,7 @@ export class FamilyTreePanel extends LitElement {
       width: 36px;
       height: 36px;
       display: block;
-    }
-    .brand-logo-badge {
-      fill: color-mix(in srgb, var(--primary-color) 18%, var(--card-background-color, #fff));
+      object-fit: contain;
     }
     .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
     .tabs button, .subtabs button, .toolbar button, .inline-form button, .row-actions button, .chip {
@@ -2695,7 +2805,44 @@ export class FamilyTreePanel extends LitElement {
       clip: rect(0, 0, 0, 0);
       border: 0;
     }
-    .req { color: var(--error-color, #c62828); }
+    .req { color: var(--error-color, #c62828); margin-left: 2px; }
+    .field-label { display: inline-flex; align-items: baseline; gap: 2px; }
+    .field-error {
+      color: var(--error-color);
+      font-size: 0.75rem;
+      margin-top: 2px;
+    }
+    .dialog input.invalid,
+    .dialog select.invalid,
+    .dialog textarea.invalid {
+      border-color: var(--error-color);
+    }
+    .person-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .person-card-wrap { display: flex; flex-direction: column; gap: 6px; }
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      padding: 0 4px 8px;
+    }
+    .person-subtabs {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .subtabs-left { display: flex; flex-wrap: wrap; gap: 4px; }
+    .subtabs-actions {
+      display: flex;
+      gap: 8px;
+      margin-left: auto;
+    }
     .md-btn {
       display: inline-flex;
       align-items: center;
@@ -2973,6 +3120,7 @@ export class FamilyTreePanel extends LitElement {
       .stats-row { grid-template-columns: 1fr; }
       .kv { grid-template-columns: 1fr; }
       .row2 { grid-template-columns: 1fr; }
+      .subtabs-actions { width: 100%; justify-content: flex-end; }
     }
   `;
 }
