@@ -26,7 +26,12 @@ import {
   subscribeRevision,
   type SettingsDto,
 } from "./api";
-import { daysUntilLabel, formatGedcomDate } from "./dates_view";
+import {
+  daysUntilLabel,
+  formatGedcomDate,
+  gedcomToIsoDate,
+  isoToGedcomDate,
+} from "./dates_view";
 import { formatHassError } from "./errors";
 import { type LocaleKey, t } from "./i18n";
 import {
@@ -360,6 +365,31 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
+  private _eventDateText(): string {
+    if ((this._eventForm.date_mode || "simple") === "advanced") {
+      return this._eventForm.date_text || "";
+    }
+    return isoToGedcomDate(this._eventForm.date_iso || "");
+  }
+
+  private _toggleEventDateMode() {
+    const current = this._eventForm.date_mode || "simple";
+    if (current === "simple") {
+      const date_text = this._eventForm.date_iso
+        ? isoToGedcomDate(this._eventForm.date_iso)
+        : this._eventForm.date_text || "";
+      this._eventForm = { ...this._eventForm, date_mode: "advanced", date_text };
+      return;
+    }
+    const date_iso = gedcomToIsoDate(this._eventForm.date_text || "") || "";
+    this._eventForm = {
+      ...this._eventForm,
+      date_mode: "simple",
+      date_iso,
+      date_text: "",
+    };
+  }
+
   private async _saveEvent() {
     if (!this.hass || !this._detail || !this._canWrite()) return;
     try {
@@ -367,7 +397,7 @@ export class FamilyTreePanel extends LitElement {
         subject_type: "person",
         subject_id: this._detail.person.id,
         event_type: this._eventForm.event_type || "birth",
-        date_text: this._eventForm.date_text || "",
+        date_text: this._eventDateText(),
         description: this._eventForm.description || "",
       });
       this._eventForm = {};
@@ -773,8 +803,34 @@ export class FamilyTreePanel extends LitElement {
                   <option value="occupation">occupation</option>
                   <option value="residence">residence</option>
                 </select>
-                <input placeholder=${this._tt("date")} .value=${this._eventForm.date_text || ""}
-                  @input=${(e: Event) => (this._eventForm = { ...this._eventForm, date_text: (e.target as HTMLInputElement).value })} />
+                <div class="event-date-field">
+                  ${(this._eventForm.date_mode || "simple") === "advanced"
+                    ? html`<input
+                        placeholder=${this._tt("date_gedcom_hint")}
+                        .value=${this._eventForm.date_text || ""}
+                        @input=${(e: Event) =>
+                          (this._eventForm = {
+                            ...this._eventForm,
+                            date_text: (e.target as HTMLInputElement).value,
+                          })} />`
+                    : html`<input
+                        type="date"
+                        title=${this._tt("date")}
+                        .value=${this._eventForm.date_iso || ""}
+                        @input=${(e: Event) =>
+                          (this._eventForm = {
+                            ...this._eventForm,
+                            date_iso: (e.target as HTMLInputElement).value,
+                          })} />`}
+                  <button
+                    type="button"
+                    class="linkish date-mode-toggle"
+                    @click=${() => this._toggleEventDateMode()}>
+                    ${(this._eventForm.date_mode || "simple") === "advanced"
+                      ? this._tt("date_simple")
+                      : this._tt("date_advanced")}
+                  </button>
+                </div>
                 <button class="primary" @click=${() => this._saveEvent()}>${this._tt("add_event")}</button>
               </div>`
             : nothing}`
@@ -1172,7 +1228,13 @@ export class FamilyTreePanel extends LitElement {
     }
     .node.self { background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 600; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
-    .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+    .event-date-field {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      flex: 1; min-width: 200px;
+    }
+    .event-date-field input { flex: 1; min-width: 140px; width: auto; }
+    .date-mode-toggle { font-size: 0.85em; white-space: nowrap; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
     .md-btn {
       display: inline-flex;
