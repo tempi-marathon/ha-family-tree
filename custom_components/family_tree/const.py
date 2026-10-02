@@ -63,6 +63,8 @@ PANEL_URL_PATH: Final = DOMAIN
 PANEL_WEBCOMPONENT: Final = "family-tree-panel"
 PANEL_FILENAME: Final = "family-tree-panel.js"
 PANEL_MODULE_URL: Final = f"/api/panel_custom/{DOMAIN}"
+# The bundle's relative ``sourceMappingURL`` resolves next to PANEL_MODULE_URL.
+PANEL_SOURCEMAP_URL: Final = f"/api/panel_custom/{PANEL_FILENAME}.map"
 BRAND_URL_PATH: Final = f"/api/{DOMAIN}/brand"
 PANEL_ICON: Final = "mdi:family-tree"
 PANEL_TITLE: Final = "Family Tree"

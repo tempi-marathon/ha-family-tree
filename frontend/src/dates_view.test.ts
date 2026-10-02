@@ -3,6 +3,7 @@ import {
   ageFromSortDates,
   daysUntilLabel,
   formatGedcomDate,
+  formatLifespanLine,
   gedcomToIsoDate,
   isoToGedcomDate,
   parseSortDateParts,
@@ -86,5 +87,31 @@ describe("ageFromSortDates", () => {
 
   it("computes deceased age", () => {
     expect(ageFromSortDates("1900-01-01", "1950-06-01", false)).toBe(50);
+  });
+});
+
+describe("formatLifespanLine", () => {
+  it("formats living birth with age", () => {
+    const today = new Date(2026, 8, 27);
+    expect(
+      formatLifespanLine({
+        birth_date_text: "26 APR 1941",
+        birth_sort_date: "1941-04-26",
+        is_living: true,
+        today,
+      }),
+    ).toBe("Apr 26, 1941 (85)");
+  });
+
+  it("formats deceased year range", () => {
+    expect(
+      formatLifespanLine({
+        birth_date_text: "1905",
+        birth_sort_date: "1905",
+        death_date_text: "ABT 1995",
+        death_sort_date: "1995",
+        is_living: false,
+      }),
+    ).toBe("1905 - about 1995 (±90)");
   });
 });

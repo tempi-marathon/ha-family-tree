@@ -26,8 +26,9 @@ from .const import (
 from .coordinator import FamilyTreeCoordinator
 from .dates import parse_gedcom_date
 from .helpers import get_coordinator, profile_name
-from .lineage import ancestors, descendants, lineage_relation
+from .lineage import ancestors, descendants, lineage_map, lineage_relation
 from .models import (
+    UNIQUE_PERSON_EVENT_TYPES,
     Event,
     EventType,
     ParentChild,
@@ -41,12 +42,17 @@ from .models import (
     UnionType,
 )
 from .names import display_name, matches_family_shortcut
-from .relatives import tree_for
+from .relatives import enrich_event_dict, tree_for, union_events_for_person
+from .repository import event_sort_key, vital_summary
 from .stats import compute_stats
 
 _LOGGER = logging.getLogger(__name__)
 
 _OPTIONAL_ENTRY = {vol.Optional(ATTR_CONFIG_ENTRY_ID): str}
+
+
+class DuplicateEventError(Exception):
+    """A once-per-person event type already exists for the subject."""
 
 
 def _coordinator(hass: HomeAssistant, msg: dict[str, Any]) -> FamilyTreeCoordinator:
@@ -138,7 +144,9 @@ async def ws_subscribe(
         vol.Optional("sex"): vol.In([s.value for s in Sex]),
         vol.Optional("living"): bool,
         vol.Optional("trashed", default=False): bool,
-        vol.Optional("limit", default=50): vol.All(int, vol.Range(min=1, max=200)),
+        vol.Optional("limit", default=MAX_PERSONS): vol.All(
+            int, vol.Range(min=1, max=MAX_PERSONS)
+        ),
         vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
         **_OPTIONAL_ENTRY,
     }
@@ -148,7 +156,7 @@ async def ws_persons_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
     coordinator = _coordinator(hass, msg)
-    limit = _cap(msg.get("limit"), 50, 200)
+    limit = _cap(msg.get("limit"), MAX_PERSONS, MAX_PERSONS)
 
     def _run() -> dict[str, Any]:
         persons, total = coordinator.repo.list_persons(
@@ -159,9 +167,21 @@ async def ws_persons_list(
             limit=limit,
             offset=int(msg.get("offset") or 0),
         )
+        ids = [p.id for p in persons]
+        life_by_id = coordinator.repo.life_events_for_persons(ids)
+        family_by_id = coordinator.repo.family_summaries_for_persons(ids)
         return {
             "persons": [
-                {**p.to_dict(), "display_name": display_name(p)} for p in persons
+                {
+                    **p.to_dict(),
+                    "display_name": display_name(p),
+                    "life_events": life_by_id.get(p.id, []),
+                    **family_by_id.get(
+                        p.id, {"father": None, "mother": None, "children_count": 0}
+                    ),
+                    **vital_summary(life_by_id.get(p.id, [])),
+                }
+                for p in persons
             ],
             "total": total,
         }
@@ -188,10 +208,11 @@ async def ws_persons_get(
         )
         if person is None:
             return None
-        events = [
-            e.to_dict()
-            for e in coordinator.repo.list_events(SubjectType.PERSON, person.id)
-        ]
+        events = []
+        for e in coordinator.repo.list_events(SubjectType.PERSON, person.id):
+            events.append(enrich_event_dict(coordinator.repo, e.to_dict()))
+        events.extend(union_events_for_person(coordinator.repo, person.id))
+        events.sort(key=event_sort_key)
         citations = coordinator.repo.list_citations(SubjectType.PERSON, person.id)
         return {
             "person": {**person.to_dict(), "display_name": display_name(person)},
@@ -274,6 +295,37 @@ async def ws_lineage(
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
 
 
+def _my_lineage(repo: Any, ha_user_id: str | None) -> dict[str, Any]:
+    empty: dict[str, Any] = {"person_id": None, "person_name": None, "relatives": {}}
+    if not ha_user_id:
+        return empty
+    link = repo.get_user_link(ha_user_id)
+    if link is None:
+        return empty
+    person = repo.get_person(link.person_id)
+    if person is None:
+        return empty
+    return {
+        "person_id": person.id,
+        "person_name": display_name(person),
+        "relatives": lineage_map(repo.db, person.id),
+    }
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/lineage/mine", **_OPTIONAL_ENTRY}
+)
+@websocket_api.async_response
+async def ws_lineage_mine(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Ancestors/descendants of the person linked to the calling HA user."""
+    coordinator = _coordinator(hass, msg)
+    user_id = connection.user.id if connection.user else None
+    result = await hass.async_add_executor_job(_my_lineage, coordinator.repo, user_id)
+    connection.send_result(msg["id"], result)
+
+
 @websocket_api.websocket_command(
     {vol.Required("type"): f"{DOMAIN}/stats", **_OPTIONAL_ENTRY}
 )
@@ -344,7 +396,7 @@ async def ws_unions_get(
                 }
             )
         events = [
-            e.to_dict()
+            enrich_event_dict(coordinator.repo, e.to_dict())
             for e in coordinator.repo.list_events(SubjectType.UNION, union.id)
         ]
         return {"union": union.to_dict(), "partners": partners, "events": events}
@@ -502,7 +554,7 @@ async def ws_settings(
         vol.Required("type"): f"{DOMAIN}/persons/save",
         # Never use key "id" here — it collides with the websocket message id (int).
         vol.Optional("person_id"): str,
-        vol.Optional("given_names", default=""): _bounded_string(MAX_NAME),
+        vol.Required("given_names"): _bounded_string(MAX_NAME, allow_empty=False),
         vol.Optional("call_name", default=""): _bounded_string(MAX_NAME),
         vol.Optional("surname_prefix", default=""): _bounded_string(MAX_NAME),
         vol.Optional("surname", default=""): _bounded_string(MAX_NAME),
@@ -527,6 +579,7 @@ async def ws_persons_save(
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
+        given_names = (msg.get("given_names") or "").strip()
         person_id = msg.get("person_id")
         if person_id:
             existing = coordinator.repo.get_person(person_id, include_deleted=True)
@@ -534,7 +587,7 @@ async def ws_persons_save(
                 raise LookupError("Person not found")
             person = Person(
                 id=existing.id,
-                given_names=msg.get("given_names") or "",
+                given_names=given_names,
                 call_name=msg.get("call_name") or "",
                 surname_prefix=msg.get("surname_prefix") or "",
                 surname=msg.get("surname") or "",
@@ -550,7 +603,7 @@ async def ws_persons_save(
             if coordinator.repo.count_persons() >= MAX_PERSONS:
                 raise OverflowError(f"Maximum of {MAX_PERSONS} persons reached")
             person = Person(
-                given_names=msg.get("given_names") or "",
+                given_names=given_names,
                 call_name=msg.get("call_name") or "",
                 surname_prefix=msg.get("surname_prefix") or "",
                 surname=msg.get("surname") or "",
@@ -878,6 +931,7 @@ async def ws_places_save(
         vol.Required("subject_id"): str,
         vol.Required("event_type"): vol.In([t.value for t in EventType]),
         vol.Optional("place_id"): vol.Any(None, str),
+        vol.Optional("place", default=""): _bounded_string(MAX_NAME),
         vol.Optional("date_text", default=""): _bounded_string(100),
         vol.Optional("description", default=""): _bounded_string(MAX_NOTES),
         **_OPTIONAL_ENTRY,
@@ -897,15 +951,37 @@ async def ws_events_save(
     parsed = parse_gedcom_date(date_text)
 
     def _run() -> dict[str, Any]:
+        event_type = EventType(msg["event_type"])
+        if (
+            msg["subject_type"] == SubjectType.PERSON.value
+            and event_type in UNIQUE_PERSON_EVENT_TYPES
+            and coordinator.repo.has_event(
+                SubjectType.PERSON,
+                msg["subject_id"],
+                event_type.value,
+                exclude_id=msg.get("event_id"),
+            )
+        ):
+            raise DuplicateEventError(
+                f"This person already has a {event_type.value} event"
+            )
+        place_id = msg.get("place_id")
+        place_name = (msg.get("place") or "").strip()
+        if not place_id and place_name:
+            found = coordinator.repo.find_place(place_name)
+            place_id = (
+                found.id
+                if found
+                else coordinator.repo.add_place(Place(name=place_name)).id
+            )
         event_id = msg.get("event_id")
         if event_id:
-            # Update path: load existing via list is awkward; rewrite fields
             event = Event(
                 id=event_id,
                 subject_type=SubjectType(msg["subject_type"]),
                 subject_id=msg["subject_id"],
                 type=EventType(msg["event_type"]),
-                place_id=msg.get("place_id"),
+                place_id=place_id,
                 date_text=date_text,
                 date_qualifier=parsed.qualifier,
                 date_from=parsed.date_from,
@@ -919,7 +995,7 @@ async def ws_events_save(
                 subject_type=SubjectType(msg["subject_type"]),
                 subject_id=msg["subject_id"],
                 type=EventType(msg["event_type"]),
-                place_id=msg.get("place_id"),
+                place_id=place_id,
                 date_text=date_text,
                 date_qualifier=parsed.qualifier,
                 date_from=parsed.date_from,
@@ -928,11 +1004,14 @@ async def ws_events_save(
                 description=msg.get("description") or "",
             )
             saved = coordinator.repo.add_event(event)
-        return saved.to_dict()
+        return enrich_event_dict(coordinator.repo, saved.to_dict())
 
-    connection.send_result(
-        msg["id"], {"event": await hass.async_add_executor_job(_run)}
-    )
+    try:
+        result = await hass.async_add_executor_job(_run)
+    except DuplicateEventError as err:
+        connection.send_error(msg["id"], "duplicate_event", str(err))
+        return
+    connection.send_result(msg["id"], {"event": result})
 
 
 @websocket_api.websocket_command(
@@ -983,19 +1062,118 @@ async def ws_user_links_set(
 
     def _run() -> dict[str, Any]:
         if not person_id:
-
-            def _clear() -> None:
-                coordinator.repo.db.execute(
-                    "DELETE FROM user_links WHERE ha_user_id = ?",
-                    (msg["ha_user_id"],),
-                )
-
-            coordinator.repo.import_batch(_clear)
+            coordinator.repo.clear_user_link(msg["ha_user_id"])
             return {"ok": True, "cleared": True}
         link = coordinator.repo.set_user_link(msg["ha_user_id"], person_id)
         return {"link": link.to_dict()}
 
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
+
+
+class ClaimError(Exception):
+    """User-link claim rejected; ``code`` is the websocket error code."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _claim_user_link(
+    repo: Any, ha_user_id: str, msg: dict[str, Any], *, is_admin: bool
+) -> dict[str, Any]:
+    """Link (or unlink) the calling user to a person; optionally create that person."""
+    create = msg.get("create")
+    if create:
+        if repo.count_persons() >= MAX_PERSONS:
+            raise ClaimError("limit_exceeded", f"Maximum of {MAX_PERSONS} persons reached")
+        given_names = (create.get("given_names") or "").strip()
+        if not given_names:
+            raise ClaimError("invalid_format", "given_names is required")
+        birth_text = (create.get("birth_date_text") or "").strip()
+
+        def _create() -> Person:
+            person = repo.add_person(
+                Person(
+                    given_names=given_names,
+                    surname_prefix=(create.get("surname_prefix") or "").strip(),
+                    surname=(create.get("surname") or "").strip(),
+                    sex=Sex(create.get("sex") or Sex.UNKNOWN.value),
+                    is_living=True,
+                )
+            )
+            if birth_text:
+                parsed = parse_gedcom_date(birth_text)
+                repo.add_event(
+                    Event(
+                        subject_type=SubjectType.PERSON,
+                        subject_id=person.id,
+                        type=EventType.BIRTH,
+                        date_text=birth_text,
+                        date_qualifier=parsed.qualifier,
+                        date_from=parsed.date_from,
+                        date_to=parsed.date_to,
+                        sort_date=parsed.sort_date,
+                    )
+                )
+            repo.set_user_link(ha_user_id, person.id)
+            return person
+
+        person = repo.import_batch(_create)
+        return {"person_id": person.id, "person_name": display_name(person)}
+
+    person_id = msg.get("person_id")
+    if not person_id:
+        repo.clear_user_link(ha_user_id)
+        return {"person_id": None, "person_name": None}
+
+    person = repo.get_person(person_id)
+    if person is None:
+        raise ClaimError("not_found", "Person not found")
+    existing = repo.user_link_for_person(person_id)
+    if existing is not None and existing.ha_user_id != ha_user_id and not is_admin:
+        raise ClaimError("already_linked", "This person is linked to another user")
+    repo.set_user_link(ha_user_id, person_id)
+    return {"person_id": person.id, "person_name": display_name(person)}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/user_links/claim",
+        vol.Optional("person_id"): vol.Any(None, str),
+        vol.Optional("create"): {
+            vol.Required("given_names"): _bounded_string(MAX_NAME, allow_empty=False),
+            vol.Optional("surname_prefix", default=""): _bounded_string(MAX_NAME),
+            vol.Optional("surname", default=""): _bounded_string(MAX_NAME),
+            vol.Optional("sex", default=Sex.UNKNOWN.value): vol.In(
+                [s.value for s in Sex]
+            ),
+            vol.Optional("birth_date_text", default=""): _bounded_string(100),
+        },
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_user_links_claim(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Self-service link for the calling user only (no admin required)."""
+    if not connection.user or not connection.user.id:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+    try:
+        result = await hass.async_add_executor_job(
+            lambda: _claim_user_link(
+                coordinator.repo,
+                connection.user.id,
+                msg,
+                is_admin=bool(connection.user.is_admin),
+            )
+        )
+    except ClaimError as err:
+        connection.send_error(msg["id"], err.code, str(err))
+        return
+    connection.send_result(msg["id"], result)
 
 
 @callback
@@ -1015,6 +1193,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_persons_purge,
         ws_tree,
         ws_lineage,
+        ws_lineage_mine,
         ws_stats,
         ws_families,
         ws_unions_get,
@@ -1029,6 +1208,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_events_delete,
         ws_user_links_list,
         ws_user_links_set,
+        ws_user_links_claim,
         ws_gazetteer_search,
         ws_gazetteer_status,
         ws_settings,

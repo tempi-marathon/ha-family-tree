@@ -31,7 +31,7 @@ Full guide: [1. Installation](docs/01-installation.md) ·
 [2. Configuration](docs/02-configuration.md) ·
 [3. Usage](docs/03-usage.md) ·
 [4. GEDCOM](docs/04-gedcom.md) ·
-[5. Migration from Laravel](docs/05-migration.md)
+[5. Migrating an existing tree](docs/05-migration.md)
 
 ## Privacy
 

@@ -5,7 +5,7 @@
 The **Family Tree** sidebar panel includes:
 
 - **Dashboard** — counts and charts (age, century, places of birth)
-- **People** — search, filters, lineage icon, family shortcuts
+- **People** — search, living filter, and Filters (family, place, date range); family shortcuts on the dashboard jump into People
 - **Person** — Details, Relationships, Tree, Sources
 - **Trash** — restore or permanently delete
 - **Settings** — GEDCOM import/export, user links, gazetteer status

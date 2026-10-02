@@ -1,6 +1,16 @@
 /** Persist Family Tree panel search / filters across remounts. */
 
-export type PanelSort = "name" | "surname" | "updated";
+export type PanelSort =
+  | "name"
+  | "surname"
+  | "updated"
+  | "birth"
+  | "death"
+  | "sex"
+  | "father"
+  | "mother"
+  | "children";
+export type SortDir = "asc" | "desc";
 export type PanelView = "dashboard" | "people" | "trash" | "settings" | "person";
 
 export interface PanelViewState {
@@ -8,8 +18,13 @@ export interface PanelViewState {
   filterLiving: string;
   filterSex: string;
   sort: PanelSort;
+  sortDir: SortDir;
   view: PanelView;
   familyShortcut: string;
+  filterPlace: string;
+  dateFrom: string;
+  dateTo: string;
+  filtersOpen: boolean;
 }
 
 export const DEFAULT_PANEL_VIEW: PanelViewState = {
@@ -17,12 +32,27 @@ export const DEFAULT_PANEL_VIEW: PanelViewState = {
   filterLiving: "all",
   filterSex: "",
   sort: "surname",
+  sortDir: "asc",
   view: "dashboard",
   familyShortcut: "",
+  filterPlace: "",
+  dateFrom: "",
+  dateTo: "",
+  filtersOpen: false,
 };
 
 const STORAGE_PREFIX = "family_tree.panel.view";
-const SORTS: ReadonlySet<string> = new Set(["name", "surname", "updated"]);
+const SORTS: ReadonlySet<string> = new Set([
+  "name",
+  "surname",
+  "updated",
+  "birth",
+  "death",
+  "sex",
+  "father",
+  "mother",
+  "children",
+]);
 const VIEWS: ReadonlySet<string> = new Set([
   "dashboard",
   "people",
@@ -55,8 +85,13 @@ export function loadPanelViewState(
       filterLiving: asString(parsed.filterLiving, "all"),
       filterSex: asString(parsed.filterSex, ""),
       sort: (SORTS.has(sort) ? sort : "surname") as PanelSort,
+      sortDir: parsed.sortDir === "desc" ? "desc" : "asc",
       view: (VIEWS.has(view) ? view : "dashboard") as PanelView,
       familyShortcut: asString(parsed.familyShortcut, ""),
+      filterPlace: asString(parsed.filterPlace, ""),
+      dateFrom: asString(parsed.dateFrom, ""),
+      dateTo: asString(parsed.dateTo, ""),
+      filtersOpen: Boolean(parsed.filtersOpen),
     };
   } catch {
     return { ...DEFAULT_PANEL_VIEW };
@@ -74,4 +109,23 @@ export function savePanelViewState(
   } catch {
     // Quota / private mode — ignore.
   }
+}
+
+/** Deduplicate options (case-insensitive) and sort by localeCompare. */
+export function sortedOptionList(
+  options: string[],
+  current = "",
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of [...options, current]) {
+    const v = value?.trim();
+    if (!v) continue;
+    const key = v.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+  }
+  out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return out;
 }

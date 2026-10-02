@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   filterAndSortPeople,
+  matchesDateRange,
   matchesFamilyShortcut,
+  matchesPlace,
   personDisplayName,
+  placeOptionsFromPeople,
 } from "./people_view";
-import type { PersonDto } from "./api";
+import type { LifeEventDto, PersonDto } from "./api";
 
 function person(partial: Partial<PersonDto>): PersonDto {
   return {
@@ -18,8 +21,29 @@ function person(partial: Partial<PersonDto>): PersonDto {
     notes: partial.notes || "",
     display_name: partial.display_name,
     updated_at: partial.updated_at,
+    life_events: partial.life_events,
   };
 }
+
+function ev(partial: Partial<LifeEventDto>): LifeEventDto {
+  return {
+    type: partial.type || "birth",
+    sort_date: partial.sort_date ?? null,
+    place_id: partial.place_id ?? null,
+    place_name: partial.place_name ?? null,
+  };
+}
+
+const baseFilters = {
+  search: "",
+  filterLiving: "all",
+  filterSex: "",
+  sort: "surname" as const,
+  familyShortcut: "",
+  filterPlace: "",
+  dateFrom: "",
+  dateTo: "",
+};
 
 describe("personDisplayName", () => {
   it("uses call name and Dutch prefix", () => {
@@ -53,6 +77,67 @@ describe("matchesFamilyShortcut", () => {
   });
 });
 
+describe("matchesPlace / matchesDateRange", () => {
+  const p = person({
+    id: "a",
+    life_events: [
+      ev({
+        type: "birth",
+        sort_date: "1823-01-01",
+        place_id: "pl1",
+        place_name: "Tilburg",
+      }),
+      ev({
+        type: "marriage",
+        sort_date: "1850-06-15",
+        place_id: "pl2",
+        place_name: "Amsterdam",
+      }),
+    ],
+  });
+
+  it("matches any life-event place", () => {
+    expect(matchesPlace(p, "")).toBe(true);
+    expect(matchesPlace(p, "pl1")).toBe(true);
+    expect(matchesPlace(p, "pl2")).toBe(true);
+    expect(matchesPlace(p, "other")).toBe(false);
+  });
+
+  it("matches date range on any sort_date (year-only Jan 1)", () => {
+    expect(matchesDateRange(p, "", "")).toBe(true);
+    expect(matchesDateRange(p, "1820-01-01", "1830-12-31")).toBe(true);
+    expect(matchesDateRange(p, "1840-01-01", "1860-01-01")).toBe(true);
+    expect(matchesDateRange(p, "1900-01-01", "1910-01-01")).toBe(false);
+    expect(matchesDateRange(p, "1850-06-15", "")).toBe(true);
+    expect(matchesDateRange(p, "", "1823-01-01")).toBe(true);
+  });
+
+  it("excludes people with no sort_date when a range is set", () => {
+    const bare = person({ id: "x", life_events: [ev({ sort_date: null })] });
+    expect(matchesDateRange(bare, "1800-01-01", "1900-01-01")).toBe(false);
+  });
+});
+
+describe("placeOptionsFromPeople", () => {
+  it("dedupes and sorts by label", () => {
+    const people = [
+      person({
+        life_events: [
+          ev({ place_id: "b", place_name: "Breda" }),
+          ev({ place_id: "a", place_name: "Amsterdam" }),
+        ],
+      }),
+      person({
+        life_events: [ev({ place_id: "a", place_name: "Amsterdam" })],
+      }),
+    ];
+    expect(placeOptionsFromPeople(people)).toEqual([
+      { id: "a", label: "Amsterdam" },
+      { id: "b", label: "Breda" },
+    ]);
+  });
+});
+
 describe("filterAndSortPeople", () => {
   const people = [
     person({
@@ -62,6 +147,14 @@ describe("filterAndSortPeople", () => {
       is_living: true,
       sex: "female",
       updated_at: "2024-01-01",
+      life_events: [
+        ev({
+          type: "birth",
+          sort_date: "1990-05-01",
+          place_id: "pl1",
+          place_name: "Utrecht",
+        }),
+      ],
     }),
     person({
       id: "b",
@@ -71,46 +164,120 @@ describe("filterAndSortPeople", () => {
       is_living: false,
       sex: "male",
       updated_at: "2025-01-01",
+      life_events: [
+        ev({
+          type: "death",
+          sort_date: "1880-03-20",
+          place_id: "pl2",
+          place_name: "Rotterdam",
+        }),
+      ],
     }),
   ];
 
   it("filters living and searches", () => {
     const living = filterAndSortPeople(people, {
-      search: "",
+      ...baseFilters,
       filterLiving: "living",
-      filterSex: "",
-      sort: "surname",
-      familyShortcut: "",
     });
     expect(living.map((p) => p.id)).toEqual(["a"]);
 
     const search = filterAndSortPeople(people, {
+      ...baseFilters,
       search: "vries",
-      filterLiving: "all",
-      filterSex: "",
-      sort: "surname",
-      familyShortcut: "",
     });
     expect(search.map((p) => p.id)).toEqual(["b"]);
   });
 
+  it("filters by family, place, and date together", () => {
+    const byFamily = filterAndSortPeople(people, {
+      ...baseFilters,
+      familyShortcut: "vries",
+    });
+    expect(byFamily.map((p) => p.id)).toEqual(["b"]);
+
+    const byPlace = filterAndSortPeople(people, {
+      ...baseFilters,
+      filterPlace: "pl1",
+    });
+    expect(byPlace.map((p) => p.id)).toEqual(["a"]);
+
+    const byDate = filterAndSortPeople(people, {
+      ...baseFilters,
+      dateFrom: "1870-01-01",
+      dateTo: "1890-12-31",
+    });
+    expect(byDate.map((p) => p.id)).toEqual(["b"]);
+  });
+
   it("sorts by surname then updated", () => {
     const bySurname = filterAndSortPeople(people, {
-      search: "",
-      filterLiving: "all",
-      filterSex: "",
+      ...baseFilters,
       sort: "surname",
-      familyShortcut: "",
     });
     expect(bySurname.map((p) => p.surname)).toEqual(["Jansen", "Vries"]);
 
     const byUpdated = filterAndSortPeople(people, {
-      search: "",
-      filterLiving: "all",
-      filterSex: "",
+      ...baseFilters,
       sort: "updated",
-      familyShortcut: "",
     });
     expect(byUpdated.map((p) => p.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("filterAndSortPeople column sorting", () => {
+  const vital = (sort_date: string) => ({
+    type: "birth",
+    date_text: sort_date.slice(0, 4),
+    date_qualifier: "exact",
+    sort_date,
+    place_name: null,
+  });
+  const people: PersonDto[] = [
+    {
+      ...person({ id: "a", given_names: "Anna", surname: "Molenschot" }),
+      birth: vital("1859-12-08"),
+      father: { id: "f1", name: "Johannes Molenschot" },
+      children_count: 0,
+    },
+    {
+      ...person({ id: "b", given_names: "Ad", surname: "Molenschot" }),
+      birth: vital("1941-04-26"),
+      father: { id: "f2", name: "Marinus Molenschot" },
+      children_count: 1,
+    },
+    {
+      ...person({ id: "c", given_names: "Adriaen", surname: "Molenschot" }),
+      birth: null,
+      father: null,
+      children_count: 8,
+    },
+  ];
+
+  it("sorts by birth date with blanks last in both directions", () => {
+    const asc = filterAndSortPeople(people, { ...baseFilters, sort: "birth" });
+    expect(asc.map((p) => p.id)).toEqual(["a", "b", "c"]);
+    const desc = filterAndSortPeople(people, {
+      ...baseFilters,
+      sort: "birth",
+      sortDir: "desc",
+    });
+    expect(desc.map((p) => p.id)).toEqual(["b", "a", "c"]);
+  });
+
+  it("sorts by father name and children count", () => {
+    const byFather = filterAndSortPeople(people, { ...baseFilters, sort: "father" });
+    expect(byFather.map((p) => p.id)).toEqual(["a", "b", "c"]);
+    const byChildren = filterAndSortPeople(people, {
+      ...baseFilters,
+      sort: "children",
+      sortDir: "desc",
+    });
+    expect(byChildren.map((p) => p.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("sorts by display name", () => {
+    const byName = filterAndSortPeople(people, { ...baseFilters, sort: "name" });
+    expect(byName.map((p) => p.id)).toEqual(["b", "c", "a"]);
   });
 });

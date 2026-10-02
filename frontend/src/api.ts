@@ -2,6 +2,39 @@
 
 import type { HomeAssistant } from "./types";
 
+export interface LifeEventDto {
+  type: "birth" | "death" | "marriage" | string;
+  sort_date: string | null;
+  date_text?: string;
+  date_qualifier?: string;
+  place_id: string | null;
+  place_name: string | null;
+}
+
+export interface PersonRef {
+  id: string;
+  name: string;
+}
+
+export interface VitalSummary {
+  type: string;
+  date_text: string;
+  date_qualifier: string;
+  sort_date: string | null;
+  place_name: string | null;
+}
+
+export interface LineageRelation {
+  type: "ancestor" | "descendant";
+  generation: number;
+}
+
+export interface MyLineageDto {
+  person_id: string | null;
+  person_name: string | null;
+  relatives: Record<string, LineageRelation>;
+}
+
 export interface PersonDto {
   id: string;
   given_names: string;
@@ -15,6 +48,14 @@ export interface PersonDto {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+  /** Present on persons/list for client-side place/date filters. */
+  life_events?: LifeEventDto[];
+  /** persons/list overview columns. */
+  father?: PersonRef | null;
+  mother?: PersonRef | null;
+  children_count?: number;
+  birth?: VitalSummary | null;
+  death?: VitalSummary | null;
 }
 
 export interface EventDto {
@@ -29,6 +70,9 @@ export interface EventDto {
   date_to: string | null;
   sort_date: string | null;
   description: string;
+  place_name?: string;
+  union_id?: string;
+  partner_names?: string[];
 }
 
 export interface PlaceDto {
@@ -75,12 +119,26 @@ export interface PersonDetail {
   tree: TreePayload | null;
 }
 
-export interface TreePayload {
-  person: PersonDto & { name?: string };
-  parents: Array<Record<string, unknown>>;
-  grandparents: Record<string, Array<Record<string, unknown>>>;
+export interface TreeUnion {
+  union_id: string;
+  type: string;
+  status: string;
+  known_children_count: number | null;
   partners: Array<Record<string, unknown>>;
   children: Array<Record<string, unknown>>;
+  marriage_date: string;
+  marriage_place: string;
+  divorce_date: string;
+  divorce_place: string;
+}
+
+export interface TreePayload {
+  person: PersonDto & { name?: string; sibling_count?: number };
+  parents: Array<Record<string, unknown>>;
+  grandparents: Record<string, Array<Record<string, unknown>>>;
+  partners: TreeUnion[];
+  children: Array<Record<string, unknown>>;
+  children_without_union?: Array<Record<string, unknown>>;
   siblings: Array<Record<string, unknown>>;
 }
 
@@ -334,6 +392,30 @@ export async function setUserLink(
     ha_user_id: haUserId,
     person_id: personId,
   }) as Promise<Record<string, unknown>>;
+}
+
+export async function getMyLineage(hass: HomeAssistant): Promise<MyLineageDto> {
+  return msg(hass, "family_tree/lineage/mine") as Promise<MyLineageDto>;
+}
+
+export async function claimUserLink(
+  hass: HomeAssistant,
+  data:
+    | { person_id: string | null }
+    | {
+        create: {
+          given_names: string;
+          surname_prefix?: string;
+          surname?: string;
+          sex?: string;
+          birth_date_text?: string;
+        };
+      },
+): Promise<{ person_id: string | null; person_name: string | null }> {
+  return msg(hass, "family_tree/user_links/claim", data) as Promise<{
+    person_id: string | null;
+    person_name: string | null;
+  }>;
 }
 
 export async function searchGazetteer(
