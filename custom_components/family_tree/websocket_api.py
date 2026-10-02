@@ -42,7 +42,7 @@ from .models import (
     UnionType,
 )
 from .names import display_name, matches_family_shortcut
-from .relatives import enrich_event_dict, tree_for, union_events_for_person
+from .relatives import enrich_event_dict, siblings_of, tree_for, union_events_for_person
 from .repository import event_sort_key, vital_summary
 from .stats import compute_stats
 
@@ -232,6 +232,37 @@ async def ws_persons_get(
             "events": events,
             "citations": citations,
             "tree": tree_for(coordinator.repo, person.id),
+        }
+
+    result = await hass.async_add_executor_job(_run)
+    if result is None:
+        connection.send_error(msg["id"], "not_found", "Person not found")
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/persons/siblings",
+        vol.Required("person_id"): str,
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_persons_siblings(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    coordinator = _coordinator(hass, msg)
+
+    def _run() -> dict[str, Any] | None:
+        person = coordinator.repo.get_person(msg["person_id"])
+        if person is None:
+            return None
+        siblings = siblings_of(coordinator.repo, person.id)
+        return {
+            "person_id": person.id,
+            "person_name": display_name(person),
+            "siblings": siblings,
         }
 
     result = await hass.async_add_executor_job(_run)
