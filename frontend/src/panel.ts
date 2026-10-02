@@ -227,7 +227,12 @@ export class FamilyTreePanel extends LitElement {
   @state() private _lineage: MyLineageDto | null = null;
   @state() private _isMobile = false;
   @state() private _rowMenu: string | null = null;
-  @state() private _rowMenuUp = false;
+  @state() private _rowMenuAnchor: {
+    top: number;
+    bottom: number;
+    right: number;
+    up: boolean;
+  } | null = null;
   @state() private _collapsed: Record<string, boolean> = {};
   @state() private _editingEventId: string | null = null;
   @state() private _relationTarget: RelationTarget | null = null;
@@ -260,6 +265,8 @@ export class FamilyTreePanel extends LitElement {
     this._restoreViewState();
     window.addEventListener("keydown", this._onWindowKeyDown);
     window.addEventListener("click", this._onWindowClick);
+    window.addEventListener("scroll", this._onWindowScroll, true);
+    window.addEventListener("resize", this._onWindowScroll);
     if (typeof window.matchMedia === "function") {
       this._mql = window.matchMedia(MOBILE_QUERY);
       this._isMobile = this._mql.matches;
@@ -273,6 +280,8 @@ export class FamilyTreePanel extends LitElement {
     this._connected = false;
     window.removeEventListener("keydown", this._onWindowKeyDown);
     window.removeEventListener("click", this._onWindowClick);
+    window.removeEventListener("scroll", this._onWindowScroll, true);
+    window.removeEventListener("resize", this._onWindowScroll);
     this._mql?.removeEventListener("change", this._onMediaChange);
     this._mql = null;
     this._unsub?.();
@@ -428,15 +437,24 @@ export class FamilyTreePanel extends LitElement {
     this._resetFilters();
   };
 
+  private _closeRowMenu = () => {
+    this._rowMenu = null;
+    this._rowMenuAnchor = null;
+  };
+
   private _onWindowKeyDown = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") {
-      if (this._rowMenu) this._rowMenu = null;
+      if (this._rowMenu) this._closeRowMenu();
       else if (this._dialogOpen) this._dialogOpen = false;
     }
   };
 
   private _onWindowClick = () => {
-    if (this._rowMenu) this._rowMenu = null;
+    if (this._rowMenu) this._closeRowMenu();
+  };
+
+  private _onWindowScroll = () => {
+    if (this._rowMenu) this._closeRowMenu();
   };
 
   private _onMediaChange = (ev: MediaQueryListEvent) => {
@@ -804,6 +822,8 @@ export class FamilyTreePanel extends LitElement {
       const target = this._relationTarget;
       this._relationTarget = null;
       this._dialogOpen = false;
+      let partnerUnionId: string | null = null;
+      let focusPersonId = person.id;
       if (target) {
         if (target.kind === "parent") {
           await addParentChild(this.hass, {
@@ -817,11 +837,21 @@ export class FamilyTreePanel extends LitElement {
             union_id: target.unionId,
           });
         } else if (target.kind === "partner") {
-          await saveUnion(this.hass, { partner_ids: [target.personId, person.id] });
+          const { union } = await saveUnion(this.hass, {
+            partner_ids: [target.personId, person.id],
+          });
+          partnerUnionId = union.id;
+          focusPersonId = target.personId;
         }
       }
       await this._refreshAll();
-      await this._openPerson(person.id);
+      if (partnerUnionId) {
+        await this._openPerson(focusPersonId);
+        this._personTab = "relationships";
+        await this._openUnionEdit(partnerUnionId);
+      } else {
+        await this._openPerson(focusPersonId);
+      }
     } catch (err) {
       this._error = formatHassError(err);
     } finally {
@@ -1263,6 +1293,7 @@ export class FamilyTreePanel extends LitElement {
         </main>
       </div>
       ${this._dialogOpen ? this._renderDialog() : nothing}
+      ${this._rowMenu ? this._renderFixedRowMenu() : nothing}
     `;
   }
 
@@ -1328,8 +1359,7 @@ export class FamilyTreePanel extends LitElement {
           </ul>
         </div>
         <div class="block">
-          <h3>${this._tt("upcoming_anniversaries")}</h3>
-          <p class="muted anniversaries-hint">${this._tt("anniversaries_hint")}</p>
+          <h3 title=${this._tt("anniversaries_hint")}>${this._tt("upcoming_anniversaries")}</h3>
           <ul class="plain">
             ${anniversaries.length
               ? anniversaries.slice(0, 8).map((u) => {
@@ -1646,6 +1676,38 @@ export class FamilyTreePanel extends LitElement {
     `;
   }
 
+  private _renderFixedRowMenu() {
+    const personId = this._rowMenu;
+    const anchor = this._rowMenuAnchor;
+    if (!personId || !anchor) return nothing;
+    const right = window.innerWidth - anchor.right;
+    const style = anchor.up
+      ? `bottom:${window.innerHeight - anchor.top + 4}px;right:${right}px;`
+      : `top:${anchor.bottom + 4}px;right:${right}px;`;
+    return html`<div
+      class="row-menu row-menu--fixed"
+      style=${style}
+      @click=${(e: Event) => e.stopPropagation()}
+    >
+      <button type="button" @click=${() => {
+        this._closeRowMenu();
+        void this._openPerson(personId);
+      }}>${this._tt("details")}</button>
+      <button type="button" @click=${() => {
+        this._closeRowMenu();
+        void this._openPerson(personId).then(() => {
+          this._personTab = "tree";
+        });
+      }}>${this._tt("tree")}</button>
+      ${this._canWrite()
+        ? html`<button type="button" class="danger" @click=${() => {
+            this._closeRowMenu();
+            void this._deletePersonById(personId);
+          }}>${this._tt("delete")}</button>`
+        : nothing}
+    </div>`;
+  }
+
   private _renderPeopleRow(p: PersonDto, lang?: string) {
     const birth = formatEventDate(p.birth, lang);
     const death = formatDeathCell(p.birth, p.death, p.is_living, lang);
@@ -1671,44 +1733,27 @@ export class FamilyTreePanel extends LitElement {
           : html`<div class="row-menu-wrap">
               <button
                 type="button"
-                class="icon-btn sm"
+                class="icon-btn sm${menuOpen ? " active" : ""}"
                 aria-label=${this._tt("actions")}
                 @click=${(e: Event) => {
                   e.stopPropagation();
                   if (menuOpen) {
-                    this._rowMenu = null;
+                    this._closeRowMenu();
                     return;
                   }
                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                  this._rowMenuUp = rect.bottom + 130 > window.innerHeight;
+                  const menuHeight = this._canWrite() ? 130 : 88;
+                  this._rowMenuAnchor = {
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    right: rect.right,
+                    up: rect.bottom + menuHeight > window.innerHeight,
+                  };
                   this._rowMenu = p.id;
                 }}
               >
                 ${icon(MDI_DOTS_VERTICAL)}
               </button>
-              ${menuOpen
-                ? html`<div
-                    class="row-menu${this._rowMenuUp ? " row-menu--up" : ""}"
-                    @click=${(e: Event) => e.stopPropagation()}
-                  >
-                    <button type="button" @click=${() => {
-                      this._rowMenu = null;
-                      void this._openPerson(p.id);
-                    }}>${this._tt("details")}</button>
-                    <button type="button" @click=${() => {
-                      this._rowMenu = null;
-                      void this._openPerson(p.id).then(() => {
-                        this._personTab = "tree";
-                      });
-                    }}>${this._tt("tree")}</button>
-                    ${this._canWrite()
-                      ? html`<button type="button" class="danger" @click=${() => {
-                          this._rowMenu = null;
-                          void this._deletePersonById(p.id);
-                        }}>${this._tt("delete")}</button>`
-                      : nothing}
-                  </div>`
-                : nothing}
             </div>`}
       </td>
     </tr>`;
@@ -2050,23 +2095,29 @@ export class FamilyTreePanel extends LitElement {
 
     const partnersBody = html`
       ${write
-        ? html`<div class="section-head">
-            <button
-              type="button"
-              class="linkish"
-              @click=${() => this._openAddRelation({ kind: "partner", personId: d.person.id })}
-            >
-              ${this._tt("add_partner")}
-            </button>
-            <button type="button" class="linkish" @click=${() => this._openPickPerson("partner")}>
-              ${this._tt("link_existing_person")}
-            </button>
+        ? html`<div class="section-head section-head-actions">
+            ${mdButton(this._tt("add_partner"), {
+              variant: "filled",
+              onClick: () => this._openAddRelation({ kind: "partner", personId: d.person.id }),
+            })}
+            ${mdButton(this._tt("link_existing_person"), {
+              onClick: () => this._openPickPerson("partner"),
+            })}
           </div>`
         : nothing}
       ${partners.length
         ? html`<div class="card-list">
-            ${partners.map(
-              (u) => html`<div class="rel-union-card">
+            ${partners.map((u) => {
+              const unionChildren = u.children || [];
+              const knownCount = u.known_children_count;
+              const unknownCount =
+                knownCount != null && knownCount > unionChildren.length
+                  ? knownCount - unionChildren.length
+                  : 0;
+              const coParentId = String(
+                (u.partners?.[0] as Record<string, unknown> | undefined)?.id || "",
+              );
+              return html`<div class="rel-union-card">
                 <div class="rel-union-head">
                   <strong>
                     ${(u.partners || [])
@@ -2093,15 +2144,20 @@ export class FamilyTreePanel extends LitElement {
                       </span>`
                     : nothing}
                 </div>
-                ${u.marriage_date
-                  ? html`<div class="muted">${this._tt("event_marriage")}: ${u.marriage_date}</div>`
-                  : nothing}
-                ${u.divorce_date
-                  ? html`<div class="muted">${this._tt("event_divorce")}: ${u.divorce_date}</div>`
-                  : nothing}
-                ${u.known_children_count != null
-                  ? html`<div class="muted">
-                      ${this._tt("known_children")}: ${u.known_children_count}
+                ${u.marriage_date || u.divorce_date || u.known_children_count != null
+                  ? html`<div class="rel-union-meta">
+                      ${u.marriage_date
+                        ? html`<div>${this._tt("event_marriage")}: <strong>${u.marriage_date}</strong></div>`
+                        : nothing}
+                      ${u.divorce_date
+                        ? html`<div>${this._tt("event_divorce")}: <strong>${u.divorce_date}</strong></div>`
+                        : nothing}
+                      ${u.known_children_count != null
+                        ? html`<div>
+                            ${this._tt("known_children")}:
+                            <strong>${u.known_children_count}</strong>
+                          </div>`
+                        : nothing}
                     </div>`
                   : nothing}
                 <div class="rel-card-list">
@@ -2109,18 +2165,39 @@ export class FamilyTreePanel extends LitElement {
                     this._renderPersonCard(partner as Record<string, unknown>),
                   )}
                 </div>
-                ${(u.children || []).length
-                  ? html`<div class="rel-union-children">
-                      <span class="muted">${this._tt("children")}</span>
-                      <div class="rel-card-list">
-                        ${u.children.map((c) =>
-                          this._renderPersonCard(c as Record<string, unknown>),
-                        )}
-                      </div>
-                    </div>`
-                  : nothing}
-              </div>`,
-            )}
+                <div class="rel-union-children">
+                  <span class="muted">${this._tt("children")}</span>
+                  <div class="rel-card-list">
+                    ${unionChildren.map((c) =>
+                      this._renderPersonCard(c as Record<string, unknown>),
+                    )}
+                    ${unknownCount > 0
+                      ? html`<div class="unknown-children muted">
+                          ${unknownCount} ${this._tt("unknown_children")}
+                        </div>`
+                      : nothing}
+                    ${write
+                      ? html`<button
+                          type="button"
+                          class="add-slot"
+                          @click=${() =>
+                            this._openAddRelation({
+                              kind: "child",
+                              personId: d.person.id,
+                              unionId: u.union_id,
+                              coParentId,
+                            })}
+                        >
+                          ${icon(MDI_PLUS)} ${this._tt("add_child")}
+                        </button>`
+                      : nothing}
+                  </div>
+                  ${!unionChildren.length && !unknownCount && !write
+                    ? html`<p class="muted">—</p>`
+                    : nothing}
+                </div>
+              </div>`;
+            })}
           </div>`
         : html`<p class="muted">—</p>`}
     `;
@@ -2158,18 +2235,29 @@ export class FamilyTreePanel extends LitElement {
           : nothing}
       </div>
       <div class="card-list">
-        ${d.events
-          .filter((ev) => ev.subject_type === "person")
-          .map((ev: EventDto) => this._renderEventCard(ev))}
-        ${d.events.filter((ev) => ev.subject_type === "person").length === 0
-          ? html`<p class="muted">—</p>`
-          : nothing}
+        ${d.events.map((ev: EventDto) => this._renderEventCard(ev))}
+        ${d.events.length === 0 ? html`<p class="muted">—</p>` : nothing}
       </div>
     `;
     return html`
       ${this._renderCollapsibleSection("personal", this._tt("section_personal"), personal)}
       ${this._renderCollapsibleSection("events", this._tt("events"), events)}
     `;
+  }
+
+  private _sortParents(
+    parents: Array<Record<string, unknown>>,
+  ): Array<Record<string, unknown>> {
+    const order: Record<string, number> = { male: 0, female: 1, unknown: 2 };
+    return [...parents].sort((a, b) => {
+      const sa = order[String(a.sex || "unknown")] ?? 2;
+      const sb = order[String(b.sex || "unknown")] ?? 2;
+      return sa - sb;
+    });
+  }
+
+  private _renderTreeGrid(cols: 2 | 4, content: unknown) {
+    return html`<div class="tree-grid tree-grid--${cols}">${content}</div>`;
   }
 
   private _allGrandparents(tree: PersonDetail["tree"]): Array<Record<string, unknown>> {
@@ -2221,7 +2309,9 @@ export class FamilyTreePanel extends LitElement {
       knownCount != null && knownCount > unionChildren.length
         ? knownCount - unionChildren.length
         : 0;
-    const parentNodes = (tree?.parents || []) as Array<Record<string, unknown>>;
+    const parentNodes = this._sortParents(
+      (tree?.parents || []) as Array<Record<string, unknown>>,
+    );
     const canAddParents = this._canWrite() && parentNodes.length < 2;
 
     return html`
@@ -2229,20 +2319,26 @@ export class FamilyTreePanel extends LitElement {
         ${grandparents.length
           ? this._renderGenRow(
               this._tt("grandparents"),
-              grandparents.map((n) => this._renderPersonCard(n)),
+              this._renderTreeGrid(
+                4,
+                grandparents.map((n) => this._renderPersonCard(n)),
+              ),
             )
           : nothing}
         ${this._renderGenRow(
           this._tt("parents"),
-          html`
-            ${parentNodes.map((n) => this._renderPersonCard(n))}
-            ${canAddParents
-              ? html`<button type="button" class="add-slot" @click=${() =>
-                  this._openParentsDialog()}>
-                  ${icon(MDI_PLUS)} ${this._tt("add_parents")}
-                </button>`
-              : nothing}
-          `,
+          this._renderTreeGrid(
+            2,
+            html`
+              ${parentNodes.map((n) => this._renderPersonCard(n))}
+              ${canAddParents
+                ? html`<button type="button" class="add-slot" @click=${() =>
+                    this._openParentsDialog()}>
+                    ${icon(MDI_PLUS)} ${this._tt("add_parents")}
+                  </button>`
+                : nothing}
+            `,
+          ),
         )}
         <div class="gen-row gen-row--focus">
           <div class="gen focus">
@@ -2292,28 +2388,33 @@ export class FamilyTreePanel extends LitElement {
               )}
               ${this._renderGenRow(
                 this._tt("children"),
-                html`
-                  ${unionChildren.map((n) => this._renderPersonCard(n as Record<string, unknown>))}
-                  ${unknownCount > 0
-                    ? html`<div class="unknown-children muted">
-                        ${unknownCount} ${this._tt("unknown_children")}
-                      </div>`
-                    : nothing}
-                  ${this._canWrite()
-                    ? html`<button type="button" class="add-slot" @click=${() =>
-                        this._openAddRelation({
-                          kind: "child",
-                          personId: p.id,
-                          unionId: activeUnion?.union_id,
-                          coParentId: String(
-                            (activeUnion?.partners?.[0] as Record<string, unknown> | undefined)
-                              ?.id || "",
-                          ),
-                        })}>
-                        ${icon(MDI_PLUS)} ${this._tt("add_child")}
-                      </button>`
-                    : nothing}
-                `,
+                this._renderTreeGrid(
+                  4,
+                  html`
+                    ${unionChildren.map((n) =>
+                      this._renderPersonCard(n as Record<string, unknown>),
+                    )}
+                    ${unknownCount > 0
+                      ? html`<div class="unknown-children muted">
+                          ${unknownCount} ${this._tt("unknown_children")}
+                        </div>`
+                      : nothing}
+                    ${this._canWrite()
+                      ? html`<button type="button" class="add-slot" @click=${() =>
+                          this._openAddRelation({
+                            kind: "child",
+                            personId: p.id,
+                            unionId: activeUnion?.union_id,
+                            coParentId: String(
+                              (activeUnion?.partners?.[0] as Record<string, unknown> | undefined)
+                                ?.id || "",
+                            ),
+                          })}>
+                          ${icon(MDI_PLUS)} ${this._tt("add_child")}
+                        </button>`
+                      : nothing}
+                  `,
+                ),
               )}
             </div>`
           : this._canWrite()
@@ -2335,11 +2436,9 @@ export class FamilyTreePanel extends LitElement {
     const tabs: PersonTab[] = ["details", "relationships", "tree", "sources"];
     return html`
       <div class="person-head">
-        <nav class="breadcrumb">
-          <button class="linkish" @click=${() => this._setView("people")}>${this._tt("nav_people")}</button>
-          <span class="muted">›</span>
-          <span>${personDisplayName(p)}</span>
-        </nav>
+        <button type="button" class="back-link" @click=${() => this._setView("people")}>
+          ← ${this._tt("nav_people")}
+        </button>
         <h2>
           ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
           ${this._lineageStar(p.id, personDisplayName(p))}
@@ -2815,14 +2914,14 @@ export class FamilyTreePanel extends LitElement {
                 : nothing}
               <button
                 type="button"
-                class="linkish date-mode-toggle align-input"
+                class="linkish date-mode-toggle"
                 @click=${() => this._toggleEventDateMode()}
               >
                 ${this._tt("date_simple")}
               </button>`
             : html`<div class="date-input-row">
-                <label class="date-label-grow"
-                  >${this._tt("date")}
+                <div class="date-label-grow">
+                  <span class="field-label">${this._tt("date")}</span>
                   <input
                     type="date"
                     title=${this._tt("date")}
@@ -2833,7 +2932,7 @@ export class FamilyTreePanel extends LitElement {
                         date_iso: (e.target as HTMLInputElement).value,
                       })}
                   />
-                </label>
+                </div>
                 <button
                   type="button"
                   class="linkish date-mode-toggle"
@@ -3334,8 +3433,8 @@ export class FamilyTreePanel extends LitElement {
     .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 0 0 16px; }
     .kv dt { color: var(--secondary-text-color); }
     .kv dd { margin: 0; }
-    .person-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 8px; }
-    .person-head h2 { margin: 0; flex: 1; font-size: 1.3rem; font-weight: 500; }
+    .person-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 8px; }
+    .person-head h2 { margin: 0; font-size: 1.3rem; font-weight: 500; }
     .tree-box { display: flex; flex-direction: column; gap: 16px; align-items: center; }
     .gen { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
     .node {
@@ -3348,6 +3447,9 @@ export class FamilyTreePanel extends LitElement {
     .section-head {
       display: flex; align-items: center; justify-content: space-between;
       gap: 8px; margin: 16px 0 8px;
+    }
+    .section-head-actions {
+      justify-content: flex-start;
     }
     .section-head h3 { margin: 0; }
     .card-list {
@@ -3375,20 +3477,37 @@ export class FamilyTreePanel extends LitElement {
     }
     .event-card-desc { margin-top: 6px; }
     .import-counts li { justify-content: space-between; }
-    .gen .person-card { max-width: 280px; }
+    .tree-grid {
+      display: grid;
+      gap: 8px;
+      width: 100%;
+    }
+    .tree-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .tree-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tree-grid .person-card,
+    .tree-grid .add-slot,
+    .tree-grid .unknown-children {
+      width: 100%;
+      max-width: none;
+      min-height: 88px;
+      box-sizing: border-box;
+    }
+    .gen .person-card { max-width: 280px; width: 280px; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
     .event-date-field {
-      display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
       flex: 1; min-width: 200px;
     }
     .event-date-field input { flex: 1; min-width: 140px; width: auto; }
     .date-input-row {
-      display: flex; align-items: flex-end; gap: 8px; flex: 1; min-width: 200px;
+      display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;
     }
-    .date-label-grow { flex: 1; min-width: 140px; }
-    .date-mode-toggle { font-size: 0.85em; white-space: nowrap; flex-shrink: 0; }
-    .date-mode-toggle.align-input { margin-bottom: 2px; }
+    .date-label-grow {
+      flex: 1; min-width: 140px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .date-mode-toggle { font-size: 0.85em; white-space: nowrap; flex-shrink: 0; align-self: center; }
     .event-form input, .event-form select { width: auto; min-width: 120px; flex: 1; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
     .empty-state {
@@ -3470,6 +3589,18 @@ export class FamilyTreePanel extends LitElement {
       align-items: flex-start;
       gap: 8px;
     }
+    .rel-union-meta {
+      margin: 12px 0;
+      padding: 12px 14px;
+      border-radius: var(--ha-border-radius-md, 8px);
+      background: var(--secondary-background-color);
+      font-size: 0.95rem;
+      line-height: 1.6;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .rel-union-meta strong { color: var(--primary-text-color); }
     .place-field { position: relative; }
     .place-suggest {
       position: absolute;
@@ -3497,7 +3628,6 @@ export class FamilyTreePanel extends LitElement {
       cursor: pointer;
     }
     .place-suggest button:hover { background: var(--secondary-background-color); }
-    .anniversaries-hint { margin: 0 0 8px; font-size: 0.85rem; }
     .union-tabs .gen + .gen { margin-top: 16px; }
     .md-btn {
       display: inline-flex;
@@ -3690,10 +3820,7 @@ export class FamilyTreePanel extends LitElement {
     .row-menu-wrap { position: relative; }
     .icon-btn.sm { width: 32px; height: 32px; }
     .row-menu {
-      position: absolute;
-      right: 0;
-      top: 100%;
-      z-index: 5;
+      z-index: 100;
       min-width: 140px;
       background: var(--card-background-color, #fff);
       border: 1px solid var(--divider-color);
@@ -3703,11 +3830,7 @@ export class FamilyTreePanel extends LitElement {
       flex-direction: column;
       padding: 4px;
     }
-    .row-menu--up {
-      top: auto;
-      bottom: 100%;
-      margin-bottom: 4px;
-    }
+    .row-menu--fixed { position: fixed; }
     .row-menu button {
       appearance: none;
       border: none;
@@ -3725,13 +3848,19 @@ export class FamilyTreePanel extends LitElement {
       align-items: flex-start;
       gap: 8px;
     }
-    .breadcrumb {
-      display: flex;
-      align-items: center;
-      gap: 6px;
+    .back-link {
+      appearance: none;
+      border: none;
+      background: none;
+      padding: 0;
+      font: inherit;
       font-size: 0.9rem;
+      color: var(--primary-color);
+      cursor: pointer;
       margin-bottom: 4px;
+      text-align: left;
     }
+    .back-link:hover { text-decoration: underline; }
     .collapse {
       border: 1px solid var(--divider-color);
       border-radius: var(--ha-border-radius-lg, 12px);
@@ -3774,8 +3903,15 @@ export class FamilyTreePanel extends LitElement {
     }
     .rel-card-list {
       display: flex;
+      flex-direction: row;
       flex-wrap: wrap;
       gap: 12px;
+    }
+    .rel-card-list .person-card,
+    .rel-card-list .add-slot,
+    .rel-card-list .unknown-children {
+      width: 280px;
+      flex-shrink: 0;
     }
     .rel-person-wrap {
       display: flex;
@@ -3790,7 +3926,14 @@ export class FamilyTreePanel extends LitElement {
       justify-content: flex-end;
       padding: 0 4px;
     }
-    .rel-union-children { margin-top: 8px; }
+    .rel-union-children { margin-top: 16px; }
+    .rel-union-children > .muted {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
     .union-tabs { width: 100%; }
     .add-slot {
       appearance: none;
