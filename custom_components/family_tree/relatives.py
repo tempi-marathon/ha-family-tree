@@ -38,6 +38,19 @@ def _vital_fields(repo: Repository, person_id: str) -> dict[str, Any]:
     }
 
 
+def _sibling_count(repo: Repository, person_id: str) -> int:
+    """Count full and half siblings without building full sibling payloads."""
+    parent_ids = {link.parent_id for link in repo.list_parents(person_id)}
+    if not parent_ids:
+        return 0
+    seen: set[str] = set()
+    for parent_id in parent_ids:
+        for link in repo.list_children(parent_id):
+            if link.child_id != person_id:
+                seen.add(link.child_id)
+    return len(seen)
+
+
 def _person_summary(repo: Repository, person: Person) -> dict[str, Any]:
     return {
         "id": person.id,
@@ -49,6 +62,7 @@ def _person_summary(repo: Repository, person: Person) -> dict[str, Any]:
         "surname": person.surname,
         "sex": person.sex.value,
         "is_living": person.is_living,
+        "sibling_count": _sibling_count(repo, person.id),
         **_vital_fields(repo, person.id),
     }
 
@@ -181,10 +195,7 @@ def tree_for(repo: Repository, person_id: str) -> dict[str, Any] | None:
     _assign_children_to_unions(repo, partners, children)
     assigned = {c["id"] for union in partners for c in union["children"]}
     return {
-        "person": {
-            **_person_summary(repo, person),
-            "sibling_count": len(siblings),
-        },
+        "person": _person_summary(repo, person),
         "parents": parent_links,
         "grandparents": grandparents,
         "partners": partners,

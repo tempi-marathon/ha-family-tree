@@ -201,6 +201,21 @@ export async function getPerson(
   }) as Promise<PersonDetail>;
 }
 
+export interface SiblingsDto {
+  person_id: string;
+  person_name: string;
+  siblings: Array<Record<string, unknown>>;
+}
+
+export async function getSiblings(
+  hass: HomeAssistant,
+  personId: string,
+): Promise<SiblingsDto> {
+  return msg(hass, "family_tree/persons/siblings", {
+    person_id: personId,
+  }) as Promise<SiblingsDto>;
+}
+
 export async function savePerson(
   hass: HomeAssistant,
   data: {
