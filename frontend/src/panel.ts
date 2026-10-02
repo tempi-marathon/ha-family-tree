@@ -9,16 +9,12 @@ import {
   type MyLineageDto,
   type PersonDetail,
   type PersonDto,
-  type PlaceDto,
   type StatsDto,
   type TreeUnion,
   addParentChild,
   claimUserLink,
   deleteEvent,
   deletePerson,
-  deleteUnion,
-  getUnion,
-  removeParentChild,
   gazetteerStatus,
   getMyLineage,
   getPerson,
@@ -107,15 +103,8 @@ const MDI_CHEVRON_RIGHT =
 const BRAND_LOGO_URL = "/api/family_tree/brand/logo.png";
 const BRAND_LOGO_DARK_URL = "/api/family_tree/brand/dark_logo.png";
 
-type PersonTab = "details" | "relationships" | "tree" | "sources";
-type DialogMode =
-  | "person"
-  | "event"
-  | "import"
-  | "siblings"
-  | "union"
-  | "pickPerson"
-  | "parents";
+type PersonTab = "details" | "tree" | "sources";
+type DialogMode = "person" | "event" | "import" | "siblings";
 type RelationTarget =
   | { kind: "parent"; personId: string }
   | { kind: "partner"; personId: string }
@@ -235,16 +224,8 @@ export class FamilyTreePanel extends LitElement {
   @state() private _meForm: Record<string, string> = {};
   @state() private _fieldErrors: Record<string, string> = {};
   @state() private _importFileName = "";
-  @state() private _unionForm: Record<string, string> = {};
-  @state() private _editingUnionId: string | null = null;
-  @state() private _pickPersonQuery = "";
-  @state() private _pickPersonRole: "partner" | "father" | "mother" | null = null;
-  @state() private _parentsForm: Record<string, string> = {};
-  @state() private _placeSuggestions: PlaceDto[] = [];
-  @state() private _placeSuggestOpen = false;
 
   private _unsub: (() => void) | null = null;
-  private _placeSearchTimer: ReturnType<typeof setTimeout> | null = null;
   private _mql: MediaQueryList | null = null;
   private _connected = false;
   private _viewHydrated = false;
@@ -665,10 +646,7 @@ export class FamilyTreePanel extends LitElement {
     return parts.length ? parts : html`<span class="muted">—</span>`;
   }
 
-  private _truncatePlaceLabel(label: string): string {
-    const comma = label.indexOf(",");
-    return comma > 0 ? label.slice(0, comma).trim() : label;
-  }
+
 
 
 
@@ -1758,318 +1736,6 @@ export class FamilyTreePanel extends LitElement {
     </section>`;
   }
 
-  private _pickPersonMatches(): PersonDto[] {
-    const q = this._pickPersonQuery.trim().toLowerCase();
-    if (!q || !this._detail) return [];
-    const selfId = this._detail.person.id;
-    return this._people
-      .filter((p) => p.id !== selfId && !p.deleted_at)
-      .filter((p) => {
-        const hay = [p.given_names, p.call_name, p.surname_prefix, p.surname, personDisplayName(p)]
-          .join(" ")
-          .toLowerCase();
-        return hay.includes(q);
-      })
-      .slice(0, 12);
-  }
-
-  private _openPickPerson(role: "partner" | "father" | "mother") {
-    this._pickPersonRole = role;
-    this._pickPersonQuery = "";
-    this._dialogMode = "pickPerson";
-    this._dialogOpen = true;
-    this._error = "";
-  }
-
-  private _openParentsDialog() {
-    const parents = (this._detail?.tree?.parents || []) as Array<Record<string, unknown>>;
-    const father = parents.find((p) => p.sex === "male");
-    const mother = parents.find((p) => p.sex === "female");
-    this._parentsForm = {
-      father_id: father ? String(father.id) : "",
-      mother_id: mother ? String(mother.id) : "",
-    };
-    this._dialogMode = "parents";
-    this._dialogOpen = true;
-    this._error = "";
-  }
-
-  private async _openUnionEdit(unionId: string) {
-    if (!this.hass) return;
-    try {
-      const data = await getUnion(this.hass, unionId);
-      const marriage = data.events.find((e) => e.type === "marriage");
-      this._editingUnionId = unionId;
-      this._unionForm = {
-        status: data.union.status || "ongoing",
-        notes: data.union.notes || "",
-        known_children_count:
-          data.union.known_children_count != null
-            ? String(data.union.known_children_count)
-            : "",
-        marriage_date: marriage?.date_text || "",
-        marriage_place: marriage?.place_name || "",
-      };
-      this._dialogMode = "union";
-      this._dialogOpen = true;
-      this._error = "";
-    } catch (err) {
-      this._error = formatHassError(err);
-    }
-  }
-
-  private async _linkPickedPerson(personId: string) {
-    if (!this.hass || !this._detail || !this._pickPersonRole) return;
-    const selfId = this._detail.person.id;
-    this._saving = true;
-    try {
-      if (this._pickPersonRole === "partner") {
-        await saveUnion(this.hass, { partner_ids: [selfId, personId] });
-      } else if (this._pickPersonRole === "father" || this._pickPersonRole === "mother") {
-        await addParentChild(this.hass, {
-          parent_id: personId,
-          child_id: selfId,
-        });
-      }
-      this._dialogOpen = false;
-      this._pickPersonRole = null;
-      this._detail = await getPerson(this.hass, selfId);
-      await this._refreshAll();
-    } catch (err) {
-      this._error = formatHassError(err);
-    } finally {
-      this._saving = false;
-    }
-  }
-
-  private async _saveParentsLinks() {
-    if (!this.hass || !this._detail) return;
-    const selfId = this._detail.person.id;
-    const fatherId = (this._parentsForm.father_id || "").trim();
-    const motherId = (this._parentsForm.mother_id || "").trim();
-    this._saving = true;
-    try {
-      if (fatherId) {
-        await addParentChild(this.hass, { parent_id: fatherId, child_id: selfId });
-      }
-      if (motherId) {
-        await addParentChild(this.hass, { parent_id: motherId, child_id: selfId });
-      }
-      this._dialogOpen = false;
-      this._detail = await getPerson(this.hass, selfId);
-      await this._refreshAll();
-    } catch (err) {
-      this._error = formatHassError(err);
-    } finally {
-      this._saving = false;
-    }
-  }
-
-  private async _removeParentLink(linkId: string) {
-    if (!this.hass || !this._detail || !confirm(this._tt("confirm_remove_parent"))) return;
-    try {
-      await removeParentChild(this.hass, linkId);
-      this._detail = await getPerson(this.hass, this._detail.person.id);
-      await this._refreshAll();
-    } catch (err) {
-      this._error = formatHassError(err);
-    }
-  }
-
-  private async _deleteUnion(unionId: string) {
-    if (!this.hass || !this._detail || !confirm(this._tt("confirm_delete_union"))) return;
-    try {
-      await deleteUnion(this.hass, unionId);
-      this._detail = await getPerson(this.hass, this._detail.person.id);
-      await this._refreshAll();
-    } catch (err) {
-      this._error = formatHassError(err);
-    }
-  }
-
-  private async _saveUnionForm() {
-    if (!this.hass || !this._detail || !this._editingUnionId) return;
-    const selfId = this._detail.person.id;
-    const partners = (this._detail.tree?.partners || []) as TreeUnion[];
-    const union = partners.find((u) => u.union_id === this._editingUnionId);
-    if (!union) return;
-    const partnerIds = [
-      selfId,
-      ...(union.partners || []).map((p) => String((p as Record<string, unknown>).id || "")),
-    ].filter(Boolean);
-    const uniquePartners = [...new Set(partnerIds)];
-    this._saving = true;
-    try {
-      const kcc = (this._unionForm.known_children_count || "").trim();
-      await saveUnion(this.hass, {
-        union_id: this._editingUnionId,
-        partner_ids: uniquePartners,
-        status: this._unionForm.status || "ongoing",
-        notes: this._unionForm.notes || "",
-        known_children_count: kcc ? Number(kcc) : null,
-      });
-      const marriageDate = (this._unionForm.marriage_date || "").trim();
-      const placeName = (this._unionForm.marriage_place || "").trim();
-      let placeId: string | undefined;
-      if (placeName) {
-        const found = await listPlaces(this.hass, { search: placeName, limit: 20 });
-        const exact = found.places.find(
-          (pl) => pl.name.localeCompare(placeName, undefined, { sensitivity: "accent" }) === 0,
-        );
-        if (exact) placeId = exact.id;
-        else {
-          const { place } = await savePlace(this.hass, { name: placeName });
-          placeId = place.id;
-        }
-      }
-      if (marriageDate) {
-        const built = buildGedcomDate("exact", marriageDate);
-        if (!built.error && built.value) {
-          await saveEvent(this.hass, {
-            subject_type: "union",
-            subject_id: this._editingUnionId,
-            type: "marriage",
-            date_text: built.value,
-            date_qualifier: "exact",
-            place_id: placeId,
-          });
-        }
-      }
-      this._dialogOpen = false;
-      this._editingUnionId = null;
-      this._detail = await getPerson(this.hass, selfId);
-      await this._refreshAll();
-    } catch (err) {
-      this._error = formatHassError(err);
-    } finally {
-      this._saving = false;
-    }
-  }
-
-  private _renderRelationshipsTab(d: PersonDetail) {
-    const tree = d.tree;
-    const parents = (tree?.parents || []) as Array<Record<string, unknown>>;
-    const partners = (tree?.partners || []) as TreeUnion[];
-    const write = this._canWrite();
-    return html`
-      <section class="rel-section block">
-        <div class="section-head">
-          <h3>${this._tt("section_parents")}</h3>
-          ${write
-            ? html`<span class="row-actions">
-                <button type="button" class="linkish" @click=${() => this._openParentsDialog()}>
-                  ${this._tt("add_parents")}
-                </button>
-                <button type="button" class="linkish" @click=${() => this._openPickPerson("father")}>
-                  ${this._tt("link_existing_person")}
-                </button>
-              </span>`
-            : nothing}
-        </div>
-        ${parents.length
-          ? html`<ul class="plain rel-list">
-              ${parents.map(
-                (parent) => html`<li>
-                  <button type="button" class="linkish" @click=${() => this._openPerson(String(parent.id))}>
-                    ${String(parent.name || parent.id)}
-                  </button>
-                  ${write && parent.link_id
-                    ? html`<button
-                        type="button"
-                        class="linkish danger"
-                        @click=${() => this._removeParentLink(String(parent.link_id))}
-                      >
-                        ${this._tt("delete")}
-                      </button>`
-                    : nothing}
-                </li>`,
-              )}
-            </ul>`
-          : html`<p class="muted">—</p>`}
-      </section>
-      <section class="rel-section block">
-        <div class="section-head">
-          <h3>${this._tt("section_partners")}</h3>
-          ${write
-            ? html`<span class="row-actions">
-                <button
-                  type="button"
-                  class="linkish"
-                  @click=${() =>
-                    this._openAddRelation({ kind: "partner", personId: d.person.id })}
-                >
-                  ${this._tt("add_partner")}
-                </button>
-                <button type="button" class="linkish" @click=${() => this._openPickPerson("partner")}>
-                  ${this._tt("link_existing_person")}
-                </button>
-              </span>`
-            : nothing}
-        </div>
-        ${partners.length
-          ? html`<div class="card-list">
-              ${partners.map(
-                (u) => html`<div class="rel-union-card">
-                  <div class="rel-union-head">
-                    <strong>
-                      ${(u.partners || [])
-                        .map((pt) => String((pt as Record<string, unknown>).name || ""))
-                        .filter(Boolean)
-                        .join(" & ") || this._tt("partners")}
-                    </strong>
-                    ${write
-                      ? html`<span class="row-actions">
-                          <button
-                            type="button"
-                            class="linkish"
-                            @click=${() => this._openUnionEdit(u.union_id)}
-                          >
-                            ${this._tt("edit")}
-                          </button>
-                          <button
-                            type="button"
-                            class="linkish danger"
-                            @click=${() => this._deleteUnion(u.union_id)}
-                          >
-                            ${this._tt("delete")}
-                          </button>
-                        </span>`
-                      : nothing}
-                  </div>
-                  ${u.marriage_date
-                    ? html`<div class="muted">${this._tt("event_marriage")}: ${u.marriage_date}</div>`
-                    : nothing}
-                  ${u.divorce_date
-                    ? html`<div class="muted">${this._tt("event_divorce")}: ${u.divorce_date}</div>`
-                    : nothing}
-                  ${u.known_children_count != null
-                    ? html`<div class="muted">
-                        ${this._tt("known_children")}: ${u.known_children_count}
-                      </div>`
-                    : nothing}
-                  ${(u.children || []).length
-                    ? html`<ul class="plain">
-                        ${u.children.map(
-                          (c) => html`<li>
-                            <button
-                              type="button"
-                              class="linkish"
-                              @click=${() => this._openPerson(String((c as Record<string, unknown>).id))}
-                            >
-                              ${String((c as Record<string, unknown>).name || "")}
-                            </button>
-                          </li>`,
-                        )}
-                      </ul>`
-                    : nothing}
-                </div>`,
-              )}
-            </div>`
-          : html`<p class="muted">—</p>`}
-      </section>
-    `;
-  }
-
   private _renderPersonDetailsTab(d: PersonDetail) {
     const p = d.person;
     const lang = this.hass?.language;
@@ -2097,10 +1763,8 @@ export class FamilyTreePanel extends LitElement {
           : nothing}
       </div>
       <div class="card-list">
-        ${d.events
-          .filter((ev) => ev.subject_type === "person")
-          .map((ev: EventDto) => this._renderEventCard(ev))}
-        ${d.events.filter((ev) => ev.subject_type === "person").length === 0
+        ${d.events.map((ev: EventDto) => this._renderEventCard(ev))}
+        ${d.events.length === 0
           ? html`<p class="muted">—</p>`
           : nothing}
       </div>
@@ -2219,7 +1883,6 @@ export class FamilyTreePanel extends LitElement {
                     subtitle: [
                       activeUnion.marriage_date,
                       activeUnion.marriage_place,
-                      activeUnion.divorce_date,
                     ]
                       .filter(Boolean)
                       .join(" · "),
@@ -2267,7 +1930,7 @@ export class FamilyTreePanel extends LitElement {
   private _renderPerson() {
     const d = this._detail!;
     const p = d.person;
-    const tabs: PersonTab[] = ["details", "relationships", "tree", "sources"];
+    const tabs: PersonTab[] = ["details", "tree", "sources"];
     return html`
       <div class="person-head">
         <nav class="breadcrumb">
@@ -2296,9 +1959,7 @@ export class FamilyTreePanel extends LitElement {
       </div>
       ${this._personTab === "details"
         ? this._renderPersonDetailsTab(d)
-        : this._personTab === "relationships"
-          ? this._renderRelationshipsTab(d)
-          : this._personTab === "tree"
+        : this._personTab === "tree"
             ? this._renderTreeTab(d)
             : html`<ul class="plain">
               ${(d.citations || []).map(
@@ -2515,8 +2176,6 @@ export class FamilyTreePanel extends LitElement {
   private _closeDialog = () => {
     this._dialogOpen = false;
     this._fieldErrors = {};
-    this._editingUnionId = null;
-    this._pickPersonRole = null;
     if (this._dialogMode === "import" && this._importPhase !== "importing") {
       this._importPhase = "";
       this._importFile = null;
@@ -2560,13 +2219,7 @@ export class FamilyTreePanel extends LitElement {
         ? this._importPhase === "done"
           ? this._tt("import_complete")
           : this._tt("import_preview")
-        : mode === "union"
-          ? this._tt("edit")
-          : mode === "pickPerson"
-            ? this._tt("link_existing_person")
-            : mode === "parents"
-              ? this._tt("add_parents")
-              : mode === "siblings"
+        : mode === "siblings"
                 ? this._tt("siblings")
                 : mode === "event"
                   ? this._editingEventId
@@ -2768,41 +2421,16 @@ export class FamilyTreePanel extends LitElement {
             ${advancedDate ? this._tt("date_simple") : this._tt("date_advanced")}
           </button>
         </div>
-        <label class="place-field"
+        <label
           >${this._fieldLabel(this._tt("place"))}
           <input
             .value=${this._eventForm.place || ""}
-            @input=${(e: Event) => {
-              const value = (e.target as HTMLInputElement).value;
-              this._eventForm = { ...this._eventForm, place: value };
-              this._schedulePlaceSearch(value);
-            }}
-            @focus=${() => {
-              if (this._placeSuggestions.length) this._placeSuggestOpen = true;
-            }}
-            @blur=${() => {
-              setTimeout(() => {
-                this._placeSuggestOpen = false;
-              }, 150);
-            }}
+            @input=${(e: Event) =>
+              (this._eventForm = {
+                ...this._eventForm,
+                place: (e.target as HTMLInputElement).value,
+              })}
           />
-          ${this._placeSuggestOpen && this._placeSuggestions.length
-            ? html`<ul class="place-suggest">
-                ${this._placeSuggestions.map(
-                  (pl) => html`<li>
-                    <button
-                      type="button"
-                      @mousedown=${() => {
-                        this._eventForm = { ...this._eventForm, place: pl.name };
-                        this._placeSuggestOpen = false;
-                      }}
-                    >
-                      ${pl.name}
-                    </button>
-                  </li>`,
-                )}
-              </ul>`
-            : nothing}
         </label>
         <label
           >${this._tt("description")}
@@ -2817,136 +2445,6 @@ export class FamilyTreePanel extends LitElement {
         </label>
       </div>
     `;
-
-    const unionBody = html`<div class="form-section">
-      <label
-        >${this._fieldLabel(this._tt("union_status"))}
-        <select
-          .value=${this._unionForm.status || "ongoing"}
-          @change=${(e: Event) =>
-            (this._unionForm = {
-              ...this._unionForm,
-              status: (e.target as HTMLSelectElement).value,
-            })}
-        >
-          <option value="ongoing">${this._tt("status_ongoing")}</option>
-          <option value="ended">${this._tt("status_ended")}</option>
-          <option value="unknown">${this._tt("status_unknown")}</option>
-        </select>
-      </label>
-      <label
-        >${this._fieldLabel(this._tt("known_children"))}
-        <input
-          type="number"
-          min="0"
-          .value=${this._unionForm.known_children_count || ""}
-          @input=${(e: Event) =>
-            (this._unionForm = {
-              ...this._unionForm,
-              known_children_count: (e.target as HTMLInputElement).value,
-            })}
-        />
-      </label>
-      <label
-        >${this._fieldLabel(this._tt("event_marriage"))}
-        <input
-          .value=${this._unionForm.marriage_date || ""}
-          placeholder=${this._tt("date_gedcom_hint")}
-          @input=${(e: Event) =>
-            (this._unionForm = {
-              ...this._unionForm,
-              marriage_date: (e.target as HTMLInputElement).value,
-            })}
-        />
-      </label>
-      <label
-        >${this._fieldLabel(this._tt("place"))}
-        <input
-          .value=${this._unionForm.marriage_place || ""}
-          @input=${(e: Event) =>
-            (this._unionForm = {
-              ...this._unionForm,
-              marriage_place: (e.target as HTMLInputElement).value,
-            })}
-        />
-      </label>
-      <label
-        >${this._fieldLabel(this._tt("union_notes"))}
-        <textarea
-          rows="2"
-          .value=${this._unionForm.notes || ""}
-          @input=${(e: Event) =>
-            (this._unionForm = {
-              ...this._unionForm,
-              notes: (e.target as HTMLTextAreaElement).value,
-            })}
-        ></textarea>
-      </label>
-    </div>`;
-
-    const pickMatches = this._pickPersonMatches();
-    const pickBody = html`<div class="form-section">
-      <label
-        >${this._fieldLabel(this._tt("search_to_link"))}
-        <input
-          type="search"
-          .value=${this._pickPersonQuery}
-          placeholder=${this._tt("search_placeholder")}
-          @input=${(e: Event) =>
-            (this._pickPersonQuery = (e.target as HTMLInputElement).value)}
-        />
-      </label>
-      <ul class="plain me-hits">
-        ${pickMatches.map(
-          (p) => html`<li>
-            <button type="button" class="linkish" @click=${() => void this._linkPickedPerson(p.id)}>
-              ${personDisplayName(p)}
-            </button>
-          </li>`,
-        )}
-        ${!pickMatches.length && this._pickPersonQuery
-          ? html`<li class="muted">—</li>`
-          : nothing}
-      </ul>
-    </div>`;
-
-    const parentsBody = html`<div class="form-section">
-      <p class="muted">${this._tt("search_to_link")}</p>
-      <label>${this._tt("father")}
-        <input
-          type="search"
-          placeholder=${this._tt("search_placeholder")}
-          @change=${(e: Event) => {
-            const q = (e.target as HTMLInputElement).value.toLowerCase();
-            const hit = this._people.find((p) =>
-              personDisplayName(p).toLowerCase().includes(q),
-            );
-            if (hit) this._parentsForm = { ...this._parentsForm, father_id: hit.id };
-          }}
-        />
-      </label>
-      <label>${this._tt("mother")}
-        <input
-          type="search"
-          placeholder=${this._tt("search_placeholder")}
-          @change=${(e: Event) => {
-            const q = (e.target as HTMLInputElement).value.toLowerCase();
-            const hit = this._people.find((p) =>
-              personDisplayName(p).toLowerCase().includes(q),
-            );
-            if (hit) this._parentsForm = { ...this._parentsForm, mother_id: hit.id };
-          }}
-        />
-      </label>
-      <div class="row-actions">
-        <button type="button" class="linkish" @click=${() => this._openPickPerson("father")}>
-          ${this._tt("link_existing_person")} (${this._tt("father")})
-        </button>
-        <button type="button" class="linkish" @click=${() => this._openPickPerson("mother")}>
-          ${this._tt("link_existing_person")} (${this._tt("mother")})
-        </button>
-      </div>
-    </div>`;
 
     const siblingsBody = html`<div class="card-list">
       ${(this._detail?.tree?.siblings || []).map((s) =>
@@ -2972,36 +2470,7 @@ export class FamilyTreePanel extends LitElement {
                 })
               : nothing}
           `
-        : mode === "union"
-          ? html`
-              ${mdButton(this._tt("cancel"), {
-                variant: "text",
-                onClick: this._closeDialog,
-              })}
-              ${mdButton(this._tt("save"), {
-                variant: "filled",
-                disabled: this._saving,
-                onClick: () => void this._saveUnionForm(),
-              })}
-            `
-          : mode === "pickPerson"
-            ? mdButton(this._tt("close"), {
-                variant: "text",
-                onClick: this._closeDialog,
-              })
-            : mode === "parents"
-              ? html`
-                  ${mdButton(this._tt("cancel"), {
-                    variant: "text",
-                    onClick: this._closeDialog,
-                  })}
-                  ${mdButton(this._tt("save"), {
-                    variant: "filled",
-                    disabled: this._saving,
-                    onClick: () => void this._saveParentsLinks(),
-                  })}
-                `
-              : mode === "siblings"
+        : mode === "siblings"
           ? mdButton(this._tt("close"), {
               variant: "text",
               onClick: this._closeDialog,
@@ -3056,13 +2525,7 @@ export class FamilyTreePanel extends LitElement {
 
           ${mode === "import"
             ? this._renderImportDialogBody()
-            : mode === "union"
-              ? unionBody
-              : mode === "pickPerson"
-                ? pickBody
-                : mode === "parents"
-                  ? parentsBody
-                  : mode === "siblings"
+            : mode === "siblings"
                     ? siblingsBody
                     : mode === "event"
                       ? eventBody
@@ -3380,20 +2843,6 @@ export class FamilyTreePanel extends LitElement {
       gap: 8px;
       margin-left: auto;
     }
-    .rel-section h3 { margin: 0; font-size: 1rem; }
-    .rel-union-card {
-      padding: 12px;
-      border: 1px solid var(--divider-color);
-      border-radius: var(--ha-border-radius-md, 8px);
-      background: var(--card-background-color, #fff);
-    }
-    .rel-union-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 8px;
-    }
-    .union-tabs .gen + .gen { margin-top: 16px; }
     .md-btn {
       display: inline-flex;
       align-items: center;
