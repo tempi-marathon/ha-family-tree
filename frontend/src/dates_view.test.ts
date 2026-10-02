@@ -4,8 +4,40 @@ import {
   daysUntilLabel,
   formatGedcomDate,
   formatLifespanLine,
+  gedcomToIsoDate,
+  isoToGedcomDate,
   parseSortDateParts,
 } from "./dates_view";
+
+describe("isoToGedcomDate", () => {
+  it("converts ISO to GEDCOM", () => {
+    expect(isoToGedcomDate("1980-01-12")).toBe("12 JAN 1980");
+    expect(isoToGedcomDate("2000-09-27")).toBe("27 SEP 2000");
+  });
+
+  it("returns empty for invalid input", () => {
+    expect(isoToGedcomDate("")).toBe("");
+    expect(isoToGedcomDate("not-a-date")).toBe("");
+  });
+});
+
+describe("gedcomToIsoDate", () => {
+  it("converts exact GEDCOM dates to ISO", () => {
+    expect(gedcomToIsoDate("12 JAN 1980")).toBe("1980-01-12");
+    expect(gedcomToIsoDate(" 27 sep 2000 ")).toBe("2000-09-27");
+  });
+
+  it("returns null for qualifiers and ranges", () => {
+    expect(gedcomToIsoDate("ABT 1900")).toBeNull();
+    expect(gedcomToIsoDate("BET 1 JAN 1910 AND 5 MAR 1912")).toBeNull();
+    expect(gedcomToIsoDate("1900")).toBeNull();
+  });
+
+  it("round-trips with isoToGedcomDate", () => {
+    const iso = "1980-03-15";
+    expect(gedcomToIsoDate(isoToGedcomDate(iso))).toBe(iso);
+  });
+});
 
 describe("formatGedcomDate", () => {
   it("returns em dash for empty", () => {

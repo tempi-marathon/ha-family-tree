@@ -43,7 +43,13 @@ import {
   formatLifespan,
   gedcomToForm,
 } from "./date_format";
-import { daysUntilLabel, formatGedcomDate, formatLifespanLine } from "./dates_view";
+import {
+  daysUntilLabel,
+  formatGedcomDate,
+  formatLifespanLine,
+  gedcomToIsoDate,
+  isoToGedcomDate,
+} from "./dates_view";
 import { formatHassError } from "./errors";
 import { type LocaleKey, t } from "./i18n";
 import {
@@ -496,6 +502,8 @@ export class FamilyTreePanel extends LitElement {
     this._editingEventId = null;
     this._eventForm = {
       event_type: "birth",
+      date_mode: "simple",
+      date_iso: "",
       date_qualifier: "exact",
       date_first: "",
       date_second: "",
@@ -507,10 +515,14 @@ export class FamilyTreePanel extends LitElement {
 
   private _openEditEvent(ev: EventDto) {
     const form = gedcomToForm(ev.date_text);
+    const date_iso = gedcomToIsoDate(form.first) || "";
+    const simple = form.qualifier === "exact" && date_iso !== "";
     this._dialogMode = "event";
     this._editingEventId = ev.id;
     this._eventForm = {
       event_type: ev.type,
+      date_mode: simple ? "simple" : "advanced",
+      date_iso: simple ? date_iso : "",
       date_qualifier: form.qualifier,
       date_first: form.first,
       date_second: form.second,
@@ -723,6 +735,32 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
+  private _toggleEventDateMode() {
+    const current = this._eventForm.date_mode || "simple";
+    if (current === "simple") {
+      const date_first = this._eventForm.date_iso
+        ? isoToGedcomDate(this._eventForm.date_iso)
+        : this._eventForm.date_first || "";
+      this._eventForm = {
+        ...this._eventForm,
+        date_mode: "advanced",
+        date_qualifier: "exact",
+        date_first,
+        date_iso: "",
+      };
+      return;
+    }
+    const date_iso = gedcomToIsoDate(this._eventForm.date_first || "") || "";
+    this._eventForm = {
+      ...this._eventForm,
+      date_mode: "simple",
+      date_iso,
+      date_qualifier: "exact",
+      date_first: "",
+      date_second: "",
+    };
+  }
+
   private async _saveEvent() {
     if (!this.hass || !this._detail || !this._canWrite()) return;
     this._saving = true;
@@ -741,22 +779,28 @@ export class FamilyTreePanel extends LitElement {
           placeId = place.id;
         }
       }
-      const qualifier = (this._eventForm.date_qualifier || "exact") as DateQualifier;
-      const built = buildGedcomDate(
-        qualifier,
-        this._eventForm.date_first || "",
-        this._eventForm.date_second || "",
-      );
-      if (built.error) {
-        this._error = this._tt("date_invalid");
-        return;
+      let date_text = "";
+      if ((this._eventForm.date_mode || "simple") === "simple") {
+        date_text = isoToGedcomDate(this._eventForm.date_iso || "");
+      } else {
+        const qualifier = (this._eventForm.date_qualifier || "exact") as DateQualifier;
+        const built = buildGedcomDate(
+          qualifier,
+          this._eventForm.date_first || "",
+          this._eventForm.date_second || "",
+        );
+        if (built.error) {
+          this._error = this._tt("date_invalid");
+          return;
+        }
+        date_text = built.value;
       }
       await saveEvent(this.hass, {
         ...(this._editingEventId ? { event_id: this._editingEventId } : {}),
         subject_type: "person",
         subject_id: this._detail.person.id,
         event_type: this._eventForm.event_type || "birth",
-        date_text: built.value,
+        date_text,
         place: this._eventForm.place || undefined,
         description: this._eventForm.description || "",
         place_id: placeId,
@@ -2175,9 +2219,11 @@ export class FamilyTreePanel extends LitElement {
     `;
 
     const usedTypes = this._usedUniqueEventTypes();
+    const advancedDate = (this._eventForm.date_mode || "simple") === "advanced";
     const needsSecondDate =
-      this._eventForm.date_qualifier === "between" ||
-      this._eventForm.date_qualifier === "from_to";
+      advancedDate &&
+      (this._eventForm.date_qualifier === "between" ||
+        this._eventForm.date_qualifier === "from_to");
     const eventBody = html`
       <div class="form-section">
         <label
@@ -2199,47 +2245,70 @@ export class FamilyTreePanel extends LitElement {
             })}
           </select>
         </label>
-        <label
-          >${this._tt("date_qualifier")}
-          <select
-            .value=${this._eventForm.date_qualifier || "exact"}
-            @change=${(e: Event) =>
-              (this._eventForm = {
-                ...this._eventForm,
-                date_qualifier: (e.target as HTMLSelectElement).value,
-              })}
-          >
-            ${FORM_QUALIFIERS.map(
-              (q) => html`<option value=${q}>${this._tt(QUALIFIER_KEYS[q])}</option>`,
-            )}
-          </select>
-        </label>
-        <label
-          >${this._tt("date")}
-          <input
-            .value=${this._eventForm.date_first || ""}
-            placeholder=${this._tt("date_hint")}
-            @input=${(e: Event) =>
-              (this._eventForm = {
-                ...this._eventForm,
-                date_first: (e.target as HTMLInputElement).value,
-              })}
-          />
-        </label>
-        ${needsSecondDate
-          ? html`<label
-              >${this._tt("date_second")}
-              <input
-                .value=${this._eventForm.date_second || ""}
-                placeholder=${this._tt("date_hint")}
-                @input=${(e: Event) =>
-                  (this._eventForm = {
-                    ...this._eventForm,
-                    date_second: (e.target as HTMLInputElement).value,
-                  })}
-              />
-            </label>`
-          : nothing}
+        <div class="event-date-field">
+          ${advancedDate
+            ? html`<label
+                >${this._tt("date_qualifier")}
+                <select
+                  .value=${this._eventForm.date_qualifier || "exact"}
+                  @change=${(e: Event) =>
+                    (this._eventForm = {
+                      ...this._eventForm,
+                      date_qualifier: (e.target as HTMLSelectElement).value,
+                    })}
+                >
+                  ${FORM_QUALIFIERS.map(
+                    (q) =>
+                      html`<option value=${q}>${this._tt(QUALIFIER_KEYS[q])}</option>`,
+                  )}
+                </select>
+              </label>
+              <label
+                >${this._tt("date")}
+                <input
+                  .value=${this._eventForm.date_first || ""}
+                  placeholder=${this._tt("date_gedcom_hint")}
+                  @input=${(e: Event) =>
+                    (this._eventForm = {
+                      ...this._eventForm,
+                      date_first: (e.target as HTMLInputElement).value,
+                    })}
+                />
+              </label>
+              ${needsSecondDate
+                ? html`<label
+                    >${this._tt("date_second")}
+                    <input
+                      .value=${this._eventForm.date_second || ""}
+                      placeholder=${this._tt("date_gedcom_hint")}
+                      @input=${(e: Event) =>
+                        (this._eventForm = {
+                          ...this._eventForm,
+                          date_second: (e.target as HTMLInputElement).value,
+                        })}
+                    />
+                  </label>`
+                : nothing}`
+            : html`<label
+                >${this._tt("date")}
+                <input
+                  type="date"
+                  title=${this._tt("date")}
+                  .value=${this._eventForm.date_iso || ""}
+                  @input=${(e: Event) =>
+                    (this._eventForm = {
+                      ...this._eventForm,
+                      date_iso: (e.target as HTMLInputElement).value,
+                    })}
+                />
+              </label>`}
+          <button
+            type="button"
+            class="linkish date-mode-toggle"
+            @click=${() => this._toggleEventDateMode()}>
+            ${advancedDate ? this._tt("date_simple") : this._tt("date_advanced")}
+          </button>
+        </div>
         <label
           >${this._tt("place")}
           <input
@@ -2596,6 +2665,12 @@ export class FamilyTreePanel extends LitElement {
     .gen .person-card { max-width: 280px; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
     .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+    .event-date-field {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      flex: 1; min-width: 200px;
+    }
+    .event-date-field input { flex: 1; min-width: 140px; width: auto; }
+    .date-mode-toggle { font-size: 0.85em; white-space: nowrap; }
     .event-form input, .event-form select { width: auto; min-width: 120px; flex: 1; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
     .empty-state {
