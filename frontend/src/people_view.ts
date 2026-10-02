@@ -1,6 +1,6 @@
 /** Pure people list filtering / sorting helpers. */
 
-import type { PersonDto } from "./api";
+import type { LifeEventDto, PersonDto } from "./api";
 import type { PanelSort } from "./panel_view_state";
 
 export interface PeopleViewFilters {
@@ -9,6 +9,14 @@ export interface PeopleViewFilters {
   filterSex: string;
   sort: PanelSort;
   familyShortcut: string;
+  filterPlace: string;
+  dateFrom: string;
+  dateTo: string;
+}
+
+export interface PlaceOption {
+  id: string;
+  label: string;
 }
 
 export function personDisplayName(person: PersonDto): string {
@@ -31,6 +39,59 @@ export function matchesFamilyShortcut(person: PersonDto, shortcut: string): bool
   return full.startsWith(needle) || bare.startsWith(needle);
 }
 
+function lifeEvents(person: PersonDto): LifeEventDto[] {
+  return person.life_events || [];
+}
+
+function isoDay(sortDate: string | null | undefined): string | null {
+  if (!sortDate) return null;
+  const day = sortDate.trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+}
+
+/** True if any life-event sort_date falls in [dateFrom, dateTo] (inclusive, open ends). */
+export function matchesDateRange(
+  person: PersonDto,
+  dateFrom: string,
+  dateTo: string,
+): boolean {
+  const from = dateFrom.trim();
+  const to = dateTo.trim();
+  if (!from && !to) return true;
+  const events = lifeEvents(person);
+  for (const ev of events) {
+    const day = isoDay(ev.sort_date);
+    if (!day) continue;
+    if (from && day < from) continue;
+    if (to && day > to) continue;
+    return true;
+  }
+  return false;
+}
+
+export function matchesPlace(person: PersonDto, placeId: string): boolean {
+  const needle = placeId.trim();
+  if (!needle) return true;
+  return lifeEvents(person).some((ev) => ev.place_id === needle);
+}
+
+/** Unique places from loaded people, sorted by label. */
+export function placeOptionsFromPeople(people: PersonDto[]): PlaceOption[] {
+  const byId = new Map<string, string>();
+  for (const person of people) {
+    for (const ev of lifeEvents(person)) {
+      if (!ev.place_id) continue;
+      const label = (ev.place_name || "").trim() || ev.place_id;
+      if (!byId.has(ev.place_id)) byId.set(ev.place_id, label);
+    }
+  }
+  return [...byId.entries()]
+    .map(([id, label]) => ({ id, label }))
+    .sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
+    );
+}
+
 export function filterAndSortPeople(
   people: PersonDto[],
   filters: PeopleViewFilters,
@@ -41,6 +102,8 @@ export function filterAndSortPeople(
     if (filters.filterLiving === "deceased" && p.is_living) return false;
     if (filters.filterSex && p.sex !== filters.filterSex) return false;
     if (!matchesFamilyShortcut(p, filters.familyShortcut)) return false;
+    if (!matchesPlace(p, filters.filterPlace)) return false;
+    if (!matchesDateRange(p, filters.dateFrom, filters.dateTo)) return false;
     if (!search) return true;
     const hay = [
       p.given_names,
