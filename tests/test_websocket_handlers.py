@@ -199,3 +199,24 @@ def test_persons_get_includes_vital_summaries(repo: Repository) -> None:
     person = admin.results[-1]["person"]
     assert person["birth"]["sort_date"] == "1900-01-12"
     assert person["death"]["sort_date"] == "1980-01-01"
+
+
+def test_persons_siblings_returns_shared_parents(repo: Repository) -> None:
+    parent = repo.add_person(Person(given_names="Parent", sex=Sex.MALE))
+    child_a = repo.add_person(Person(given_names="Alice"))
+    child_b = repo.add_person(Person(given_names="Bob"))
+    repo.add_parent_child(ParentChild(parent_id=parent.id, child_id=child_a.id))
+    repo.add_parent_child(ParentChild(parent_id=parent.id, child_id=child_b.id))
+
+    conn = _FakeConnection("user-1")
+    _call(
+        ws.ws_persons_siblings,
+        conn,
+        {"type": "family_tree/persons/siblings", "person_id": child_a.id},
+    )
+    assert not conn.errors
+    result = conn.results[-1]
+    assert result["person_id"] == child_a.id
+    assert len(result["siblings"]) == 1
+    assert result["siblings"][0]["id"] == child_b.id
+    assert result["siblings"][0]["relation"] == "sibling"

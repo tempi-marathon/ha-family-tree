@@ -105,6 +105,8 @@ const MDI_CHEVRON_RIGHT =
   "M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z";
 const MDI_BOOKMARK_OUTLINE =
   "M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5A2,2 0 0,0 17,3Z";
+const MDI_INFORMATION =
+  "M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z";
 
 const BRAND_LOGO_URL = "/api/family_tree/brand/logo.png";
 const BRAND_LOGO_DARK_URL = "/api/family_tree/brand/dark_logo.png";
@@ -162,6 +164,15 @@ function brandLogo(hass?: HomeAssistant, alt = "") {
   const dark = Boolean(hass?.themes?.darkMode);
   const src = dark ? BRAND_LOGO_DARK_URL : BRAND_LOGO_URL;
   return html`<img class="brand-logo" src=${src} alt=${alt} height="36" />`;
+}
+
+function tooltip(content: string, inner: unknown) {
+  return html`
+    <span class="ft-tooltip" tabindex="0">
+      ${inner}
+      <span class="ft-tooltip__popup" role="tooltip">${content}</span>
+    </span>
+  `;
 }
 
 function mdButton(
@@ -674,29 +685,57 @@ export class FamilyTreePanel extends LitElement {
 
   private _lineageStar(personId: string, personName?: string) {
     if (personId === this._myLinkedPersonId()) {
-      return html`<span class="lineage-star" title=${this._tt("lineage_me")}
-        >${icon(MDI_STAR)}</span
-      >`;
+      return tooltip(
+        this._tt("lineage_me"),
+        html`<span class="lineage-star">${icon(MDI_STAR)}</span>`,
+      );
     }
     const rel = this._lineageRel(personId);
     if (!rel) return nothing;
-    return html`<span
-      class="lineage-star"
-      title=${this._lineageTooltip(personId, personName)}
-      >${icon(MDI_STAR)}</span
-    >`;
+    return tooltip(
+      this._lineageTooltip(personId, personName),
+      html`<span class="lineage-star">${icon(MDI_STAR)}</span>`,
+    );
   }
 
   private _deceasedIcon(isLiving: boolean) {
     if (isLiving) return nothing;
-    return html`<span class="deceased-icon" title=${this._tt("deceased")}
-      >${icon(MDI_BOOKMARK_OUTLINE)}</span
-    >`;
+    return tooltip(
+      this._tt("deceased"),
+      html`<span class="deceased-icon">${icon(MDI_BOOKMARK_OUTLINE)}</span>`,
+    );
   }
 
   private _childrenCountLabel(count: number): string {
     if (count === 1) return `1 ${this._tt("child")}`;
     return `${count} ${this._tt("children").toLowerCase()}`;
+  }
+
+  private _moreChildrenLabel(count: number): string {
+    const key = count === 1 ? "more_child" : "more_children";
+    return this._tt(key).replace("%s", String(count));
+  }
+
+  private _renderMoreChildrenCard(unknownCount: number, onAdd?: () => void) {
+    const label = this._moreChildrenLabel(unknownCount);
+    return html`<div class="more-children-card">
+      <div class="more-children-label">+ ${label}</div>
+      ${onAdd
+        ? html`<button type="button" class="linkish more-children-add" @click=${onAdd}>
+            ${icon(MDI_PLUS)} ${this._tt("add_child")}
+          </button>`
+        : nothing}
+    </div>`;
+  }
+
+  private _renderChildExtras(unknownCount: number, onAdd?: () => void) {
+    if (unknownCount > 0) {
+      return this._renderMoreChildrenCard(unknownCount, onAdd);
+    }
+    if (!onAdd) return nothing;
+    return html`<button type="button" class="add-slot" @click=${onAdd}>
+      ${icon(MDI_PLUS)} ${this._tt("add_child")}
+    </button>`;
   }
 
   private _fieldLabel(text: string, required = false) {
@@ -791,9 +830,10 @@ export class FamilyTreePanel extends LitElement {
           : MDI_ACCOUNT;
     const key = `sex_${sex}` as LocaleKey;
     const label = this._tt(key) !== key ? this._tt(key) : sex;
-    return html`<span class="sex-badge sex-badge--icon-only ${cls}" title=${label}
-      >${icon(iconPath)}</span
-    >`;
+    return tooltip(
+      label,
+      html`<span class="sex-badge sex-badge--icon-only ${cls}">${icon(iconPath)}</span>`,
+    );
   }
 
   private _sortIcon(sort: PanelSort) {
@@ -1425,7 +1465,13 @@ export class FamilyTreePanel extends LitElement {
           </ul>
         </div>
         <div class="block">
-          <h3 title=${this._tt("anniversaries_hint")}>${this._tt("upcoming_anniversaries")}</h3>
+          <h3 class="heading-with-tip">
+            ${this._tt("upcoming_anniversaries")}
+            ${tooltip(
+              this._tt("anniversaries_hint"),
+              html`<span class="info-tip">${icon(MDI_INFORMATION)}</span>`,
+            )}
+          </h3>
           <ul class="plain">
             ${anniversaries.length
               ? anniversaries.slice(0, 8).map((u) => {
@@ -2269,26 +2315,18 @@ export class FamilyTreePanel extends LitElement {
                     ${unionChildren.map((c) =>
                       this._renderPersonCard(c as Record<string, unknown>),
                     )}
-                    ${unknownCount > 0
-                      ? html`<div class="unknown-children muted">
-                          ${unknownCount} ${this._tt("unknown_children")}
-                        </div>`
-                      : nothing}
-                    ${write
-                      ? html`<button
-                          type="button"
-                          class="add-slot"
-                          @click=${() =>
+                    ${this._renderChildExtras(
+                      unknownCount,
+                      write
+                        ? () =>
                             this._openAddRelation({
                               kind: "child",
                               personId: d.person.id,
                               unionId: u.union_id,
                               coParentId,
-                            })}
-                        >
-                          ${icon(MDI_PLUS)} ${this._tt("add_child")}
-                        </button>`
-                      : nothing}
+                            })
+                        : undefined,
+                    )}
                   </div>
                   ${!unionChildren.length && !unknownCount && !write
                     ? html`<p class="muted">—</p>`
@@ -2354,10 +2392,6 @@ export class FamilyTreePanel extends LitElement {
     });
   }
 
-  private _renderTreeGrid(cols: 2 | 4, content: unknown) {
-    return html`<div class="tree-grid tree-grid--${cols}">${content}</div>`;
-  }
-
   private _allGrandparents(tree: PersonDetail["tree"]): Array<Record<string, unknown>> {
     if (!tree?.grandparents) return [];
     const seen = new Set<string>();
@@ -2379,20 +2413,6 @@ export class FamilyTreePanel extends LitElement {
     return html`<div class="gen-row">
       <span class="gen-label muted">${label}</span>
       <div class="gen">${content}</div>
-    </div>`;
-  }
-
-  private _renderTreeCell(
-    colStart: number,
-    colSpan: number,
-    content: unknown,
-    extraClass = "",
-  ) {
-    return html`<div
-      class="tree-cell tree-cell--${colStart}-${colStart + colSpan - 1} ${extraClass}"
-      style=${`grid-column: ${colStart} / span ${colSpan}`}
-    >
-      ${content}
     </div>`;
   }
 
@@ -2471,12 +2491,51 @@ export class FamilyTreePanel extends LitElement {
       .filter(Boolean)
       .join(" · ");
 
-    const renderTreeCard = (node: Record<string, unknown> | null, extraClass = "") =>
+    const coParentId = String(
+      (activeUnion?.partners?.[0] as Record<string, unknown> | undefined)?.id || "",
+    );
+    const onAddChild = this._canWrite()
+      ? () =>
+          this._openAddRelation({
+            kind: "child",
+            personId: p.id,
+            unionId: activeUnion?.union_id,
+            coParentId,
+          })
+      : undefined;
+
+    const renderTreeCard = (node: Record<string, unknown> | null) =>
       node
-        ? html`<div class="tree-card-wrap ${extraClass}">
-            ${this._renderPersonCard(node)}
+        ? html`<div class="tree-card-wrap">${this._renderPersonCard(node)}</div>`
+        : html`<div class="tree-card-wrap tree-card-wrap--empty"></div>`;
+
+    const renderParentSlot = (
+      parent: Record<string, unknown> | undefined,
+      missing: boolean,
+    ) => html`<div class="tree-card-wrap">
+      ${parent ? this._renderPersonCard(parent) : nothing}
+      ${canAddParents && missing
+        ? html`<button type="button" class="add-slot" @click=${() => this._openParentsDialog()}>
+            ${icon(MDI_PLUS)} ${this._tt("add_parents")}
+          </button>`
+        : nothing}
+    </div>`;
+
+    const showChildExtras = unknownCount > 0 || Boolean(onAddChild);
+    const childrenRow = html`<div
+      class="tree-children-row ${unionChildren.length ? "tree-children-row--bar" : ""}"
+    >
+      ${unionChildren.map(
+        (n) => html`<div class="tree-card-wrap tree-child-slot">
+          ${this._renderPersonCard(n as Record<string, unknown>)}
+        </div>`,
+      )}
+      ${showChildExtras
+        ? html`<div class="tree-card-wrap">
+            ${this._renderChildExtras(unknownCount, onAddChild)}
           </div>`
-        : html`<div class="tree-card-wrap tree-card-wrap--empty ${extraClass}"></div>`;
+        : nothing}
+    </div>`;
 
     return html`
       <div class="tree-scroll">
@@ -2484,75 +2543,38 @@ export class FamilyTreePanel extends LitElement {
           ${gpSlots.some(Boolean)
             ? this._renderTreeRow(
                 this._tt("grandparents"),
-                html`
-                  ${this._renderTreeCell(
-                    1,
-                    1,
-                    renderTreeCard(gpSlots[0], "vt-hline-bottom vt-hline-bottom-first"),
-                  )}
-                  ${this._renderTreeCell(
-                    2,
-                    1,
-                    renderTreeCard(gpSlots[1], "vt-hline-bottom"),
-                  )}
-                  ${this._renderTreeCell(
-                    3,
-                    1,
-                    renderTreeCard(gpSlots[2], "vt-hline-bottom"),
-                  )}
-                  ${this._renderTreeCell(
-                    4,
-                    1,
-                    renderTreeCard(gpSlots[3], "vt-hline-bottom vt-hline-bottom-last"),
-                  )}
-                `,
+                html`<div class="tree-row tree-row--pairs">
+                  <div class="tree-pair">
+                    ${renderTreeCard(gpSlots[0])}
+                    ${renderTreeCard(gpSlots[1])}
+                  </div>
+                  <div class="tree-pair">
+                    ${renderTreeCard(gpSlots[2])}
+                    ${renderTreeCard(gpSlots[3])}
+                  </div>
+                </div>`,
               )
             : nothing}
           ${this._renderTreeRow(
             this._tt("parents"),
-            html`
-              ${this._renderTreeCell(
-                1,
-                2,
-                html`<div class="tree-card-wrap vt-vline vt-hline-bottom vt-hline-bottom-first">
-                  ${father ? this._renderPersonCard(father) : nothing}
-                  ${canAddParents && !father
-                    ? html`<button type="button" class="add-slot" @click=${() =>
-                        this._openParentsDialog()}>
-                        ${icon(MDI_PLUS)} ${this._tt("add_parents")}
-                      </button>`
-                    : nothing}
-                </div>`,
-              )}
-              ${this._renderTreeCell(
-                3,
-                2,
-                html`<div class="tree-card-wrap vt-vline vt-hline-bottom vt-hline-bottom-last">
-                  ${mother ? this._renderPersonCard(mother) : nothing}
-                  ${canAddParents && !mother
-                    ? html`<button type="button" class="add-slot" @click=${() =>
-                        this._openParentsDialog()}>
-                        ${icon(MDI_PLUS)} ${this._tt("add_parents")}
-                      </button>`
-                    : nothing}
-                </div>`,
-              )}
-            `,
+            html`<div class="tree-row">
+              <div class="tree-couple">
+                ${renderParentSlot(father, !father)}
+                ${renderParentSlot(mother ?? undefined, !mother)}
+              </div>
+            </div>`,
           )}
-          ${this._renderTreeRow(
-            null,
-            this._renderTreeCell(
-              2,
-              2,
-              html`<div class="tree-card-wrap vt-vline vt-current">
+          <div class="gen-row gen-row--focus">
+            <div class="tree-row">
+              <div class="tree-card-wrap tree-stem-both">
                 ${this._renderPersonCard(focusNode)}
-              </div>`,
-            ),
-          )}
+              </div>
+            </div>
+          </div>
           ${partners.length
             ? html`<div class="union-tabs">
                 ${partners.length > 1
-                  ? html`<div class="subtabs">
+                  ? html`<div class="subtabs tree-subtabs">
                       ${partners.map(
                         (u, i) => html`<button
                           class=${i === unionIdx ? "active" : ""}
@@ -2568,77 +2590,32 @@ export class FamilyTreePanel extends LitElement {
                   : nothing}
                 ${this._renderTreeRow(
                   this._tt("partners"),
-                  this._renderTreeCell(
-                    2,
-                    2,
-                    html`<div
-                      class="tree-card-wrap vt-vline vt-vline-partner ${unionChildren.length ? "" : "vt-vline-no-bottom"}"
+                  html`<div class="tree-row">
+                    <div
+                      class="tree-card-wrap tree-stem-down ${unionChildren.length || unknownCount ? "" : "tree-stem-down-last"}"
                     >
                       ${(activeUnion?.partners || []).map((partner) =>
                         this._renderPersonCard(partner as Record<string, unknown>, {
                           subtitle: marriageSubtitle,
                         }),
                       )}
-                    </div>`,
-                  ),
+                    </div>
+                  </div>`,
                 )}
-                ${this._renderTreeRow(
-                  this._tt("children"),
-                  this._renderTreeCell(
-                    1,
-                    4,
-                    html`<div class="tree-children-grid">
-                      ${unionChildren.map(
-                        (n, i) => html`<div
-                          class="tree-card-wrap vt-vline vt-children ${i % 4 === 0 ? "vt-hline-top vt-hline-top-first" : ""} ${i % 4 === 3 ? "vt-hline-top vt-hline-top-last" : ""}"
-                          style=${`grid-column:${(i % 4) + 1};grid-row:${Math.floor(i / 4) + 1}`}
-                        >
-                          ${this._renderPersonCard(n as Record<string, unknown>)}
-                        </div>`,
-                      )}
-                      ${unknownCount > 0
-                        ? html`<div
-                            class="unknown-children muted"
-                            style=${`grid-column:${(unionChildren.length % 4) + 1};grid-row:${Math.floor(unionChildren.length / 4) + 1}`}
-                          >
-                            ${unknownCount} ${this._tt("unknown_children")}
-                          </div>`
-                        : nothing}
-                      ${this._canWrite()
-                        ? html`<button
-                            type="button"
-                            class="add-slot"
-                            style=${`grid-column:${((unionChildren.length + (unknownCount > 0 ? 1 : 0)) % 4) + 1};grid-row:${Math.floor((unionChildren.length + (unknownCount > 0 ? 1 : 0)) / 4) + 1}`}
-                            @click=${() =>
-                              this._openAddRelation({
-                                kind: "child",
-                                personId: p.id,
-                                unionId: activeUnion?.union_id,
-                                coParentId: String(
-                                  (activeUnion?.partners?.[0] as
-                                    | Record<string, unknown>
-                                    | undefined)?.id || "",
-                                ),
-                              })}
-                          >
-                            ${icon(MDI_PLUS)} ${this._tt("add_child")}
-                          </button>`
-                        : nothing}
-                    </div>`,
-                  ),
-                )}
+                ${this._renderTreeRow(this._tt("children"), html`<div class="tree-row">${childrenRow}</div>`)}
               </div>`
             : this._canWrite()
               ? this._renderTreeRow(
                   this._tt("partners"),
-                  this._renderTreeCell(
-                    2,
-                    2,
-                    html`<button type="button" class="add-slot" @click=${() =>
-                      this._openAddRelation({ kind: "partner", personId: p.id })}>
+                  html`<div class="tree-row">
+                    <button
+                      type="button"
+                      class="add-slot"
+                      @click=${() => this._openAddRelation({ kind: "partner", personId: p.id })}
+                    >
                       ${icon(MDI_PLUS)} ${this._tt("add_partner")}
-                    </button>`,
-                  ),
+                    </button>
+                  </div>`,
                 )
               : nothing}
         </div>
@@ -3148,16 +3125,18 @@ export class FamilyTreePanel extends LitElement {
             : html`<div class="date-input-row">
                 <div class="date-label-grow">
                   <span class="field-label">${this._tt("date")}</span>
-                  <input
-                    type="date"
-                    title=${this._tt("date")}
-                    .value=${this._eventForm.date_iso || ""}
-                    @input=${(e: Event) =>
-                      (this._eventForm = {
-                        ...this._eventForm,
-                        date_iso: (e.target as HTMLInputElement).value,
-                      })}
-                  />
+                  ${tooltip(
+                    this._tt("date"),
+                    html`<input
+                      type="date"
+                      .value=${this._eventForm.date_iso || ""}
+                      @input=${(e: Event) =>
+                        (this._eventForm = {
+                          ...this._eventForm,
+                          date_iso: (e.target as HTMLInputElement).value,
+                        })}
+                    />`,
+                  )}
                 </div>
                 <button
                   type="button"
@@ -3368,12 +3347,6 @@ export class FamilyTreePanel extends LitElement {
       ? html`<p class="muted">${this._tt("loading")}</p>`
       : preview
         ? html`<div class="preview-body">
-            <div class="preview-head">
-              ${this._deceasedIcon(preview.person.is_living)}
-              ${this._sexIconBadge(preview.person.sex)}
-              <strong>${personDisplayName(preview.person)}</strong>
-              ${this._lineageStar(preview.person.id, personDisplayName(preview.person))}
-            </div>
             <dl class="kv">
               <dt>${this._tt("given_names")}</dt>
               <dd>${preview.person.given_names || "—"}</dd>
@@ -3521,7 +3494,14 @@ export class FamilyTreePanel extends LitElement {
           @click=${(e: Event) => e.stopPropagation()}
         >
           <div class="dialog-header">
-            <h2>${dialogTitle}</h2>
+            <h2>
+              ${mode === "preview" && preview
+                ? html`${this._deceasedIcon(preview.person.is_living)}
+                    ${this._sexIconBadge(preview.person.sex)}
+                    <span class="dialog-title-text">${personDisplayName(preview.person)}</span>
+                    ${this._lineageStar(preview.person.id, personDisplayName(preview.person))}`
+                : dialogTitle}
+            </h2>
             <button
               type="button"
               class="icon-btn dialog-close"
@@ -3594,7 +3574,7 @@ export class FamilyTreePanel extends LitElement {
       object-fit: contain;
     }
     .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
-    .tabs button, .subtabs button, .toolbar button, .inline-form button, .row-actions button, .chip {
+    .tabs button, .subtabs button, .toolbar button:not(.md-btn), .inline-form button:not(.md-btn), .row-actions button:not(.md-btn), .chip {
       appearance: none;
       border: 1px solid var(--divider-color);
       background: var(--card-background-color, var(--secondary-background-color));
@@ -3682,6 +3662,45 @@ export class FamilyTreePanel extends LitElement {
     }
     .block { margin-bottom: 20px; }
     .block h3 { margin: 0 0 8px; font-size: 1.05rem; font-weight: 500; }
+    .heading-with-tip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .info-tip {
+      display: inline-flex;
+      color: var(--secondary-text-color);
+      cursor: help;
+    }
+    .info-tip svg { width: 16px; height: 16px; }
+    .ft-tooltip {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .ft-tooltip__popup {
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 6px 10px;
+      border-radius: var(--ha-border-radius-md, 8px);
+      background: var(--secondary-background-color);
+      color: var(--primary-text-color);
+      font-size: 0.8rem;
+      line-height: 1.35;
+      max-width: 240px;
+      white-space: normal;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 10;
+      transition: opacity 0.15s;
+    }
+    .ft-tooltip:hover .ft-tooltip__popup,
+    .ft-tooltip:focus-visible .ft-tooltip__popup {
+      opacity: 1;
+    }
     ul.plain, ul.people { list-style: none; padding: 0; margin: 0; }
     ul.plain li, ul.people li {
       display: flex; align-items: center; justify-content: space-between;
@@ -3757,95 +3776,122 @@ export class FamilyTreePanel extends LitElement {
       align-items: stretch;
     }
     .view-tree {
-      align-items: stretch;
-      min-width: 1200px;
+      align-items: center;
+      min-width: 0;
       padding: 24px 0 32px;
       --tree-line-color: var(--divider-color);
-      --tree-lines: -1rem;
+      --tree-gap: 12px;
+      --tree-stem: 20px;
     }
     .tree-row {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      width: 100%;
-      position: relative;
-      align-items: start;
-    }
-    .tree-cell {
-      min-width: 0;
       display: flex;
       justify-content: center;
+      align-items: flex-start;
+      width: 100%;
+      position: relative;
+    }
+    .tree-row--pairs { gap: 48px; flex-wrap: wrap; }
+    .tree-pair,
+    .tree-couple {
+      display: flex;
+      gap: var(--tree-gap);
+      position: relative;
+      padding-bottom: var(--tree-stem);
+    }
+    .tree-pair::before,
+    .tree-couple::before {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: 25%;
+      right: 25%;
+      border-top: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-pair::after,
+    .tree-couple::after {
+      content: "";
+      position: absolute;
+      bottom: calc(-1 * var(--tree-stem));
+      left: 50%;
+      height: var(--tree-stem);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
     }
     .tree-card-wrap {
       position: relative;
-      width: 100%;
-      max-width: 280px;
-      justify-self: center;
+      width: 280px;
+      max-width: 100%;
+      flex-shrink: 0;
     }
-    .tree-card-wrap--empty { min-height: 1px; }
+    .tree-card-wrap--empty { min-height: 1px; min-width: 0; width: auto; }
     .tree-card-wrap .person-card,
-    .tree-card-wrap .add-slot {
+    .tree-card-wrap .add-slot,
+    .tree-card-wrap .more-children-card {
       width: 100%;
-      max-width: 280px;
       box-sizing: border-box;
+      position: relative;
+      z-index: 1;
+      background: var(--card-background-color, #fff);
     }
-    .tree-children-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      width: 100%;
-    }
-    .tree-children-grid .person-card,
-    .tree-children-grid .add-slot,
-    .tree-children-grid .unknown-children {
-      width: 100%;
-      max-width: 280px;
-      justify-self: center;
-      box-sizing: border-box;
-    }
-    .view-tree .vt-vline { position: relative; }
-    .view-tree .vt-vline:after {
+    .tree-stem-both::before,
+    .tree-stem-both::after,
+    .tree-stem-down::before,
+    .tree-stem-down::after,
+    .tree-child-slot::before {
+      content: "";
+      position: absolute;
+      left: 50%;
       border-left: 2px solid var(--tree-line-color);
-      content: "";
-      left: 50%;
-      position: absolute;
-      bottom: var(--tree-lines);
-      top: var(--tree-lines);
       z-index: 0;
+      pointer-events: none;
     }
-    .view-tree .vt-vline-no-bottom:after { bottom: 0; }
-    .view-tree .vt-vline-partner { margin-bottom: 24px; }
-    .view-tree .vt-vline-partner:after {
-      bottom: -1.5rem;
-      top: -1rem;
+    .tree-stem-both::before {
+      top: calc(-1 * var(--tree-stem));
+      height: var(--tree-stem);
     }
-    .view-tree .vt-hline-bottom:before {
-      border-top: 2px solid var(--tree-line-color);
+    .tree-stem-both::after {
+      bottom: calc(-1 * var(--tree-stem));
+      height: var(--tree-stem);
+    }
+    .tree-stem-down::before {
+      top: calc(-1 * var(--tree-stem));
+      height: var(--tree-stem);
+    }
+    .tree-stem-down::after {
+      bottom: calc(-1 * var(--tree-stem));
+      height: var(--tree-stem);
+    }
+    .tree-stem-down-last::after {
+      display: none;
+    }
+    .tree-children-row {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: var(--tree-gap);
+      position: relative;
+      padding-top: var(--tree-stem);
+    }
+    .tree-children-row--bar::before {
       content: "";
       position: absolute;
-      bottom: var(--tree-lines);
-      left: 50%;
-      width: calc(50% + 0.5rem);
-    }
-    .view-tree .vt-hline-bottom-first:before { left: 50%; right: auto; }
-    .view-tree .vt-hline-bottom-last:before {
-      right: 50%;
-      left: auto;
-      width: calc(50% + 0.5rem);
-    }
-    .view-tree .vt-hline-top:before {
+      top: 0;
+      left: 10%;
+      right: 10%;
       border-top: 2px solid var(--tree-line-color);
-      content: "";
-      position: absolute;
-      top: var(--tree-lines);
-      left: 50%;
-      width: calc(50% + 0.5rem);
+      z-index: 0;
+      pointer-events: none;
     }
-    .view-tree .vt-hline-top-first:before { left: 50%; }
-    .view-tree .vt-hline-top-last:before {
-      right: 50%;
-      left: auto;
-      width: calc(50% + 0.5rem);
+    .tree-child-slot::before {
+      top: calc(-1 * var(--tree-stem));
+      height: var(--tree-stem);
+    }
+    .tree-subtabs {
+      justify-content: center;
+      width: 100%;
     }
     .gen { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
     .node {
@@ -4128,7 +4174,12 @@ export class FamilyTreePanel extends LitElement {
       min-width: 0;
       font-size: 1.25rem;
       font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
     }
+    .dialog-title-text { min-width: 0; }
     .dialog-close {
       flex-shrink: 0;
       margin: -8px -8px -8px 0;
@@ -4347,31 +4398,29 @@ export class FamilyTreePanel extends LitElement {
       gap: 10px;
     }
     .preview-body { margin-bottom: 8px; }
-    .preview-head {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 12px;
-      font-size: 1.05rem;
-    }
     .rel-card-list {
       display: flex;
       flex-direction: row;
       flex-wrap: wrap;
       gap: 12px;
+      width: 100%;
     }
     .rel-card-list .person-card,
     .rel-card-list .add-slot,
+    .rel-card-list .more-children-card,
     .rel-card-list .unknown-children {
       width: 280px;
-      flex-shrink: 0;
+      max-width: 100%;
+      flex: 0 1 280px;
+      box-sizing: border-box;
     }
     .rel-person-wrap {
       display: flex;
       flex-direction: column;
       gap: 6px;
-      max-width: 280px;
+      width: 280px;
+      max-width: 100%;
+      flex: 0 1 280px;
     }
     .rel-person-wrap .person-card { width: 100%; }
     .rel-person-actions {
@@ -4402,6 +4451,26 @@ export class FamilyTreePanel extends LitElement {
       align-items: center;
       gap: 6px;
     }
+    .more-children-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 120px;
+      padding: 12px 16px;
+      border: 1px dashed var(--divider-color);
+      border-radius: var(--ha-border-radius-lg, 12px);
+      box-sizing: border-box;
+      text-align: center;
+    }
+    .more-children-label {
+      font-weight: 500;
+      color: var(--primary-text-color);
+    }
+    .more-children-add {
+      font-size: 0.9rem;
+    }
     .unknown-children {
       padding: 8px 12px;
       border: 1px dashed var(--divider-color);
@@ -4423,6 +4492,13 @@ export class FamilyTreePanel extends LitElement {
       .kv { grid-template-columns: 1fr; }
       .row2 { grid-template-columns: 1fr; }
       .subtabs-actions { width: 100%; justify-content: flex-end; }
+      .rel-card-list .person-card,
+      .rel-card-list .add-slot,
+      .rel-card-list .more-children-card,
+      .rel-person-wrap {
+        width: 100%;
+        flex: 1 1 100%;
+      }
     }
   `;
 }

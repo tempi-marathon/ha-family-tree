@@ -1231,6 +1231,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_subscribe,
         ws_persons_list,
         ws_persons_get,
+        ws_persons_siblings,
         ws_persons_save,
         ws_persons_delete,
         ws_persons_restore,
