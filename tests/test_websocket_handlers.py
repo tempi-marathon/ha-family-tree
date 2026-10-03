@@ -202,11 +202,13 @@ def test_persons_get_includes_vital_summaries(repo: Repository) -> None:
 
 
 def test_persons_siblings_returns_shared_parents(repo: Repository) -> None:
-    parent = repo.add_person(Person(given_names="Parent", sex=Sex.MALE))
+    father = repo.add_person(Person(given_names="Father", sex=Sex.MALE))
+    mother = repo.add_person(Person(given_names="Mother", sex=Sex.FEMALE))
     child_a = repo.add_person(Person(given_names="Alice"))
     child_b = repo.add_person(Person(given_names="Bob"))
-    repo.add_parent_child(ParentChild(parent_id=parent.id, child_id=child_a.id))
-    repo.add_parent_child(ParentChild(parent_id=parent.id, child_id=child_b.id))
+    for child_id in (child_a.id, child_b.id):
+        repo.add_parent_child(ParentChild(parent_id=father.id, child_id=child_id))
+        repo.add_parent_child(ParentChild(parent_id=mother.id, child_id=child_id))
 
     conn = _FakeConnection("user-1")
     _call(
