@@ -2418,9 +2418,53 @@ export class FamilyTreePanel extends LitElement {
 
   private _renderTreeRow(label: string | null, content: unknown) {
     return html`<div class="gen-row">
-      ${label ? html`<span class="gen-label muted">${label}</span>` : nothing}
-      <div class="tree-row">${content}</div>
+      <span class="gen-label muted ${label ? "" : "gen-label--empty"}">${label ?? ""}</span>
+      ${content}
     </div>`;
+  }
+
+  private _treeCard(node: Record<string, unknown> | null, extraClass = "") {
+    if (!node) {
+      return html`<div class="tree-card-wrap tree-card-wrap--empty"></div>`;
+    }
+    return html`<div class="tree-card-wrap ${extraClass}">
+      ${this._renderPersonCard(node)}
+    </div>`;
+  }
+
+  private _treeCell(colStart: number, colSpan: number, content: unknown, extraClass = "") {
+    const style =
+      colStart === 1 && colSpan === 1
+        ? ""
+        : `grid-column:${colStart}/span ${colSpan}`;
+    return html`<div class="tree-grid-cell ${extraClass}" style=${style}>${content}</div>`;
+  }
+
+  /** Column placement for child slots (1–4 per row). */
+  private _childSlotPlacements(slotCount: number): Array<{ col: number; span: number }> {
+    if (slotCount <= 0) return [];
+    if (slotCount === 1) return [{ col: 2, span: 2 }];
+    if (slotCount === 2) return [{ col: 2, span: 1 }, { col: 3, span: 1 }];
+    if (slotCount === 3) return [{ col: 1, span: 1 }, { col: 2, span: 1 }, { col: 3, span: 1 }];
+    return Array.from({ length: Math.min(slotCount, 4) }, (_, i) => ({
+      col: i + 1,
+      span: 1,
+    }));
+  }
+
+  private _treeBusStyle(placements: Array<{ col: number; span: number }>): string {
+    if (placements.length < 2) return "";
+    const cardW = 280;
+    const gap = 12;
+    const colCenter = (col: number) => (col - 1) * (cardW + gap) + cardW / 2;
+    const first = placements[0];
+    const last = placements[placements.length - 1];
+    const left = colCenter(first.col);
+    const right = colCenter(last.col + last.span - 1);
+    const total = 4 * cardW + 3 * gap;
+    const leftPct = (left / total) * 100;
+    const rightPct = ((total - right) / total) * 100;
+    return `--tree-bus-left:${leftPct}%;--tree-bus-right:${rightPct}%`;
   }
 
   private _grandparentSlots(
@@ -2504,38 +2548,29 @@ export class FamilyTreePanel extends LitElement {
           })
       : undefined;
 
-    const renderTreeCard = (node: Record<string, unknown> | null) =>
-      node
-        ? html`<div class="tree-card-wrap">${this._renderPersonCard(node)}</div>`
-        : html`<div class="tree-card-wrap tree-card-wrap--empty"></div>`;
-
     const renderParentSlot = (
       parent: Record<string, unknown> | undefined,
       missing: boolean,
-    ) => html`<div class="tree-card-wrap">
+    ) => html`
       ${parent ? this._renderPersonCard(parent) : nothing}
       ${canAddParents && missing
         ? html`<button type="button" class="add-slot" @click=${() => this._openParentsDialog()}>
             ${icon(MDI_PLUS)} ${this._tt("add_parents")}
           </button>`
         : nothing}
-    </div>`;
+    `;
 
+    const childSlots: Array<Record<string, unknown> | "extras"> = [
+      ...unionChildren.map((n) => n as Record<string, unknown>),
+    ];
     const showChildExtras = unknownCount > 0 || Boolean(onAddChild);
-    const childrenRow = html`<div
-      class="tree-children-row ${unionChildren.length ? "tree-children-row--bar" : ""}"
-    >
-      ${unionChildren.map(
-        (n) => html`<div class="tree-card-wrap tree-child-slot">
-          ${this._renderPersonCard(n as Record<string, unknown>)}
-        </div>`,
-      )}
-      ${showChildExtras
-        ? html`<div class="tree-card-wrap">
-            ${this._renderChildExtras(unknownCount, onAddChild)}
-          </div>`
-        : nothing}
-    </div>`;
+    if (showChildExtras) childSlots.push("extras");
+    const childChunks: Array<Array<Record<string, unknown> | "extras">> = [];
+    for (let i = 0; i < childSlots.length; i += 4) {
+      childChunks.push(childSlots.slice(i, i + 4));
+    }
+    const hasChildRow = childSlots.length > 0;
+    const hasPartnerChildren = unionChildren.length > 0 || unknownCount > 0;
 
     return html`
       <div class="tree-scroll">
@@ -2543,34 +2578,36 @@ export class FamilyTreePanel extends LitElement {
           ${gpSlots.some(Boolean)
             ? this._renderTreeRow(
                 this._tt("grandparents"),
-                html`<div class="tree-row tree-row--pairs">
-                  <div class="tree-pair">
-                    ${renderTreeCard(gpSlots[0])}
-                    ${renderTreeCard(gpSlots[1])}
+                html`<div class="tree-grid-row tree-grid-row--gp">
+                  <div class="tree-grid-pair tree-grid-pair--left">
+                    ${this._treeCard(gpSlots[0])}
+                    ${this._treeCard(gpSlots[1])}
                   </div>
-                  <div class="tree-pair">
-                    ${renderTreeCard(gpSlots[2])}
-                    ${renderTreeCard(gpSlots[3])}
+                  <div class="tree-grid-pair tree-grid-pair--right">
+                    ${this._treeCard(gpSlots[2])}
+                    ${this._treeCard(gpSlots[3])}
                   </div>
                 </div>`,
               )
             : nothing}
           ${this._renderTreeRow(
             this._tt("parents"),
-            html`<div class="tree-row">
-              <div class="tree-couple">
-                ${renderParentSlot(father, !father)}
-                ${renderParentSlot(mother ?? undefined, !mother)}
-              </div>
+            html`<div class="tree-grid-row tree-grid-row--parents">
+              ${this._treeCell(1, 2, renderParentSlot(father, !father), "tree-grid-cell--span2")}
+              ${this._treeCell(3, 2, renderParentSlot(mother ?? undefined, !mother), "tree-grid-cell--span2")}
             </div>`,
           )}
-          <div class="gen-row gen-row--focus">
-            <div class="tree-row">
-              <div class="tree-card-wrap tree-stem-both">
-                ${this._renderPersonCard(focusNode)}
-              </div>
-            </div>
-          </div>
+          ${this._renderTreeRow(
+            null,
+            html`<div class="tree-grid-row tree-grid-row--focus">
+              ${this._treeCell(
+                2,
+                2,
+                this._treeCard(focusNode),
+                "tree-grid-cell--center tree-grid-cell--stem-down",
+              )}
+            </div>`,
+          )}
           ${partners.length
             ? html`<div class="union-tabs">
                 ${partners.length > 1
@@ -2590,31 +2627,68 @@ export class FamilyTreePanel extends LitElement {
                   : nothing}
                 ${this._renderTreeRow(
                   this._tt("partners"),
-                  html`<div class="tree-row">
-                    <div
-                      class="tree-card-wrap tree-stem-down ${unionChildren.length || unknownCount ? "" : "tree-stem-down-last"}"
-                    >
-                      ${(activeUnion?.partners || []).map((partner) =>
-                        this._renderPersonCard(partner as Record<string, unknown>, {
-                          subtitle: marriageSubtitle,
-                        }),
-                      )}
-                    </div>
+                  html`<div
+                    class="tree-grid-row tree-grid-row--partner ${hasPartnerChildren ? "tree-grid-row--stem-down" : ""}"
+                  >
+                    ${this._treeCell(
+                      2,
+                      2,
+                      html`${(activeUnion?.partners || []).map((partner) =>
+                        html`<div class="tree-card-wrap">
+                          ${this._renderPersonCard(partner as Record<string, unknown>, {
+                            subtitle: marriageSubtitle,
+                          })}
+                        </div>`,
+                      )}`,
+                      "tree-grid-cell--center",
+                    )}
                   </div>`,
                 )}
-                ${this._renderTreeRow(this._tt("children"), html`<div class="tree-row">${childrenRow}</div>`)}
+                ${hasChildRow
+                  ? this._renderTreeRow(
+                      this._tt("children"),
+                      html`${childChunks.map((chunk, chunkIdx) => {
+                        const placements = this._childSlotPlacements(chunk.length);
+                        const busStyle = this._treeBusStyle(placements);
+                        const multiBus = placements.length >= 2;
+                        return html`<div
+                          class="tree-grid-row tree-grid-row--children ${chunkIdx === 0 ? "" : "tree-grid-row--children-cont"} ${multiBus ? "tree-grid-row--children-bus" : ""}"
+                          style=${busStyle}
+                        >
+                          ${placements.map((slot, i) => {
+                            const item = chunk[i];
+                            const content =
+                              item === "extras"
+                                ? this._renderChildExtras(unknownCount, onAddChild)
+                                : this._treeCard(item as Record<string, unknown>);
+                            return this._treeCell(
+                              slot.col,
+                              slot.span,
+                              content,
+                              `tree-grid-cell--child ${multiBus ? "tree-grid-cell--child-drop" : "tree-grid-cell--child-solo"}`,
+                            );
+                          })}
+                        </div>`;
+                      })}`,
+                    )
+                  : nothing}
               </div>`
             : this._canWrite()
               ? this._renderTreeRow(
                   this._tt("partners"),
-                  html`<div class="tree-row">
-                    <button
-                      type="button"
-                      class="add-slot"
-                      @click=${() => this._openAddRelation({ kind: "partner", personId: p.id })}
-                    >
-                      ${icon(MDI_PLUS)} ${this._tt("add_partner")}
-                    </button>
+                  html`<div class="tree-grid-row">
+                    ${this._treeCell(
+                      2,
+                      2,
+                      html`<button
+                        type="button"
+                        class="add-slot"
+                        @click=${() => this._openAddRelation({ kind: "partner", personId: p.id })}
+                      >
+                        ${icon(MDI_PLUS)} ${this._tt("add_partner")}
+                      </button>`,
+                      "tree-grid-cell--center",
+                    )}
                   </div>`,
                 )
               : nothing}
@@ -3775,58 +3849,194 @@ export class FamilyTreePanel extends LitElement {
       gap: 24px;
       align-items: stretch;
     }
-    .view-tree {
+    .tree-box.view-tree {
+      gap: 0;
       align-items: center;
+    }
+    .view-tree {
       min-width: 0;
       padding: 24px 0 32px;
       --tree-line-color: var(--divider-color);
+      --tree-card-width: 280px;
       --tree-gap: 12px;
-      --tree-stem: 20px;
+      --tree-row-gap: 24px;
     }
-    .tree-row {
+    .tree-grid-row {
+      display: grid;
+      grid-template-columns: repeat(4, var(--tree-card-width));
+      column-gap: var(--tree-gap);
+      width: fit-content;
+      max-width: 100%;
+      padding-bottom: var(--tree-row-gap);
+      position: relative;
+      align-items: stretch;
+    }
+    .tree-grid-row--children-cont::before {
+      display: none;
+    }
+    .tree-grid-cell {
       display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      position: relative;
+      min-width: 0;
+    }
+    .tree-grid-cell--span2,
+    .tree-grid-cell--center {
       justify-content: center;
-      align-items: flex-start;
-      width: 100%;
-      position: relative;
     }
-    .tree-row--pairs { gap: 48px; flex-wrap: wrap; }
-    .tree-pair,
-    .tree-couple {
-      display: flex;
-      gap: var(--tree-gap);
+    .tree-grid-pair {
+      display: grid;
+      grid-template-columns: subgrid;
+      grid-column: span 2;
       position: relative;
-      padding-bottom: var(--tree-stem);
+      align-items: stretch;
     }
-    .tree-pair::before,
-    .tree-couple::before {
+    .tree-grid-pair--left { grid-column: 1 / 3; }
+    .tree-grid-pair--right { grid-column: 3 / 5; }
+    .tree-grid-pair::before {
       content: "";
       position: absolute;
       bottom: 0;
-      left: 25%;
-      right: 25%;
+      left: calc(var(--tree-card-width) / 2);
+      right: calc(var(--tree-card-width) / 2);
       border-top: 2px solid var(--tree-line-color);
       z-index: 0;
       pointer-events: none;
     }
-    .tree-pair::after,
-    .tree-couple::after {
+    .tree-grid-pair::after {
       content: "";
       position: absolute;
-      bottom: calc(-1 * var(--tree-stem));
+      bottom: calc(-1 * var(--tree-row-gap));
       left: 50%;
-      height: var(--tree-stem);
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-row-gap);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-row--parents::before {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: calc(var(--tree-card-width) / 2);
+      right: calc(var(--tree-card-width) / 2);
+      border-top: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-row--parents::after {
+      content: "";
+      position: absolute;
+      bottom: calc(-1 * var(--tree-row-gap));
+      left: 50%;
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-row-gap);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-cell--span2::before {
+      content: "";
+      position: absolute;
+      top: calc(-1 * var(--tree-row-gap));
+      left: 50%;
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-row-gap);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-row--focus .tree-grid-cell--stem-down::before,
+    .tree-grid-row--partner .tree-grid-cell--center::before {
+      content: "";
+      position: absolute;
+      top: calc(-1 * var(--tree-row-gap));
+      left: 50%;
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-row-gap);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-row--focus .tree-grid-cell--stem-down::after,
+    .tree-grid-row--partner.tree-grid-row--stem-down::after {
+      content: "";
+      position: absolute;
+      bottom: calc(-1 * var(--tree-row-gap));
+      left: 50%;
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-row-gap);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-row--children::before {
+      content: "";
+      position: absolute;
+      top: calc(-1 * var(--tree-row-gap));
+      left: 50%;
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-row-gap);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-row--children-bus::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: var(--tree-bus-left, 12.5%);
+      right: var(--tree-bus-right, 12.5%);
+      border-top: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-cell--child-drop::before {
+      content: "";
+      position: absolute;
+      top: calc(-1 * var(--tree-row-gap));
+      left: 50%;
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-row-gap);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-cell--child-solo::before {
+      content: "";
+      position: absolute;
+      top: calc(-1 * var(--tree-row-gap));
+      left: 50%;
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-row-gap);
       border-left: 2px solid var(--tree-line-color);
       z-index: 0;
       pointer-events: none;
     }
     .tree-card-wrap {
       position: relative;
-      width: 280px;
+      display: flex;
+      flex-direction: column;
+      width: var(--tree-card-width);
       max-width: 100%;
-      flex-shrink: 0;
+      flex: 1;
+      z-index: 1;
     }
-    .tree-card-wrap--empty { min-height: 1px; min-width: 0; width: auto; }
+    .tree-card-wrap--empty {
+      min-height: 1px;
+      width: var(--tree-card-width);
+      flex: 0 0 auto;
+    }
     .tree-card-wrap .person-card,
     .tree-card-wrap .add-slot,
     .tree-card-wrap .more-children-card {
@@ -3835,59 +4045,13 @@ export class FamilyTreePanel extends LitElement {
       position: relative;
       z-index: 1;
       background: var(--card-background-color, #fff);
-    }
-    .tree-stem-both::before,
-    .tree-stem-both::after,
-    .tree-stem-down::before,
-    .tree-stem-down::after,
-    .tree-child-slot::before {
-      content: "";
-      position: absolute;
-      left: 50%;
-      border-left: 2px solid var(--tree-line-color);
-      z-index: 0;
-      pointer-events: none;
-    }
-    .tree-stem-both::before {
-      top: calc(-1 * var(--tree-stem));
-      height: var(--tree-stem);
-    }
-    .tree-stem-both::after {
-      bottom: calc(-1 * var(--tree-stem));
-      height: var(--tree-stem);
-    }
-    .tree-stem-down::before {
-      top: calc(-1 * var(--tree-stem));
-      height: var(--tree-stem);
-    }
-    .tree-stem-down::after {
-      bottom: calc(-1 * var(--tree-stem));
-      height: var(--tree-stem);
-    }
-    .tree-stem-down-last::after {
-      display: none;
-    }
-    .tree-children-row {
+      flex: 1;
       display: flex;
-      justify-content: center;
-      flex-wrap: wrap;
-      gap: var(--tree-gap);
-      position: relative;
-      padding-top: var(--tree-stem);
+      flex-direction: column;
+      min-height: 0;
     }
-    .tree-children-row--bar::before {
-      content: "";
-      position: absolute;
-      top: 0;
-      left: 10%;
-      right: 10%;
-      border-top: 2px solid var(--tree-line-color);
-      z-index: 0;
-      pointer-events: none;
-    }
-    .tree-child-slot::before {
-      top: calc(-1 * var(--tree-stem));
-      height: var(--tree-stem);
+    .tree-card-wrap .person-card-footer {
+      margin-top: auto;
     }
     .tree-subtabs {
       justify-content: center;
@@ -4370,18 +4534,17 @@ export class FamilyTreePanel extends LitElement {
       background: #fff;
     }
     .collapse--cards .collapse-body {
+      padding: 10px 14px 14px;
       background: color-mix(in srgb, var(--divider-color) 8%, #fff);
     }
     .gen-row {
       position: relative;
       display: flex;
-      justify-content: stretch;
+      justify-content: center;
       width: 100%;
-      padding-left: 6.5rem;
       box-sizing: border-box;
-      align-items: start;
+      align-items: stretch;
     }
-    .gen-row--focus { padding-left: 0; }
     .gen-label {
       position: absolute;
       left: 0;
@@ -4391,7 +4554,9 @@ export class FamilyTreePanel extends LitElement {
       text-align: left;
       font-size: 0.85rem;
     }
-    .gen-row .tree-row { flex: 1; min-width: 0; }
+    .gen-label--empty {
+      visibility: hidden;
+    }
     .siblings-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
