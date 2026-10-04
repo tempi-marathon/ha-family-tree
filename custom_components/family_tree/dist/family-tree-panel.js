@@ -1115,8 +1115,9 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
       opacity: 0;
       pointer-events: none;
-      z-index: 10;
+      z-index: 99999;
       transition: opacity 0.15s;
+      width: max-content;
     }
     .ft-tooltip:hover .ft-tooltip__popup,
     .ft-tooltip:focus-visible .ft-tooltip__popup {
@@ -1247,31 +1248,19 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     .tree-grid-pair::before {
       content: "";
       position: absolute;
-      bottom: var(--tree-line-offset);
+      bottom: calc(-1 * var(--tree-connector));
       left: calc(var(--tree-card-width) / 2);
       right: calc(var(--tree-card-width) / 2);
       border-top: 2px solid var(--tree-line-color);
       z-index: 0;
       pointer-events: none;
     }
-    .tree-grid-pair::after {
-      content: "";
-      position: absolute;
-      bottom: calc(-1 * var(--tree-connector));
-      left: 50%;
-      margin-left: -1px;
-      width: 0;
-      height: var(--tree-connector);
-      border-left: 2px solid var(--tree-line-color);
-      z-index: 0;
-      pointer-events: none;
-    }
     .tree-grid-row--parents::before {
       content: "";
       position: absolute;
-      bottom: var(--tree-line-offset);
-      left: calc(var(--tree-card-width) / 2);
-      right: calc(var(--tree-card-width) / 2);
+      bottom: calc(var(--tree-connector) - 0.2rem);
+      left: calc(var(--tree-card-width) + 0.4rem);
+      right: calc(var(--tree-card-width) + 0.4rem);
       border-top: 2px solid var(--tree-line-color);
       z-index: 0;
       pointer-events: none;
@@ -1313,32 +1302,10 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       z-index: 0;
       pointer-events: none;
     }
-    .tree-grid-row--focus .tree-grid-cell--stem-down::after,
-    .tree-grid-row--partner.tree-grid-row--stem-down::after {
-      content: "";
-      position: absolute;
-      bottom: calc(-1 * var(--tree-connector));
-      left: 50%;
-      margin-left: -1px;
-      width: 0;
-      height: var(--tree-connector);
-      border-left: 2px solid var(--tree-line-color);
-      z-index: 0;
-      pointer-events: none;
+    .tree-grid-row--partner::before {
+      padding-bottom: calc(var(--tree-row-gap) / 2);
     }
     .tree-grid-row--children::before {
-      content: "";
-      position: absolute;
-      top: calc(-1 * var(--tree-connector));
-      left: 50%;
-      margin-left: -1px;
-      width: 0;
-      height: var(--tree-connector);
-      border-left: 2px solid var(--tree-line-color);
-      z-index: 0;
-      pointer-events: none;
-    }
-    .tree-grid-row--children-bus::after {
       content: "";
       position: absolute;
       top: var(--tree-line-offset);
@@ -1377,6 +1344,9 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     .tree-grid-row--add-child {
       padding-top: 0;
     }
+    .tree-grid-row--add-child .tree-card-wrap::after {
+      content: unset;
+    }
     .tree-card-wrap {
       position: relative;
       display: flex;
@@ -1394,7 +1364,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     .tree-grid-row:not(.tree-grid-row--children) .tree-card-wrap:not(.tree-card-wrap--empty)::after {
       content: "";
       position: absolute;
-      bottom: 0;
+      bottom: calc(-1 * var(--tree-connector));
       left: 50%;
       margin-left: -1px;
       width: 0;
@@ -1457,7 +1427,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       display: flex;
       align-items: center;
       gap: 6px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
     }
     .person-card-formal { margin-top: 2px; }
     .person-card-meta, .event-card-meta {
