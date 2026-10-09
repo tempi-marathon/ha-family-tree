@@ -4213,7 +4213,9 @@ export class FamilyTreePanel extends LitElement {
     }
     .tree-box.view-tree {
       gap: 0;
-      align-items: center;
+      align-items: stretch;
+      width: max-content;
+      min-width: 100%;
     }
     .view-tree {
       min-width: 0;
@@ -4229,7 +4231,8 @@ export class FamilyTreePanel extends LitElement {
       grid-template-columns: repeat(4, var(--tree-card-width));
       column-gap: var(--tree-gap);
       width: fit-content;
-      max-width: 100%;
+      min-width: max-content;
+      flex-shrink: 0;
       padding-bottom: var(--tree-row-gap);
       position: relative;
       align-items: stretch;
@@ -4262,8 +4265,8 @@ export class FamilyTreePanel extends LitElement {
       content: "";
       position: absolute;
       bottom: calc(-1 * var(--tree-connector));
-      left: calc(var(--tree-card-width) / 2);
-      right: calc(var(--tree-card-width) / 2);
+      left: calc(25% - var(--tree-gap) / 4);
+      right: calc(25% - var(--tree-gap) / 4);
       border-top: 2px solid var(--tree-line-color);
       z-index: 0;
       pointer-events: none;
@@ -4272,21 +4275,9 @@ export class FamilyTreePanel extends LitElement {
       content: "";
       position: absolute;
       bottom: calc(var(--tree-connector) - 0.2rem);
-      left: calc(var(--tree-card-width) + 0.4rem);
-      right: calc(var(--tree-card-width) + 0.4rem);
+      left: calc(25% - var(--tree-gap) / 4);
+      right: calc(25% - var(--tree-gap) / 4);
       border-top: 2px solid var(--tree-line-color);
-      z-index: 0;
-      pointer-events: none;
-    }
-    .tree-grid-row--parents::after {
-      content: "";
-      position: absolute;
-      bottom: calc(-1 * var(--tree-connector));
-      left: 50%;
-      margin-left: -1px;
-      width: 0;
-      height: var(--tree-connector);
-      border-left: 2px solid var(--tree-line-color);
       z-index: 0;
       pointer-events: none;
     }
@@ -4321,7 +4312,7 @@ export class FamilyTreePanel extends LitElement {
     .tree-grid-row--children::before {
       content: "";
       position: absolute;
-      top: calc(-1 * var(--tree-connector));
+      top: 0;
       left: var(--tree-bus-left, 12.5%);
       right: var(--tree-bus-right, 12.5%);
       border-top: 2px solid var(--tree-line-color);
@@ -4371,8 +4362,7 @@ export class FamilyTreePanel extends LitElement {
       width: var(--tree-card-width);
       flex: 0 0 auto;
     }
-    .tree-grid-row:not(.tree-grid-row--add-child) .tree-card-wrap:not(.tree-card-wrap--empty)::after,
-    .tree-grid-row:not(.tree-grid-row--children) .tree-card-wrap:not(.tree-card-wrap--empty)::after {
+    .tree-grid-row:not(.tree-grid-row--children):not(.tree-grid-row--add-child) .tree-card-wrap:not(.tree-card-wrap--empty)::after {
       content: "";
       position: absolute;
       bottom: calc(-1 * var(--tree-connector));
@@ -4899,7 +4889,8 @@ export class FamilyTreePanel extends LitElement {
       position: relative;
       display: flex;
       justify-content: center;
-      width: 100%;
+      width: max-content;
+      min-width: 100%;
       box-sizing: border-box;
       align-items: stretch;
     }
@@ -4966,7 +4957,10 @@ export class FamilyTreePanel extends LitElement {
       text-transform: uppercase;
       letter-spacing: 0.03em;
     }
-    .union-tabs { width: 100%; }
+    .union-tabs {
+      width: max-content;
+      min-width: 100%;
+    }
     .add-slot {
       appearance: none;
       border: 1px dashed var(--divider-color);
