@@ -47,6 +47,7 @@ import {
   formatEventDate,
   formatLifespan,
   gedcomToForm,
+  parseGedcomDate,
 } from "./date_format";
 import {
   daysUntilLabel,
@@ -142,6 +143,10 @@ const EVENT_TYPE_KEYS: Record<string, LocaleKey> = {
 const PERSON_EVENT_TYPES = ["birth", "baptism", "occupation", "residence", "death", "burial"];
 /** Mirrors backend UNIQUE_PERSON_EVENT_TYPES. */
 const UNIQUE_PERSON_EVENT_TYPES = new Set(["birth", "baptism", "death", "burial"]);
+
+const PERSON_DIALOG_PERSONAL = "person-dialog-personal";
+const PERSON_DIALOG_BIRTH = "person-dialog-birth";
+const PERSON_DIALOG_DECEASED = "person-dialog-deceased";
 
 const QUALIFIER_KEYS: Record<DateQualifier, LocaleKey> = {
   exact: "qual_exact",
@@ -264,6 +269,7 @@ export class FamilyTreePanel extends LitElement {
   @state() private _parentsForm: Record<string, string> = {};
   @state() private _placeSuggestions: PlaceDto[] = [];
   @state() private _placeSuggestOpen = false;
+  @state() private _personPlaceField: "birth_place" | "death_place" | null = null;
   @state() private _siblingsPersonId = "";
   @state() private _siblingsPersonName = "";
   @state() private _siblingsList: Array<Record<string, unknown>> = [];
@@ -541,6 +547,65 @@ export class FamilyTreePanel extends LitElement {
     });
   }
 
+  private _emptyPersonVitalFields(): Record<string, string> {
+    return {
+      profession: "",
+      birth_place: "",
+      birth_date_iso: "",
+      birth_date_text: "",
+      death_place: "",
+      death_date_iso: "",
+      death_date_text: "",
+      birth_event_id: "",
+      death_event_id: "",
+      occupation_event_id: "",
+    };
+  }
+
+  private _personEventsForEdit(personId: string): EventDto[] {
+    if (this._detail?.person.id === personId) return this._detail.events;
+    if (this._previewDetail?.person.id === personId) return this._previewDetail.events;
+    return [];
+  }
+
+  private _vitalEventIds(events: EventDto[]): {
+    birth?: string;
+    death?: string;
+    occupation?: string;
+  } {
+    const birth = events.find((e) => e.type === "birth");
+    const death = events.find((e) => e.type === "death");
+    const occ = events
+      .filter((e) => e.type === "occupation")
+      .sort((a, b) => (a.sort_date || "").localeCompare(b.sort_date || ""));
+    const occupation = occ.length ? occ[occ.length - 1] : undefined;
+    return {
+      birth: birth?.id,
+      death: death?.id,
+      occupation: occupation?.id,
+    };
+  }
+
+  private _vitalFieldsFromPerson(person: PersonDto, events: EventDto[]): Record<string, string> {
+    const ids = this._vitalEventIds(events);
+    const birthText = person.birth?.date_text || "";
+    const birthIso = gedcomToIsoDate(birthText) || "";
+    const deathText = person.death?.date_text || "";
+    const deathIso = gedcomToIsoDate(deathText) || "";
+    return {
+      profession: this._professionFromEvents(events),
+      birth_place: person.birth?.place_name || "",
+      birth_date_iso: birthIso,
+      birth_date_text: birthIso ? "" : birthText,
+      death_place: person.death?.place_name || "",
+      death_date_iso: deathIso,
+      death_date_text: deathIso ? "" : deathText,
+      birth_event_id: ids.birth || "",
+      death_event_id: ids.death || "",
+      occupation_event_id: ids.occupation || "",
+    };
+  }
+
   private _openCreate(clearRelation = true) {
     if (clearRelation) this._relationTarget = null;
     this._editing = null;
@@ -555,7 +620,9 @@ export class FamilyTreePanel extends LitElement {
       sex: "unknown",
       deceased: "false",
       notes: "",
+      ...this._emptyPersonVitalFields(),
     };
+    this._collapsed = { ...this._collapsed, [PERSON_DIALOG_DECEASED]: true };
     this._dialogOpen = true;
   }
 
@@ -564,6 +631,7 @@ export class FamilyTreePanel extends LitElement {
     this._dialogMode = "person";
     this._error = "";
     this._fieldErrors = {};
+    const events = this._personEventsForEdit(person.id);
     this._form = {
       given_names: person.given_names || "",
       call_name: person.call_name || "",
@@ -572,6 +640,11 @@ export class FamilyTreePanel extends LitElement {
       sex: person.sex || "unknown",
       deceased: person.is_living ? "false" : "true",
       notes: person.notes || "",
+      ...this._vitalFieldsFromPerson(person, events),
+    };
+    this._collapsed = {
+      ...this._collapsed,
+      [PERSON_DIALOG_DECEASED]: person.is_living,
     };
     this._dialogOpen = true;
   }
@@ -789,7 +862,11 @@ export class FamilyTreePanel extends LitElement {
     return comma > 0 ? label.slice(0, comma).trim() : label;
   }
 
-  private _schedulePlaceSearch(value: string) {
+  private _schedulePlaceSearch(
+    value: string,
+    personField?: "birth_place" | "death_place",
+  ) {
+    if (personField) this._personPlaceField = personField;
     if (this._placeSearchTimer) clearTimeout(this._placeSearchTimer);
     const q = value.trim();
     if (!q || !this.hass) {
@@ -803,6 +880,181 @@ export class FamilyTreePanel extends LitElement {
         this._placeSuggestOpen = res.places.length > 0;
       });
     }, 250);
+  }
+
+  private _vitalDateText(iso: string, unformatted: string): { text: string; error: boolean } {
+    const raw = (unformatted || "").trim();
+    if (raw) {
+      const parsed = parseGedcomDate(raw);
+      if (!parsed.first && !parsed.second && !/\d/.test(raw)) {
+        return { text: "", error: true };
+      }
+      return { text: raw, error: false };
+    }
+    const isoTrim = (iso || "").trim();
+    if (!isoTrim) return { text: "", error: false };
+    const gedcom = isoToGedcomDate(isoTrim);
+    return gedcom ? { text: gedcom, error: false } : { text: "", error: true };
+  }
+
+  private async _resolvePlaceId(placeName: string): Promise<string | null> {
+    if (!this.hass) return null;
+    const name = placeName.trim();
+    if (!name) return null;
+    const found = await listPlaces(this.hass, { search: name, limit: 20 });
+    const exact = found.places.find(
+      (p) => p.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0,
+    );
+    if (exact) return exact.id;
+    const { place } = await savePlace(this.hass, { name });
+    return place.id;
+  }
+
+  private async _resolvePersonEventIds(
+    personId: string,
+  ): Promise<{ birth?: string; death?: string; occupation?: string }> {
+    const fromForm = {
+      birth: (this._form.birth_event_id || "").trim() || undefined,
+      death: (this._form.death_event_id || "").trim() || undefined,
+      occupation: (this._form.occupation_event_id || "").trim() || undefined,
+    };
+    const needFetch =
+      (!fromForm.birth &&
+        Boolean(
+          (this._form.birth_place || "").trim() ||
+            (this._form.birth_date_iso || "").trim() ||
+            (this._form.birth_date_text || "").trim(),
+        )) ||
+      (this._form.deceased === "true" &&
+        !fromForm.death &&
+        Boolean(
+          (this._form.death_place || "").trim() ||
+            (this._form.death_date_iso || "").trim() ||
+            (this._form.death_date_text || "").trim(),
+        )) ||
+      (!fromForm.occupation && Boolean((this._form.profession || "").trim()));
+    if (!needFetch || !this.hass) return fromForm;
+    const detail = await getPerson(this.hass, personId);
+    const ids = this._vitalEventIds(detail.events);
+    return {
+      birth: fromForm.birth || ids.birth,
+      death: fromForm.death || ids.death,
+      occupation: fromForm.occupation || ids.occupation,
+    };
+  }
+
+  private async _savePersonVitalEvent(
+    personId: string,
+    eventType: string,
+    opts: {
+      dateIso: string;
+      dateText: string;
+      place: string;
+      eventId?: string;
+    },
+  ): Promise<boolean> {
+    if (!this.hass) return false;
+    const placeName = (opts.place || "").trim();
+    const built = this._vitalDateText(opts.dateIso, opts.dateText);
+    if (built.error) return false;
+    if (!built.text && !placeName) return true;
+    const placeId = placeName ? await this._resolvePlaceId(placeName) : null;
+    await saveEvent(this.hass, {
+      ...(opts.eventId ? { event_id: opts.eventId } : {}),
+      subject_type: "person",
+      subject_id: personId,
+      event_type: eventType,
+      date_text: built.text,
+      date_qualifier: "exact",
+      place: placeName || undefined,
+      place_id: placeId,
+      description: "",
+    });
+    return true;
+  }
+
+  private async _savePersonVitals(personId: string): Promise<boolean> {
+    const ids = await this._resolvePersonEventIds(personId);
+    const birthOk = await this._savePersonVitalEvent(personId, "birth", {
+      dateIso: this._form.birth_date_iso || "",
+      dateText: this._form.birth_date_text || "",
+      place: this._form.birth_place || "",
+      eventId: ids.birth,
+    });
+    if (!birthOk) return false;
+    if (this._form.deceased === "true") {
+      const deathOk = await this._savePersonVitalEvent(personId, "death", {
+        dateIso: this._form.death_date_iso || "",
+        dateText: this._form.death_date_text || "",
+        place: this._form.death_place || "",
+        eventId: ids.death,
+      });
+      if (!deathOk) return false;
+    }
+    const profession = (this._form.profession || "").trim();
+    if (profession && this.hass) {
+      await saveEvent(this.hass, {
+        ...(ids.occupation ? { event_id: ids.occupation } : {}),
+        subject_type: "person",
+        subject_id: personId,
+        event_type: "occupation",
+        date_text: "",
+        date_qualifier: "exact",
+        description: profession,
+      });
+    }
+    return true;
+  }
+
+  private _renderPersonPlaceField(
+    field: "birth_place" | "death_place",
+    label: string,
+    write: boolean,
+  ) {
+    const suggestOpen =
+      this._placeSuggestOpen &&
+      this._personPlaceField === field &&
+      this._placeSuggestions.length > 0;
+    return html`<label class="place-field"
+      >${label}
+      <input
+        .value=${this._form[field] || ""}
+        ?disabled=${!write}
+        @input=${(e: Event) => {
+          const value = (e.target as HTMLInputElement).value;
+          this._form = { ...this._form, [field]: value };
+          this._schedulePlaceSearch(value, field);
+        }}
+        @focus=${() => {
+          this._personPlaceField = field;
+          if (this._placeSuggestions.length) this._placeSuggestOpen = true;
+        }}
+        @blur=${() => {
+          setTimeout(() => {
+            if (this._personPlaceField === field) {
+              this._placeSuggestOpen = false;
+            }
+          }, 150);
+        }}
+      />
+      ${suggestOpen
+        ? html`<ul class="place-suggest">
+            ${this._placeSuggestions.map(
+              (pl) => html`<li>
+                <button
+                  type="button"
+                  @mousedown=${() => {
+                    this._form = { ...this._form, [field]: pl.name };
+                    this._placeSuggestOpen = false;
+                  }}
+                >
+                  ${pl.name}
+                </button>
+              </li>`,
+            )}
+          </ul>`
+        : nothing}
+    </label>`;
   }
 
   private _sexBadge(sex: string) {
@@ -925,6 +1177,11 @@ export class FamilyTreePanel extends LitElement {
         payload.person_id = this._editing.id;
       }
       const { person } = await savePerson(this.hass, payload);
+      const vitalsOk = await this._savePersonVitals(person.id);
+      if (!vitalsOk) {
+        this._error = this._tt("date_invalid");
+        return;
+      }
       const target = this._relationTarget;
       this._relationTarget = null;
       this._dialogOpen = false;
@@ -1032,20 +1289,8 @@ export class FamilyTreePanel extends LitElement {
     if (!this.hass || !this._detail || !this._canWrite()) return;
     this._saving = true;
     try {
-      let placeId: string | null = null;
       const placeName = (this._eventForm.place || "").trim();
-      if (placeName) {
-        const found = await listPlaces(this.hass, { search: placeName, limit: 20 });
-        const exact = found.places.find(
-          (p) => p.name.localeCompare(placeName, undefined, { sensitivity: "accent" }) === 0,
-        );
-        if (exact) {
-          placeId = exact.id;
-        } else {
-          const { place } = await savePlace(this.hass, { name: placeName });
-          placeId = place.id;
-        }
-      }
+      const placeId = placeName ? await this._resolvePlaceId(placeName) : null;
       let date_text = "";
       if ((this._eventForm.date_mode || "simple") === "simple") {
         date_text = isoToGedcomDate(this._eventForm.date_iso || "");
@@ -3036,103 +3281,199 @@ export class FamilyTreePanel extends LitElement {
                       ? this._tt("add_person")
                       : this._tt("add_person");
 
-    const personBody = html`
-      <div class="form-section">
-        <div class="form-section-title">${this._tt("details")}</div>
+    const deceasedOn = this._form.deceased === "true";
+    const personalBody = html`<div class="form-section">
+      <label
+        >${this._fieldLabel(this._tt("given_names"), write)}
+        <input
+          class=${this._fieldInvalid("given_names") ? "invalid" : ""}
+          .value=${this._form.given_names || ""}
+          ?disabled=${!write}
+          @input=${(e: Event) => this._onPersonField("given_names", e)}
+        />
+        ${this._fieldError("given_names")}
+      </label>
+      <label
+        >${this._fieldLabel(this._tt("call_name"))}
+        <input
+          .value=${this._form.call_name || ""}
+          ?disabled=${!write}
+          @input=${(e: Event) => this._onPersonField("call_name", e)}
+        />
+      </label>
+      <div class="row2">
         <label
-          >${this._fieldLabel(this._tt("given_names"), write)}
+          >${this._tt("surname_prefix")}
           <input
-            class=${this._fieldInvalid("given_names") ? "invalid" : ""}
-            .value=${this._form.given_names || ""}
-            ?disabled=${!write}
-            @input=${(e: Event) => this._onPersonField("given_names", e)}
-          />
-          ${this._fieldError("given_names")}
-        </label>
-        <label
-          >${this._fieldLabel(this._tt("call_name"))}
-          <input
-            .value=${this._form.call_name || ""}
-            ?disabled=${!write}
-            @input=${(e: Event) => this._onPersonField("call_name", e)}
-          />
-        </label>
-        <div class="row2">
-          <label
-            >${this._tt("surname_prefix")}
-            <input
-              .value=${this._form.surname_prefix || ""}
-              ?disabled=${!write}
-              @input=${(e: Event) =>
-                (this._form = {
-                  ...this._form,
-                  surname_prefix: (e.target as HTMLInputElement).value,
-                })}
-            />
-          </label>
-          <label
-            >${this._tt("surname")}
-            <input
-              .value=${this._form.surname || ""}
-              ?disabled=${!write}
-              @input=${(e: Event) =>
-                (this._form = {
-                  ...this._form,
-                  surname: (e.target as HTMLInputElement).value,
-                })}
-            />
-          </label>
-        </div>
-        <div class="row2">
-          <label
-            >${this._tt("sex")}
-            <select
-              .value=${this._form.sex || "unknown"}
-              ?disabled=${!write}
-              @change=${(e: Event) =>
-                (this._form = {
-                  ...this._form,
-                  sex: (e.target as HTMLSelectElement).value,
-                })}
-            >
-              <option value="male">${this._tt("sex_male")}</option>
-              <option value="female">${this._tt("sex_female")}</option>
-              <option value="intersex">${this._tt("sex_intersex")}</option>
-              <option value="unknown">${this._tt("sex_unknown")}</option>
-            </select>
-          </label>
-          <label class="check-row"
-            >${this._tt("deceased")}
-            <span class="check-control">
-              <input
-                type="checkbox"
-                .checked=${this._form.deceased === "true"}
-                ?disabled=${!write}
-                @change=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
-                    deceased: (e.target as HTMLInputElement).checked
-                      ? "true"
-                      : "false",
-                  })}
-              />
-            </span>
-          </label>
-        </div>
-        <label
-          >${this._tt("notes")}
-          <textarea
-            rows="3"
-            .value=${this._form.notes || ""}
+            .value=${this._form.surname_prefix || ""}
             ?disabled=${!write}
             @input=${(e: Event) =>
               (this._form = {
                 ...this._form,
-                notes: (e.target as HTMLTextAreaElement).value,
+                surname_prefix: (e.target as HTMLInputElement).value,
               })}
-          ></textarea>
+          />
+        </label>
+        <label
+          >${this._tt("surname")}
+          <input
+            .value=${this._form.surname || ""}
+            ?disabled=${!write}
+            @input=${(e: Event) =>
+              (this._form = {
+                ...this._form,
+                surname: (e.target as HTMLInputElement).value,
+              })}
+          />
         </label>
       </div>
+      <label
+        >${this._tt("sex")}
+        <select
+          .value=${this._form.sex || "unknown"}
+          ?disabled=${!write}
+          @change=${(e: Event) =>
+            (this._form = {
+              ...this._form,
+              sex: (e.target as HTMLSelectElement).value,
+            })}
+        >
+          <option value="male">${this._tt("sex_male")}</option>
+          <option value="female">${this._tt("sex_female")}</option>
+          <option value="intersex">${this._tt("sex_intersex")}</option>
+          <option value="unknown">${this._tt("sex_unknown")}</option>
+        </select>
+      </label>
+      <label
+        >${this._tt("profession")}
+        <input
+          .value=${this._form.profession || ""}
+          ?disabled=${!write}
+          @input=${(e: Event) => this._onPersonField("profession", e)}
+        />
+      </label>
+      <label
+        >${this._tt("notes")}
+        <textarea
+          rows="3"
+          .value=${this._form.notes || ""}
+          ?disabled=${!write}
+          @input=${(e: Event) =>
+            (this._form = {
+              ...this._form,
+              notes: (e.target as HTMLTextAreaElement).value,
+            })}
+        ></textarea>
+      </label>
+    </div>`;
+
+    const birthBody = html`<div class="form-section">
+      ${this._renderPersonPlaceField("birth_place", this._tt("birth_place"), write)}
+      <label
+        >${this._tt("col_birth")}
+        <input
+          type="date"
+          .value=${this._form.birth_date_iso || ""}
+          ?disabled=${!write}
+          @input=${(e: Event) =>
+            (this._form = {
+              ...this._form,
+              birth_date_iso: (e.target as HTMLInputElement).value,
+            })}
+        />
+      </label>
+      <label
+        >${this._tt("birth_date_unformatted")}
+        <input
+          placeholder=${this._tt("date_gedcom_hint")}
+          .value=${this._form.birth_date_text || ""}
+          ?disabled=${!write}
+          @input=${(e: Event) =>
+            (this._form = {
+              ...this._form,
+              birth_date_text: (e.target as HTMLInputElement).value,
+            })}
+        />
+      </label>
+    </div>`;
+
+    const deceasedBody = html`<div class="form-section">
+      <label class="check-row"
+        >${this._tt("deceased")}
+        <span class="check-control">
+          <input
+            type="checkbox"
+            .checked=${deceasedOn}
+            ?disabled=${!write}
+            @change=${(e: Event) => {
+              const checked = (e.target as HTMLInputElement).checked;
+              this._form = {
+                ...this._form,
+                deceased: checked ? "true" : "false",
+                ...(checked
+                  ? {}
+                  : {
+                      death_place: "",
+                      death_date_iso: "",
+                      death_date_text: "",
+                    }),
+              };
+            }}
+          />
+        </span>
+      </label>
+      ${deceasedOn
+        ? html`
+            ${this._renderPersonPlaceField("death_place", this._tt("death_place"), write)}
+            <label
+              >${this._tt("col_death")}
+              <input
+                type="date"
+                .value=${this._form.death_date_iso || ""}
+                ?disabled=${!write}
+                @input=${(e: Event) =>
+                  (this._form = {
+                    ...this._form,
+                    death_date_iso: (e.target as HTMLInputElement).value,
+                  })}
+              />
+            </label>
+            <label
+              >${this._tt("death_date_unformatted")}
+              <input
+                placeholder=${this._tt("date_gedcom_hint")}
+                .value=${this._form.death_date_text || ""}
+                ?disabled=${!write}
+                @input=${(e: Event) =>
+                  (this._form = {
+                    ...this._form,
+                    death_date_text: (e.target as HTMLInputElement).value,
+                  })}
+              />
+            </label>
+          `
+        : nothing}
+    </div>`;
+
+    const personBody = html`
+      ${this._renderCollapsibleSection(
+        PERSON_DIALOG_PERSONAL,
+        this._tt("section_personal"),
+        personalBody,
+        true,
+      )}
+      ${this._renderCollapsibleSection(
+        PERSON_DIALOG_BIRTH,
+        this._tt("section_birth"),
+        birthBody,
+        true,
+      )}
+      ${this._renderCollapsibleSection(
+        PERSON_DIALOG_DECEASED,
+        this._tt("section_deceased"),
+        deceasedBody,
+        false,
+      )}
     `;
 
     const usedTypes = this._usedUniqueEventTypes();
