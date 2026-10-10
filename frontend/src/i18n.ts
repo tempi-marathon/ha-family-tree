@@ -136,6 +136,8 @@ const EN = {
   settings_shortcuts: "Family surname shortcuts",
   settings_shortcuts_help:
     "Surnames shown as quick filters on the dashboard and people list (e.g. van Iersel). Matching ignores Dutch prefixes for sorting.",
+  settings_lineage_help:
+    "Link yourself to a person in the tree. After that, this icon marks you and your biological relatives (parents, children, and so on) in the people list, on profiles, and in tree views.",
   settings_shortcuts_add: "Add",
   settings_shortcuts_placeholder: "Surname",
   settings_gazetteer_countries_hint:
@@ -318,6 +320,8 @@ const NL: Record<LocaleKey, string> = {
   settings_shortcuts: "Achternaam-snelkoppelingen",
   settings_shortcuts_help:
     "Achternamen als snelle filters op het dashboard en in de personenlijst (bijv. van Iersel). Nederlandse tussenvoegsels worden bij sorteren genegeerd.",
+  settings_lineage_help:
+    "Koppel jezelf aan een persoon in de stamboom. Daarna markeert dit icoon jou en je biologische familie (ouders, kinderen, enz.) in de personenlijst, op profielen en in stamboomweergaven.",
   settings_shortcuts_add: "Toevoegen",
   settings_shortcuts_placeholder: "Achternaam",
   settings_gazetteer_countries_hint:
