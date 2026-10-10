@@ -93,10 +93,8 @@ const MDI_GENDER_MALE =
   "M9,9C10.29,9 11.5,9.41 12.47,10.11L17.58,5H13V3H21V11H19V6.41L13.89,11.5C14.59,12.5 15,13.7 15,15A6,6 0 0,1 9,21A6,6 0 0,1 3,15A6,6 0 0,1 9,9M9,11A4,4 0 0,0 5,15A4,4 0 0,0 9,19A4,4 0 0,0 13,15A4,4 0 0,0 9,11Z";
 const MDI_GENDER_FEMALE =
   "M12,4A6,6 0 0,1 18,10C18,12.97 15.84,15.44 13,15.92V18H15V20H13V22H11V20H9V18H11V15.92C8.16,15.44 6,12.97 6,10A6,6 0 0,1 12,4M12,6A4,4 0 0,0 8,10A4,4 0 0,0 12,14A4,4 0 0,0 16,10A4,4 0 0,0 12,6Z";
-const MDI_STAR =
-  "M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z";
-const MDI_STAR_OUTLINE =
-  "M12,15.39L8.24,17.66L9.23,13.38L5.91,10.5L10.29,10.13L12,6.09L13.71,10.13L18.09,10.5L14.77,13.38L15.76,17.66M22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27L18.18,21L16.54,13.97L22,9.24Z";
+const MDI_ACCOUNT_HEART =
+  "M15,14C12.3,14 7,15.3 7,18V20H23V18C23,15.3 17.7,14 15,14M15,12A4,4 0 0,0 19,8A4,4 0 0,0 15,4A4,4 0 0,0 11,8A4,4 0 0,0 15,12M5,15L4.4,14.5C2.4,12.6 1,11.4 1,9.9C1,8.7 2,7.7 3.2,7.7C3.9,7.7 4.6,8 5,8.5C5.4,8 6.1,7.7 6.8,7.7C8,7.7 9,8.6 9,9.9C9,11.4 7.6,12.6 5.6,14.5L5,15Z";
 const MDI_DOTS_VERTICAL =
   "M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z";
 const MDI_MENU_DOWN = "M7,10L12,15L17,10H7Z";
@@ -761,19 +759,17 @@ export class FamilyTreePanel extends LitElement {
     return this._tt("lineage_tooltip").replace(/%s/g, () => args[i++] || "");
   }
 
-  private _lineageStar(personId: string, personName?: string) {
+  private _lineageIconSpan() {
+    return html`<span class="lineage-marker">${icon(MDI_ACCOUNT_HEART)}</span>`;
+  }
+
+  private _lineageBadge(personId: string, personName?: string) {
     if (personId === this._myLinkedPersonId()) {
-      return tooltip(
-        this._tt("lineage_me"),
-        html`<span class="lineage-star">${icon(MDI_STAR)}</span>`,
-      );
+      return tooltip(this._tt("lineage_me"), this._lineageIconSpan());
     }
     const rel = this._lineageRel(personId);
     if (!rel) return nothing;
-    return tooltip(
-      this._lineageTooltip(personId, personName),
-      html`<span class="lineage-star">${icon(MDI_STAR)}</span>`,
-    );
+    return tooltip(this._lineageTooltip(personId, personName), this._lineageIconSpan());
   }
 
   private _deceasedIcon(isLiving: boolean) {
@@ -2056,7 +2052,7 @@ export class FamilyTreePanel extends LitElement {
             <div class="person-card-title">
               ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
             </div>
-            ${this._lineageStar(p.id, personDisplayName(p))}
+            ${this._lineageBadge(p.id, personDisplayName(p))}
           </div>
           <div class="person-card-meta">${this._sexBadge(p.sex)}</div>
           ${birth ? html`<div class="person-card-meta">${birth}</div>` : nothing}
@@ -2129,7 +2125,7 @@ export class FamilyTreePanel extends LitElement {
       <td>${this._sexBadge(p.sex)}</td>
       <td>${this._parentsCell(p)}</td>
       <td class="num">${p.children_count ?? 0}</td>
-      <td class="center">${this._lineageStar(p.id)}</td>
+      <td class="center">${this._lineageBadge(p.id)}</td>
       <td class="menu-cell">
         ${this._view === "trash" && this._canWrite()
           ? html`<span class="row-actions">
@@ -2240,7 +2236,7 @@ export class FamilyTreePanel extends LitElement {
           <div class="person-card-title">
             ${this._deceasedIcon(isLiving)} ${this._sexIconBadge(sex)} ${title}
           </div>
-          ${id ? this._lineageStar(id, title) : nothing}
+          ${id ? this._lineageBadge(id, title) : nothing}
         </div>
         ${formal && formal !== title
           ? html`<div class="person-card-formal">${formal}</div>`
@@ -3011,7 +3007,7 @@ export class FamilyTreePanel extends LitElement {
         </button>
         <h2>
           ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
-          ${this._lineageStar(p.id, personDisplayName(p))}
+          ${this._lineageBadge(p.id, personDisplayName(p))}
         </h2>
       </div>
       <div class="subtabs person-subtabs">
@@ -3096,6 +3092,10 @@ export class FamilyTreePanel extends LitElement {
     return html`<section class="block me-card">
       <h3>${this._tt("this_is_me")}</h3>
       <p class="muted">${userName}</p>
+      <p class="lineage-legend muted">
+        <span class="lineage-marker" aria-hidden="true">${icon(MDI_ACCOUNT_HEART)}</span>
+        ${this._tt("settings_lineage_help")}
+      </p>
       ${linked
         ? html`<p>
             <strong>${linked}</strong>
@@ -4046,7 +4046,7 @@ export class FamilyTreePanel extends LitElement {
                 ? html`${this._deceasedIcon(preview.person.is_living)}
                     ${this._sexIconBadge(preview.person.sex)}
                     <span class="dialog-title-text">${personDisplayName(preview.person)}</span>
-                    ${this._lineageStar(preview.person.id, personDisplayName(preview.person))}`
+                    ${this._lineageBadge(preview.person.id, personDisplayName(preview.person))}`
                 : dialogTitle}
             </h2>
             <button
@@ -4937,8 +4937,15 @@ export class FamilyTreePanel extends LitElement {
     .sex-male { background: color-mix(in srgb, #2196f3 15%, transparent); color: #1565c0; }
     .sex-female { background: color-mix(in srgb, #e91e63 15%, transparent); color: #ad1457; }
     .sex-other { background: var(--secondary-background-color); }
-    .lineage-star { color: var(--primary-color); display: inline-flex; }
-    .lineage-star svg { width: 16px; height: 16px; }
+    .lineage-marker { color: var(--primary-color); display: inline-flex; flex-shrink: 0; }
+    .lineage-marker svg { width: 16px; height: 16px; }
+    .lineage-legend {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 0 0 12px;
+      line-height: 1.4;
+    }
     .name-cell { font-weight: 500; }
     .menu-cell { width: 40px; position: relative; }
     .row-menu-wrap { position: relative; }
