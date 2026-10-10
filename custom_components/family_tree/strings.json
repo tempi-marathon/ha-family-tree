@@ -17,16 +17,6 @@
         "data_description": {
           "gazetteer_countries": "Pick from the list or type ISO 3166-1 alpha-2 codes (e.g. NL, BE, DE). Leave empty to skip; place search stays manual until you add countries."
         }
-      },
-      "shortcuts": {
-        "title": "Family shortcuts",
-        "description": "Optional surname shortcuts shown in the Family Tree panel (e.g. your main family names). Leave empty if unsure — you can add them later under Configure.",
-        "data": {
-          "family_shortcuts": "Surname shortcuts"
-        },
-        "data_description": {
-          "family_shortcuts": "Type a surname and press Enter (e.g. Molenschot, van Iersel). Matching ignores Dutch prefixes for sorting."
-        }
       }
     },
     "error": {
@@ -40,14 +30,12 @@
     "step": {
       "init": {
         "title": "Family Tree options",
-        "description": "Offline place-search countries and surname shortcuts for this tree.",
+        "description": "Offline place-search countries for this tree. Surname shortcuts are edited in the Family Tree panel under Settings.",
         "data": {
-          "gazetteer_countries": "Gazetteer countries (ISO codes)",
-          "family_shortcuts": "Family surname shortcuts"
+          "gazetteer_countries": "Gazetteer countries (ISO codes)"
         },
         "data_description": {
-          "gazetteer_countries": "ISO 3166-1 alpha-2 codes to download from GeoNames (e.g. NL, BE).",
-          "family_shortcuts": "Surnames shown as quick links in the panel (e.g. van Iersel)."
+          "gazetteer_countries": "ISO 3166-1 alpha-2 codes to download from GeoNames (e.g. NL, BE)."
         }
       }
     }

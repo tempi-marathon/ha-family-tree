@@ -17,16 +17,6 @@
         "data_description": {
           "gazetteer_countries": "Kies uit de lijst of typ ISO 3166-1 alpha-2 codes (bijv. NL, BE, DE). Laat leeg om over te slaan; plaatszoeken blijft dan handmatig tot je landen toevoegt."
         }
-      },
-      "shortcuts": {
-        "title": "Familiesnelkoppelingen",
-        "description": "Optionele achternaam-snelkoppelingen in het Stamboom-paneel (bijv. je hoofdfamilienamen). Laat leeg als je het nog niet weet — later via Configureren toe te voegen.",
-        "data": {
-          "family_shortcuts": "Achternaam-snelkoppelingen"
-        },
-        "data_description": {
-          "family_shortcuts": "Typ een achternaam en druk op Enter (bijv. Molenschot, van Iersel). Nederlandse tussenvoegsels worden bij sorteren genegeerd."
-        }
       }
     },
     "error": {
@@ -40,14 +30,12 @@
     "step": {
       "init": {
         "title": "Stamboom-opties",
-        "description": "Offline plaatszoek-landen en achternaam-snelkoppelingen voor deze stamboom.",
+        "description": "Offline plaatszoek-landen voor deze stamboom. Achternaam-snelkoppelingen bewerk je in het Stamboom-paneel onder Instellingen.",
         "data": {
-          "gazetteer_countries": "Gazetteer-landen (ISO-codes)",
-          "family_shortcuts": "Familienaam-snelkoppelingen"
+          "gazetteer_countries": "Gazetteer-landen (ISO-codes)"
         },
         "data_description": {
-          "gazetteer_countries": "ISO 3166-1 alpha-2 codes om te downloaden van GeoNames (bijv. NL, BE).",
-          "family_shortcuts": "Achternamen als snelle links in het paneel (bijv. van Iersel)."
+          "gazetteer_countries": "ISO 3166-1 alpha-2 codes om te downloaden van GeoNames (bijv. NL, BE)."
         }
       }
     }
