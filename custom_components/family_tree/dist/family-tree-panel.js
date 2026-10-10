@@ -1160,7 +1160,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       padding: 16px;
       border-radius: var(--ha-border-radius-md, 8px);
       border-left: 3px solid var(--primary-color);
-      background: var(--card-background-color, #fff);
+      background: var(--card-background-color, var(--secondary-background-color));
       box-shadow: var(--ha-card-box-shadow, none);
     }
     .stat-n { display: block; font-size: 1.5rem; font-weight: 600; }
@@ -1180,7 +1180,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       padding: 12px;
       border-radius: var(--ha-card-border-radius, 12px);
       border: 1px solid var(--divider-color);
-      background: var(--card-background-color, #fff);
+      background: var(--card-background-color, var(--secondary-background-color));
       box-shadow: var(--ha-card-box-shadow, none);
     }
     .chart-card h3 { margin: 0 0 8px; font-size: 0.95rem; font-weight: 500; }
@@ -1476,7 +1476,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       box-sizing: border-box;
       position: relative;
       z-index: 1;
-      background: var(--card-background-color, #fff);
+      background: var(--card-background-color, var(--secondary-background-color));
       flex: 1;
       display: flex;
       flex-direction: column;
@@ -1666,7 +1666,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       padding: 12px;
       border: 1px solid var(--divider-color);
       border-radius: var(--ha-border-radius-md, 8px);
-      background: var(--card-background-color, #fff);
+      background: var(--card-background-color, var(--secondary-background-color));
     }
     .rel-union-head {
       display: flex;
@@ -1695,7 +1695,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       margin: 2px 0 0;
       padding: 0;
       list-style: none;
-      background: var(--card-background-color, #fff);
+      background: var(--card-background-color, var(--secondary-background-color));
       border: 1px solid var(--divider-color);
       border-radius: var(--ha-border-radius-md, 8px);
       box-shadow: var(--ha-card-box-shadow, 0 2px 8px rgba(0,0,0,0.12));
@@ -1739,10 +1739,14 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     .md-btn-outlined {
       border: 1px solid var(--primary-color);
       color: var(--primary-color);
-      background: var(--card-background-color, #fff);
+      background: var(--card-background-color, var(--secondary-background-color));
     }
     .md-btn-active.md-btn-outlined {
-      background: color-mix(in srgb, var(--primary-color) 8%, var(--card-background-color, #fff));
+      background: color-mix(
+        in srgb,
+        var(--primary-color) 8%,
+        var(--card-background-color, var(--secondary-background-color))
+      );
     }
     .md-btn-text {
       color: var(--primary-color);
@@ -1761,7 +1765,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       box-sizing: border-box;
     }
     .dialog {
-      background: var(--card-background-color, #fff);
+      background: var(--card-background-color, var(--secondary-background-color));
       color: var(--primary-text-color);
       padding: 20px;
       border-radius: var(--ha-dialog-border-radius, var(--ha-border-radius-lg, 12px));
@@ -1934,7 +1938,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     .row-menu {
       z-index: 100;
       min-width: 140px;
-      background: var(--card-background-color, #fff);
+      background: var(--card-background-color, var(--secondary-background-color));
       border: 1px solid var(--divider-color);
       border-radius: var(--ha-border-radius-md, 8px);
       box-shadow: var(--ha-card-box-shadow, 0 4px 16px rgba(0,0,0,.12));
@@ -1978,7 +1982,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       border-radius: var(--ha-border-radius-lg, 12px);
       margin-bottom: 12px;
       overflow: hidden;
-      background: #fff;
+      background: var(--card-background-color, var(--secondary-background-color));
     }
     .collapse-head {
       appearance: none;
@@ -1988,7 +1992,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       justify-content: space-between;
       align-items: center;
       padding: 12px 14px;
-      background: #fff;
+      background: var(--secondary-background-color);
       font: inherit;
       font-weight: 600;
       cursor: pointer;
@@ -1996,11 +2000,15 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     }
     .collapse-body {
       padding: 0 14px 14px;
-      background: #fff;
+      background: var(--card-background-color, var(--secondary-background-color));
     }
     .collapse--cards .collapse-body {
       padding: 10px 14px 14px;
-      background: color-mix(in srgb, var(--divider-color) 8%, #fff);
+      background: color-mix(
+        in srgb,
+        var(--divider-color) 8%,
+        var(--card-background-color, var(--secondary-background-color))
+      );
     }
     .gen-row {
       position: relative;
