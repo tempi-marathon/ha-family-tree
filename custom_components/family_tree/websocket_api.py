@@ -9,7 +9,6 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import Unauthorized
-from homeassistant.helpers import config_validation as cv
 
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
@@ -595,7 +594,7 @@ async def ws_settings(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): f"{DOMAIN}/settings/save",
-        vol.Required("family_shortcuts"): cv.ensure_list,
+        vol.Required("family_shortcuts"): list,
         **_OPTIONAL_ENTRY,
     }
 )
