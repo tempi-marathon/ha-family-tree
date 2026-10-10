@@ -10,7 +10,6 @@ from typing import Any
 
 from .const import META_FAMILY_SHORTCUTS
 from .db import Database
-from .shortcuts import normalize_family_shortcuts
 from .models import (
     Citation,
     Event,
@@ -27,6 +26,7 @@ from .models import (
     new_id,
 )
 from .names import display_name
+from .shortcuts import normalize_family_shortcuts
 
 _LOGGER = logging.getLogger(__name__)
 
