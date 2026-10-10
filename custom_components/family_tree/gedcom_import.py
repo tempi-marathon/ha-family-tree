@@ -27,6 +27,7 @@ from .models import (
 )
 from .names import split_surname
 from .repository import Repository
+from .validation import normalize_source_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -313,7 +314,7 @@ class GedcomImporter:
         if "TITL" in groups:
             title = groups["TITL"][0].value
         if "WWW" in groups:
-            url = groups["WWW"][0].value
+            url = normalize_source_url(groups["WWW"][0].value)
         if "AUTH" in groups:
             author = groups["AUTH"][0].value
         if "PUBL" in groups:

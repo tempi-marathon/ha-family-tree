@@ -116,7 +116,9 @@ class Gazetteer:
 
     async def async_ensure_countries(self, country_codes: list[str]) -> None:
         """Download any missing country dumps and refresh admin1 names."""
-        codes = [c.strip().upper() for c in country_codes if c and c.strip()]
+        from .validation import normalize_country_codes
+
+        codes = normalize_country_codes(country_codes)
         if not codes:
             return
         missing = await self.hass.async_add_executor_job(self._missing_countries, codes)

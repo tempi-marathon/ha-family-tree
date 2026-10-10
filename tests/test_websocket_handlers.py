@@ -140,6 +140,31 @@ def test_claim_requires_user(repo: Repository) -> None:
     assert conn.errors[0][0] == "unauthorized"
 
 
+def test_persons_save_requires_admin(repo: Repository) -> None:
+    conn = _FakeConnection("user-1", is_admin=False)
+    _call(
+        ws.ws_persons_save,
+        conn,
+        {
+            "type": "family_tree/persons/save",
+            "given_names": "Ada",
+        },
+    )
+    assert conn.errors == [("unauthorized", "Unauthorized")]
+    assert not conn.results
+
+
+def test_persons_delete_requires_admin(repo: Repository) -> None:
+    person = repo.add_person(Person(given_names="Ada"))
+    conn = _FakeConnection("user-1", is_admin=False)
+    _call(
+        ws.ws_persons_delete,
+        conn,
+        {"type": "family_tree/persons/delete", "person_id": person.id},
+    )
+    assert conn.errors == [("unauthorized", "Unauthorized")]
+
+
 def test_events_save_rejects_duplicate_unique_type(repo: Repository) -> None:
     p = repo.add_person(Person(given_names="Ada"))
     existing = repo.add_event(
