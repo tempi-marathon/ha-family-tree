@@ -896,8 +896,9 @@ async def ws_parent_child_add(
 
     try:
         result = await hass.async_add_executor_job(_run)
-    except Exception as err:  # noqa: BLE001
-        connection.send_error(msg["id"], "error", str(err))
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("parent_child/add failed")
+        connection.send_error(msg["id"], "error", "Could not add parent-child link")
         return
     connection.send_result(msg["id"], {"link": result})
 

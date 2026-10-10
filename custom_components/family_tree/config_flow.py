@@ -27,14 +27,11 @@ from .const import (
     DOMAIN,
     SUGGESTED_GAZETTEER_COUNTRIES,
 )
+from .validation import normalize_country_codes
 
 
 def _normalize_countries(raw: Any) -> list[str]:
-    return [
-        str(c).strip().upper()
-        for c in (raw or [])
-        if str(c).strip()
-    ]
+    return normalize_country_codes(raw)
 
 
 def _country_selector(current: list[str]) -> SelectSelector:

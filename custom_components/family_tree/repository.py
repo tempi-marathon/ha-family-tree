@@ -27,6 +27,7 @@ from .models import (
 )
 from .names import display_name
 from .shortcuts import normalize_family_shortcuts
+from .validation import normalize_source_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -852,6 +853,8 @@ class Repository:
         return _row_source(row) if row else None
 
     def add_source(self, source: Source) -> Source:
+        safe_url = normalize_source_url(source.url)
+
         def _do() -> Source:
             self.db.execute(
                 "INSERT INTO sources (id, title, url, author, repository, notes, "
@@ -859,7 +862,7 @@ class Repository:
                 (
                     source.id,
                     source.title,
-                    source.url,
+                    safe_url,
                     source.author,
                     source.repository,
                     source.notes,

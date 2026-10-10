@@ -58,6 +58,7 @@ import {
   isoToGedcomDate,
 } from "./dates_view";
 import { formatHassError } from "./errors";
+import { isSafeUrl } from "./url";
 import { type LocaleKey, t } from "./i18n";
 import {
   loadPanelViewState,
@@ -3035,7 +3036,9 @@ export class FamilyTreePanel extends LitElement {
                 (c) => html`<li>
                   <strong>${c.source_title || "Source"}</strong>
                   ${c.source_url
-                    ? html`<a href=${String(c.source_url)} target="_blank" rel="noopener">${c.source_url}</a>`
+                    ? isSafeUrl(String(c.source_url))
+                      ? html`<a href=${String(c.source_url)} target="_blank" rel="noopener">${c.source_url}</a>`
+                      : html`<span>${c.source_url}</span>`
                     : nothing}
                   ${c.detail ? html`<span class="muted"> — ${c.detail}</span>` : nothing}
                 </li>`,

@@ -71,7 +71,7 @@ link_user:
 
 export_gedcom:
   name: Export GEDCOM
-  description: Export the family tree as GEDCOM 5.5.1 text (admin or automation).
+  description: Export the family tree as GEDCOM 5.5.1 text (any authenticated user or automation).
   fields:
     config_entry_id:
       name: Config entry

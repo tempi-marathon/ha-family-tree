@@ -35,8 +35,9 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
 
         try:
             coordinator = get_coordinator(hass)
-        except Exception as err:  # noqa: BLE001
-            return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("GEDCOM import coordinator lookup failed")
+            return self.json_message("Family Tree is not available", HTTPStatus.BAD_REQUEST)
 
         replace = request.query.get("replace", "0") in ("1", "true", "yes")
         preview = request.query.get("preview", "0") in ("1", "true", "yes")
@@ -67,9 +68,9 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
                         HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                     )
                 text = body.decode("utf-8", errors="replace")
-        except Exception as err:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             _LOGGER.exception("Failed to read GEDCOM upload")
-            return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+            return self.json_message("Failed to read upload", HTTPStatus.BAD_REQUEST)
 
         if preview:
 
@@ -78,9 +79,9 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
 
             try:
                 report = await hass.async_add_executor_job(_preview)
-            except Exception as err:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 _LOGGER.exception("GEDCOM preview failed")
-                return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+                return self.json_message("GEDCOM preview failed", HTTPStatus.BAD_REQUEST)
             return self.json({"ok": True, "preview": True, "report": report})
 
         def _import() -> dict:
@@ -90,9 +91,9 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
 
         try:
             report = await hass.async_add_executor_job(_import)
-        except Exception as err:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             _LOGGER.exception("GEDCOM import failed")
-            return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+            return self.json_message("GEDCOM import failed", HTTPStatus.BAD_REQUEST)
 
         return self.json({"ok": True, "report": report})
 
@@ -109,8 +110,9 @@ class FamilyTreeExportGedcomView(HomeAssistantView):
         hass: HomeAssistant = request.app["hass"]
         try:
             coordinator = get_coordinator(hass)
-        except Exception as err:  # noqa: BLE001
-            return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("GEDCOM export coordinator lookup failed")
+            return self.json_message("Family Tree is not available", HTTPStatus.BAD_REQUEST)
 
         text = await hass.async_add_executor_job(export_gedcom, coordinator.repo.db)
         return web.Response(
