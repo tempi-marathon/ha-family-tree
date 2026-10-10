@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import Unauthorized
+from homeassistant.helpers import config_validation as cv
 
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
@@ -44,6 +45,7 @@ from .models import (
 from .names import display_name, matches_family_shortcut
 from .relatives import enrich_event_dict, siblings_of, tree_for, union_events_for_person
 from .repository import event_sort_key, vital_summary
+from .shortcuts import normalize_family_shortcuts
 from .stats import compute_stats
 
 _LOGGER = logging.getLogger(__name__)
@@ -588,6 +590,32 @@ async def ws_settings(
             ),
         },
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/settings/save",
+        vol.Required("family_shortcuts"): cv.ensure_list,
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_settings_save(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+    shortcuts = normalize_family_shortcuts(msg.get("family_shortcuts"))
+
+    def _run() -> list[str]:
+        return coordinator.repo.set_family_shortcuts(shortcuts)
+
+    saved = await hass.async_add_executor_job(_run)
+    connection.send_result(msg["id"], {CONF_FAMILY_SHORTCUTS: saved})
 
 
 # --- Mutations -------------------------------------------------------------
@@ -1257,6 +1285,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_gazetteer_search,
         ws_gazetteer_status,
         ws_settings,
+        ws_settings_save,
     ):
         websocket_api.async_register_command(hass, handler)
     hass.data[key] = True

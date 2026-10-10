@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
     EVENT_ANNIVERSARY,
     EVENT_BIRTHDAY,
+    META_FAMILY_SHORTCUTS,
 )
 from .dates import parse_gedcom_date
 from .models import EventType, SubjectType, UnionStatus
@@ -72,6 +73,9 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
 
     @property
     def family_shortcuts(self) -> list[str]:
+        stored = self.repo.get_family_shortcuts()
+        if stored is not None:
+            return stored
         return list(self.entry.options.get(CONF_FAMILY_SHORTCUTS) or [])
 
     @property
@@ -89,7 +93,22 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
             second=0,
         )
         await self.async_sync_gazetteer()
+        await self.hass.async_add_executor_job(self._migrate_family_shortcuts)
+        await self._async_strip_shortcuts_from_options()
         await self.async_refresh()
+
+    def _migrate_family_shortcuts(self) -> None:
+        if self.repo.meta_has(META_FAMILY_SHORTCUTS):
+            return
+        legacy = list(self.entry.options.get(CONF_FAMILY_SHORTCUTS) or [])
+        self.repo.set_family_shortcuts(legacy)
+
+    async def _async_strip_shortcuts_from_options(self) -> None:
+        opts = dict(self.entry.options)
+        if CONF_FAMILY_SHORTCUTS not in opts:
+            return
+        opts.pop(CONF_FAMILY_SHORTCUTS, None)
+        self.hass.config_entries.async_update_entry(self.entry, options=opts)
 
     async def async_shutdown(self) -> None:
         """Detach listeners and close database."""

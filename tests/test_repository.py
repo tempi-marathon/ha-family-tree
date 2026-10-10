@@ -243,3 +243,12 @@ def test_events_sorted_chronologically_with_type_order(tmp_path: Path):
         "occupation",
     ]
     repo.db.close()
+
+
+def test_family_shortcuts_meta(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    assert repo.get_family_shortcuts() is None
+    saved = repo.set_family_shortcuts(["van Iersel", "Molenschot", "van Iersel"])
+    assert saved == ["van Iersel", "Molenschot"]
+    assert repo.get_family_shortcuts() == ["van Iersel", "Molenschot"]
+    repo.db.close()

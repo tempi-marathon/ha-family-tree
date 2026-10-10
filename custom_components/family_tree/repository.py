@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from .const import META_FAMILY_SHORTCUTS
 from .db import Database
+from .shortcuts import normalize_family_shortcuts
 from .models import (
     Citation,
     Event,
@@ -1052,3 +1055,43 @@ class Repository:
             self._batch_depth -= 1
         self._notify()
         return result
+
+    # --- Meta / panel settings ---------------------------------------------
+
+    def meta_has(self, key: str) -> bool:
+        row = self.db.fetchone("SELECT key FROM meta WHERE key = ?", (key,))
+        return row is not None
+
+    def get_family_shortcuts(self) -> list[str] | None:
+        """Return stored shortcuts, or None if not migrated yet."""
+        if not self.meta_has(META_FAMILY_SHORTCUTS):
+            return None
+        row = self.db.fetchone(
+            "SELECT value FROM meta WHERE key = ?", (META_FAMILY_SHORTCUTS,)
+        )
+        if not row:
+            return []
+        try:
+            raw = json.loads(row["value"])
+        except (TypeError, json.JSONDecodeError):
+            return []
+        return normalize_family_shortcuts(raw) if isinstance(raw, list) else []
+
+    def set_family_shortcuts(self, shortcuts: list[str]) -> list[str]:
+        normalized = normalize_family_shortcuts(shortcuts)
+
+        def _do() -> list[str]:
+            payload = json.dumps(normalized)
+            if self.meta_has(META_FAMILY_SHORTCUTS):
+                self.db.execute(
+                    "UPDATE meta SET value = ? WHERE key = ?",
+                    (payload, META_FAMILY_SHORTCUTS),
+                )
+            else:
+                self.db.execute(
+                    "INSERT INTO meta (key, value) VALUES (?, ?)",
+                    (META_FAMILY_SHORTCUTS, payload),
+                )
+            return normalized
+
+        return self._mutate(_do)

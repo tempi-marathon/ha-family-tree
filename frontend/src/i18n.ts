@@ -133,6 +133,15 @@ const EN = {
   edit_in_relationships: "Edit in Relationships",
   section_parents: "Parents",
   section_partners: "Partners",
+  settings_shortcuts: "Family surname shortcuts",
+  settings_shortcuts_help:
+    "Surnames shown as quick filters on the dashboard and people list (e.g. van Iersel). Matching ignores Dutch prefixes for sorting.",
+  settings_shortcuts_add: "Add",
+  settings_shortcuts_placeholder: "Surname",
+  settings_gazetteer_countries_hint:
+    "Offline place-search countries are configured in Home Assistant → Settings → Devices & services → Family Tree → Configure.",
+  gazetteer_search_placeholder: "Search places…",
+  search: "Search",
   link_existing_person: "Link existing person",
   search_to_link: "Search for a person…",
   union_status: "Status",
@@ -306,6 +315,15 @@ const NL: Record<LocaleKey, string> = {
   edit_in_relationships: "Bewerken in Relaties",
   section_parents: "Ouders",
   section_partners: "Partners",
+  settings_shortcuts: "Achternaam-snelkoppelingen",
+  settings_shortcuts_help:
+    "Achternamen als snelle filters op het dashboard en in de personenlijst (bijv. van Iersel). Nederlandse tussenvoegsels worden bij sorteren genegeerd.",
+  settings_shortcuts_add: "Toevoegen",
+  settings_shortcuts_placeholder: "Achternaam",
+  settings_gazetteer_countries_hint:
+    "Landen voor offline plaatszoeken stel je in via Home Assistant → Instellingen → Apparaten en diensten → Stamboom → Configureren.",
+  gazetteer_search_placeholder: "Plaatsen zoeken…",
+  search: "Zoeken",
   link_existing_person: "Bestaande persoon koppelen",
   search_to_link: "Zoek een persoon…",
   union_status: "Status",

@@ -373,12 +373,24 @@ export async function saveEvent(
   hass: HomeAssistant,
   data: Record<string, unknown>,
 ): Promise<{ event: EventDto }> {
-  const { id, event_id, ...rest } = data;
-  const payload = {
+  const { id, event_id, date_qualifier: _dq, type, ...rest } = data;
+  const payload: Record<string, unknown> = {
     ...rest,
     ...(event_id || id ? { event_id: String(event_id || id) } : {}),
   };
+  if (!payload.event_type && typeof type === "string") {
+    payload.event_type = type;
+  }
   return msg(hass, "family_tree/events/save", payload) as Promise<{ event: EventDto }>;
+}
+
+export async function saveFamilyShortcuts(
+  hass: HomeAssistant,
+  familyShortcuts: string[],
+): Promise<{ family_shortcuts: string[] }> {
+  return msg(hass, "family_tree/settings/save", {
+    family_shortcuts: familyShortcuts,
+  }) as Promise<{ family_shortcuts: string[] }>;
 }
 
 export async function deleteEvent(

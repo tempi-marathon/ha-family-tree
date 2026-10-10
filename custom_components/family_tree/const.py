@@ -11,6 +11,8 @@ VERSION: Final = "0.1.0"
 CONF_NAME: Final = "name"
 CONF_GAZETTEER_COUNTRIES: Final = "gazetteer_countries"
 CONF_FAMILY_SHORTCUTS: Final = "family_shortcuts"
+META_FAMILY_SHORTCUTS: Final = "family_shortcuts"
+MAX_FAMILY_SHORTCUTS: Final = 50
 
 DEFAULT_PROFILE_NAME: Final = "Family Tree"
 DEFAULT_GAZETTEER_COUNTRIES: Final = []

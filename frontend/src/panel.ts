@@ -31,6 +31,7 @@ import {
   restorePerson,
   listPlaces,
   saveEvent,
+  saveFamilyShortcuts,
   savePerson,
   savePlace,
   saveUnion,
@@ -276,6 +277,9 @@ export class FamilyTreePanel extends LitElement {
   @state() private _siblingsLoading = false;
   @state() private _previewDetail: PersonDetail | null = null;
   @state() private _previewLoading = false;
+  @state() private _shortcutsDraft: string[] = [];
+  @state() private _shortcutInput = "";
+  @state() private _shortcutsSaving = false;
 
   private _unsub: (() => void) | null = null;
   private _placeSearchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -429,6 +433,7 @@ export class FamilyTreePanel extends LitElement {
       this._total = list.total;
       this._stats = stats;
       this._settings = settings;
+      this._syncShortcutsDraft();
       this._lineage = lineage;
       if (this._detail) {
         this._detail = await getPerson(this.hass, this._detail.person.id);
@@ -965,7 +970,6 @@ export class FamilyTreePanel extends LitElement {
       subject_id: personId,
       event_type: eventType,
       date_text: built.text,
-      date_qualifier: "exact",
       place: placeName || undefined,
       place_id: placeId,
       description: "",
@@ -999,7 +1003,6 @@ export class FamilyTreePanel extends LitElement {
         subject_id: personId,
         event_type: "occupation",
         date_text: "",
-        date_qualifier: "exact",
         description: profession,
       });
     }
@@ -1469,13 +1472,52 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
+  private _syncShortcutsDraft() {
+    this._shortcutsDraft = [...(this._settings?.family_shortcuts || [])];
+  }
+
   private async _loadSettingsExtras() {
     if (!this.hass) return;
     try {
+      this._settings = await getSettings(this.hass);
+      this._syncShortcutsDraft();
       this._userLinks = (await listUserLinks(this.hass)).links;
       this._gazetteer = await gazetteerStatus(this.hass);
     } catch (err) {
       this._error = formatHassError(err);
+    }
+  }
+
+  private _addShortcutFromInput() {
+    const text = this._shortcutInput.trim();
+    if (!text) return;
+    if (this._shortcutsDraft.some((s) => s.toLowerCase() === text.toLowerCase())) {
+      this._shortcutInput = "";
+      return;
+    }
+    this._shortcutsDraft = [...this._shortcutsDraft, text];
+    this._shortcutInput = "";
+  }
+
+  private _removeShortcut(index: number) {
+    this._shortcutsDraft = this._shortcutsDraft.filter((_, i) => i !== index);
+  }
+
+  private async _saveShortcutsDraft() {
+    if (!this.hass || !this._canWrite()) return;
+    this._shortcutsSaving = true;
+    this._error = "";
+    try {
+      const { family_shortcuts } = await saveFamilyShortcuts(this.hass, this._shortcutsDraft);
+      this._shortcutsDraft = [...family_shortcuts];
+      if (this._settings) {
+        this._settings = { ...this._settings, family_shortcuts };
+      }
+      await this._refreshAll();
+    } catch (err) {
+      this._error = formatHassError(err);
+    } finally {
+      this._shortcutsSaving = false;
     }
   }
 
@@ -2440,9 +2482,8 @@ export class FamilyTreePanel extends LitElement {
           await saveEvent(this.hass, {
             subject_type: "union",
             subject_id: this._editingUnionId,
-            type: "marriage",
+            event_type: "marriage",
             date_text: built.value,
-            date_qualifier: "exact",
             place_id: placeId,
           });
         }
@@ -3136,72 +3177,145 @@ export class FamilyTreePanel extends LitElement {
 
   private _renderSettings() {
     const countries = (this._gazetteer?.countries as Array<Record<string, unknown>>) || [];
+    const write = this._canWrite();
+    const importBody = html`<div class="form-section">
+      ${write
+        ? html`
+            <label class="check">
+              <input type="checkbox" .checked=${this._replaceImport}
+                @change=${(e: Event) => (this._replaceImport = (e.target as HTMLInputElement).checked)} />
+              ${this._tt("replace_import")}
+            </label>
+            <input type="file" accept=".ged,text/plain"
+              @change=${(e: Event) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (file) void this._previewGedcom(file);
+                (e.target as HTMLInputElement).value = "";
+              }} />
+          `
+        : nothing}
+      <button type="button" @click=${() => this._exportGedcom()}>${this._tt("export_gedcom")}</button>
+      ${this._importStatus ? html`<p class="muted">${this._importStatus}</p>` : nothing}
+    </div>`;
+
+    const shortcutsBody = html`<div class="form-section">
+      <p class="muted">${this._tt("settings_shortcuts_help")}</p>
+      <div class="chip-row settings-shortcut-chips">
+        ${this._shortcutsDraft.map(
+          (s, i) => html`<span class="chip">
+            ${s}
+            ${write
+              ? html`<button
+                  type="button"
+                  class="linkish chip-remove"
+                  aria-label=${this._tt("delete")}
+                  @click=${() => this._removeShortcut(i)}
+                >
+                  ×
+                </button>`
+              : nothing}
+          </span>`,
+        )}
+        ${!this._shortcutsDraft.length ? html`<span class="muted">—</span>` : nothing}
+      </div>
+      ${write
+        ? html`<div class="inline-form">
+            <input
+              .value=${this._shortcutInput}
+              placeholder=${this._tt("settings_shortcuts_placeholder")}
+              @input=${(e: Event) =>
+                (this._shortcutInput = (e.target as HTMLInputElement).value)}
+              @keydown=${(e: KeyboardEvent) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  this._addShortcutFromInput();
+                }
+              }}
+            />
+            <button type="button" @click=${() => this._addShortcutFromInput()}>
+              ${this._tt("settings_shortcuts_add")}
+            </button>
+            <button
+              type="button"
+              ?disabled=${this._shortcutsSaving}
+              @click=${() => void this._saveShortcutsDraft()}
+            >
+              ${this._tt("save")}
+            </button>
+          </div>`
+        : nothing}
+    </div>`;
+
+    const linksBody = html`<div class="form-section">
+      <ul class="plain">
+        ${this._userLinks.map(
+          (l) => html`<li>
+            ${l.ha_user_id} → ${l.person_name || l.person_id}
+            ${write
+              ? html`<button class="linkish" @click=${async () => {
+                  await setUserLink(this.hass, String(l.ha_user_id), null);
+                  await this._loadSettingsExtras();
+                }}>${this._tt("delete")}</button>`
+              : nothing}
+          </li>`,
+        )}
+        ${!this._userLinks.length ? html`<li class="muted">—</li>` : nothing}
+      </ul>
+      ${write
+        ? html`<div class="inline-form">
+            <input id="link-user" placeholder="HA user id" />
+            <input id="link-person" placeholder="person id" />
+            <button type="button" @click=${async () => {
+              const u = (this.renderRoot.querySelector("#link-user") as HTMLInputElement)?.value;
+              const p = (this.renderRoot.querySelector("#link-person") as HTMLInputElement)?.value;
+              if (u && p) {
+                await setUserLink(this.hass, u, p);
+                await this._loadSettingsExtras();
+              }
+            }}>${this._tt("save")}</button>
+          </div>`
+        : nothing}
+    </div>`;
+
+    const gazetteerBody = html`<div class="form-section">
+      <p class="muted">${this._tt("settings_gazetteer_countries_hint")}</p>
+      <p class="muted">${countries.map((c) => `${c.code} (${c.place_count})`).join(", ") || "—"}</p>
+      <div class="inline-form">
+        <input
+          .value=${this._gazQuery}
+          placeholder=${this._tt("gazetteer_search_placeholder")}
+          @input=${(e: Event) => (this._gazQuery = (e.target as HTMLInputElement).value)}
+        />
+        <button type="button" @click=${() => this._runGazSearch()}>${this._tt("search")}</button>
+      </div>
+      <ul class="plain">
+        ${this._gazHits.map(
+          (h) => html`<li>${h.name}${h.admin1 ? `, ${h.admin1}` : ""} (${h.country_code})</li>`,
+        )}
+      </ul>
+    </div>`;
+
     return html`
       ${this._renderMeCard()}
-      <section class="block">
-        <h3>${this._tt("import_gedcom")} / ${this._tt("export_gedcom")}</h3>
-        ${this._canWrite()
-          ? html`
-              <label class="check">
-                <input type="checkbox" .checked=${this._replaceImport}
-                  @change=${(e: Event) => (this._replaceImport = (e.target as HTMLInputElement).checked)} />
-                ${this._tt("replace_import")}
-              </label>
-              <input type="file" accept=".ged,text/plain"
-                @change=${(e: Event) => {
-                  const file = (e.target as HTMLInputElement).files?.[0];
-                  if (file) void this._previewGedcom(file);
-                  (e.target as HTMLInputElement).value = "";
-                }} />
-            `
-          : nothing}
-        <button @click=${() => this._exportGedcom()}>${this._tt("export_gedcom")}</button>
-        ${this._importStatus ? html`<p class="muted">${this._importStatus}</p>` : nothing}
-      </section>
-      <section class="block">
-        <h3>${this._tt("user_links")}</h3>
-        <ul class="plain">
-          ${this._userLinks.map(
-            (l) => html`<li>
-              ${l.ha_user_id} → ${l.person_name || l.person_id}
-              ${this._canWrite()
-                ? html`<button class="linkish" @click=${async () => {
-                    await setUserLink(this.hass, String(l.ha_user_id), null);
-                    await this._loadSettingsExtras();
-                  }}>${this._tt("delete")}</button>`
-                : nothing}
-            </li>`,
-          )}
-        </ul>
-        ${this._canWrite()
-          ? html`<div class="inline-form">
-              <input id="link-user" placeholder="HA user id" />
-              <input id="link-person" placeholder="person id" />
-              <button @click=${async () => {
-                const u = (this.renderRoot.querySelector("#link-user") as HTMLInputElement)?.value;
-                const p = (this.renderRoot.querySelector("#link-person") as HTMLInputElement)?.value;
-                if (u && p) {
-                  await setUserLink(this.hass, u, p);
-                  await this._loadSettingsExtras();
-                }
-              }}>${this._tt("save")}</button>
-            </div>`
-          : nothing}
-      </section>
-      <section class="block">
-        <h3>${this._tt("gazetteer")}</h3>
-        <p class="muted">${countries.map((c) => `${c.code} (${c.place_count})`).join(", ") || "—"}</p>
-        <div class="inline-form">
-          <input .value=${this._gazQuery} placeholder="Search places…"
-            @input=${(e: Event) => (this._gazQuery = (e.target as HTMLInputElement).value)} />
-          <button @click=${() => this._runGazSearch()}>Search</button>
-        </div>
-        <ul class="plain">
-          ${this._gazHits.map(
-            (h) => html`<li>${h.name}${h.admin1 ? `, ${h.admin1}` : ""} (${h.country_code})</li>`,
-          )}
-        </ul>
-      </section>
+      ${this._renderCollapsibleSection(
+        "settings-import",
+        `${this._tt("import_gedcom")} / ${this._tt("export_gedcom")}`,
+        importBody,
+        true,
+      )}
+      ${this._renderCollapsibleSection(
+        "settings-shortcuts",
+        this._tt("settings_shortcuts"),
+        shortcutsBody,
+        true,
+      )}
+      ${this._renderCollapsibleSection("settings-links", this._tt("user_links"), linksBody, false)}
+      ${this._renderCollapsibleSection(
+        "settings-gazetteer",
+        this._tt("gazetteer"),
+        gazetteerBody,
+        false,
+      )}
     `;
   }
 
@@ -3369,7 +3483,7 @@ export class FamilyTreePanel extends LitElement {
 
     const birthBody = html`<div class="form-section">
       ${this._renderPersonPlaceField("birth_place", this._tt("birth_place"), write)}
-      <label
+      <label class="vital-date-field"
         >${this._tt("col_birth")}
         <input
           type="date"
@@ -3425,7 +3539,7 @@ export class FamilyTreePanel extends LitElement {
       ${deceasedOn
         ? html`
             ${this._renderPersonPlaceField("death_place", this._tt("death_place"), write)}
-            <label
+            <label class="vital-date-field"
               >${this._tt("col_death")}
               <input
                 type="date"
@@ -4469,12 +4583,27 @@ export class FamilyTreePanel extends LitElement {
     }
     .gen .person-card { max-width: 280px; width: 280px; }
     .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .settings-shortcut-chips .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .chip-remove {
+      padding: 0 4px;
+      font-size: 1.1em;
+      line-height: 1;
+    }
     .inline-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
     .event-date-field {
       display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
       flex: 1; min-width: 200px;
     }
     .event-date-field input { flex: 1; min-width: 140px; width: auto; }
+    .vital-date-field input[type="date"] {
+      width: auto;
+      max-width: min(100%, 11.5rem);
+      align-self: flex-start;
+    }
     .date-input-row {
       display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px;
     }
