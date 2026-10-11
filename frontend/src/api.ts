@@ -418,6 +418,19 @@ export async function deleteEvent(
   }) as Promise<{ ok: boolean }>;
 }
 
+export interface HaUserDto {
+  id: string;
+  name: string;
+  is_active?: boolean;
+}
+
+export async function listHaUsers(hass: HomeAssistant): Promise<HaUserDto[]> {
+  const res = await hass.connection.sendMessagePromise<{ users: HaUserDto[] }>({
+    type: "config/user_registry/list",
+  });
+  return res.users || [];
+}
+
 export async function listUserLinks(
   hass: HomeAssistant,
 ): Promise<{ links: Array<Record<string, unknown>> }> {

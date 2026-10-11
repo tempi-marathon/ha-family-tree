@@ -28,6 +28,8 @@ import {
   getStats,
   listPersonMedia,
   deletePersonMedia,
+  listHaUsers,
+  type HaUserDto,
   listPersons,
   listUserLinks,
   personMediaUploadUrl,
@@ -241,6 +243,11 @@ export class FamilyTreePanel extends LitElement {
   @state() private _saving = false;
   @state() private _loading = true;
   @state() private _userLinks: Array<Record<string, unknown>> = [];
+  @state() private _haUsers: HaUserDto[] = [];
+  @state() private _linkUserQuery = "";
+  @state() private _linkSelectedUserId = "";
+  @state() private _linkPersonQuery = "";
+  @state() private _linkPersonId = "";
   @state() private _gazetteer: Record<string, unknown> | null = null;
   @state() private _gazQuery = "";
   @state() private _gazHits: GazetteerHit[] = [];
@@ -1220,10 +1227,16 @@ export class FamilyTreePanel extends LitElement {
     return occ[occ.length - 1].description || "";
   }
 
-  private _mePersonMatches(): PersonDto[] {
-    const q = this._meQuery.trim().toLowerCase();
+  private _peopleSearchMatches(
+    query: string,
+    opts: { limit?: number; excludeId?: string } = {},
+  ): PersonDto[] {
+    const q = query.trim().toLowerCase();
     if (!q) return [];
+    const limit = opts.limit ?? 12;
     return this._people
+      .filter((p) => !p.deleted_at)
+      .filter((p) => !opts.excludeId || p.id !== opts.excludeId)
       .filter((p) => {
         const hay = [
           p.given_names,
@@ -1236,7 +1249,53 @@ export class FamilyTreePanel extends LitElement {
           .toLowerCase();
         return hay.includes(q);
       })
+      .slice(0, limit);
+  }
+
+  private _mePersonMatches(): PersonDto[] {
+    return this._peopleSearchMatches(this._meQuery);
+  }
+
+  private _haUserMatches(): HaUserDto[] {
+    const q = this._linkUserQuery.trim().toLowerCase();
+    if (!q) return [];
+    return this._haUsers
+      .filter((u) => {
+        const hay = [u.name, u.id].join(" ").toLowerCase();
+        return hay.includes(q);
+      })
       .slice(0, 12);
+  }
+
+  private _haUserDisplayName(userId: string): string {
+    const u = this._haUsers.find((x) => x.id === userId);
+    return u ? u.name || u.id : userId;
+  }
+
+  private _renderPersonSearchHits(
+    matches: PersonDto[],
+    query: string,
+    onSelect: (personId: string) => void,
+  ) {
+    if (!matches.length) {
+      return query.trim()
+        ? html`<p class="muted">${this._tt("no_people")}</p>`
+        : nothing;
+    }
+    const lang = this.hass?.language;
+    return html`<ul class="plain me-hits">
+      ${matches.map(
+        (p) => html`<li>
+          <button type="button" class="linkish" @click=${() => onSelect(p.id)}>
+            <strong>${personDisplayName(p)}</strong>
+            <span class="muted">
+              ${formatLifespan(p.birth, p.death, p.is_living, lang)}
+              ${[p.father?.name, p.mother?.name].filter(Boolean).join(" · ")}
+            </span>
+          </button>
+        </li>`,
+      )}
+    </ul>`;
   }
 
   private async _savePerson() {
@@ -1498,17 +1557,21 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _pickGedcomFile() {
+  private _pickGedcomFile(inputId = "ft-gedcom-file") {
     const input = this.renderRoot.querySelector(
-      "#ft-gedcom-file",
+      `#${inputId}`,
     ) as HTMLInputElement | null;
     input?.click();
   }
 
-  private _onGedcomFileChange(e: Event) {
+  private _onGedcomFilePicked(e: Event) {
     const file = (e.target as HTMLInputElement).files?.[0];
     (e.target as HTMLInputElement).value = "";
     if (file) void this._previewGedcom(file);
+  }
+
+  private _onGedcomFileChange(e: Event) {
+    this._onGedcomFilePicked(e);
   }
 
   private _renderEmptyCta() {
@@ -1564,6 +1627,30 @@ export class FamilyTreePanel extends LitElement {
       this._syncShortcutsDraft();
       this._userLinks = (await listUserLinks(this.hass)).links;
       this._gazetteer = await gazetteerStatus(this.hass);
+      this._lineage = await getMyLineage(this.hass).catch(() => this._lineage);
+      if (this._canWrite()) {
+        try {
+          this._haUsers = await listHaUsers(this.hass);
+        } catch {
+          this._haUsers = [];
+        }
+      }
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
+  }
+
+  private async _saveUserLinkFromForm() {
+    if (!this.hass || !this._canWrite()) return;
+    if (!this._linkSelectedUserId || !this._linkPersonId) return;
+    try {
+      await setUserLink(this.hass, this._linkSelectedUserId, this._linkPersonId);
+      this._linkUserQuery = "";
+      this._linkPersonQuery = "";
+      this._linkSelectedUserId = "";
+      this._linkPersonId = "";
+      await this._loadSettingsExtras();
+      this._error = "";
     } catch (err) {
       this._error = formatHassError(err);
     }
@@ -3274,117 +3361,135 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _renderMeCard() {
+  private _renderMeSettingsBody() {
     const userName = this.hass?.user?.name || this.hass?.user?.id || "—";
-    const linked = this._lineage?.person_name;
+    const personId = this._lineage?.person_id;
+    const linkedName = this._lineage?.person_name;
+    const linkedPerson = personId
+      ? this._people.find((p) => p.id === personId)
+      : undefined;
     const matches = this._mePersonMatches();
-    return html`<section class="block me-card">
-      <h3>${this._tt("this_is_me")}</h3>
+    return html`<div class="form-section settings-me-body">
       <p class="muted">${userName}</p>
       <p class="lineage-legend muted">
         <span class="lineage-marker" aria-hidden="true">${icon(MDI_ACCOUNT_HEART)}</span>
         ${this._tt("settings_lineage_help")}
       </p>
-      ${linked
-        ? html`<p>
-            <strong>${linked}</strong>
+      ${linkedPerson
+        ? html`<div class="person-card-wrap me-linked-card">
+            ${this._renderPersonCard(linkedPerson as unknown as Record<string, unknown>, {
+              preview: false,
+            })}
             <button type="button" class="linkish" @click=${() => void this._claimMe(null)}>
               ${this._tt("unlink_me")}
             </button>
-          </p>`
-        : html`<p class="muted">${this._tt("not_linked")}</p>`}
-      <label>
-        ${this._tt("search_person")}
-        <input
-          type="search"
-          .value=${this._meQuery}
-          placeholder=${this._tt("search_placeholder")}
-          @input=${(e: Event) => (this._meQuery = (e.target as HTMLInputElement).value)}
-        />
-      </label>
-      ${matches.length
-        ? html`<ul class="plain me-hits">
-            ${matches.map(
-              (p) => html`<li>
-                <button type="button" class="linkish" @click=${() => void this._claimMe(p.id)}>
-                  <strong>${personDisplayName(p)}</strong>
-                  <span class="muted">
-                    ${formatLifespan(p.birth, p.death, p.is_living, this.hass?.language)}
-                    ${[p.father?.name, p.mother?.name].filter(Boolean).join(" · ")}
-                  </span>
-                </button>
-              </li>`,
-            )}
-          </ul>`
-        : this._meQuery.trim()
-          ? html`<p class="muted">${this._tt("no_people")}</p>`
-          : nothing}
-      ${!linked
-        ? html`<button type="button" class="linkish" @click=${() => (this._meCreateOpen = !this._meCreateOpen)}>
-            ${this._tt("create_my_person")}
-          </button>`
-        : nothing}
-      ${this._meCreateOpen
-        ? html`<div class="inline-form me-create">
-            <input
-              placeholder=${this._tt("given_names")}
-              .value=${this._meForm.given_names || ""}
-              @input=${(e: Event) =>
-                (this._meForm = {
-                  ...this._meForm,
-                  given_names: (e.target as HTMLInputElement).value,
-                })}
-            />
-            <input
-              placeholder=${this._tt("surname")}
-              .value=${this._meForm.surname || ""}
-              @input=${(e: Event) =>
-                (this._meForm = {
-                  ...this._meForm,
-                  surname: (e.target as HTMLInputElement).value,
-                })}
-            />
-            <select
-              .value=${this._meForm.sex || "unknown"}
-              @change=${(e: Event) =>
-                (this._meForm = {
-                  ...this._meForm,
-                  sex: (e.target as HTMLSelectElement).value,
-                })}
-            >
-              <option value="male">${this._tt("sex_male")}</option>
-              <option value="female">${this._tt("sex_female")}</option>
-              <option value="unknown">${this._tt("sex_unknown")}</option>
-            </select>
-            <button type="button" @click=${() => void this._createAndClaimMe()}>
-              ${this._tt("save")}
-            </button>
           </div>`
+        : linkedName
+          ? html`<p>
+              <strong>${linkedName}</strong>
+              <button type="button" class="linkish" @click=${() => void this._claimMe(null)}>
+                ${this._tt("unlink_me")}
+              </button>
+            </p>`
+          : html`<p class="muted">${this._tt("not_linked")}</p>`}
+      ${!personId
+        ? html`<label>
+            ${this._tt("search_person")}
+            <input
+              type="search"
+              .value=${this._meQuery}
+              placeholder=${this._tt("search_placeholder")}
+              @input=${(e: Event) => (this._meQuery = (e.target as HTMLInputElement).value)}
+            />
+          </label>
+          ${this._renderPersonSearchHits(matches, this._meQuery, (id) => void this._claimMe(id))}
+          <button
+            type="button"
+            class="linkish"
+            @click=${() => (this._meCreateOpen = !this._meCreateOpen)}
+          >
+            ${this._tt("create_my_person")}
+          </button>
+          ${this._meCreateOpen
+            ? html`<div class="inline-form me-create">
+                <input
+                  placeholder=${this._tt("given_names")}
+                  .value=${this._meForm.given_names || ""}
+                  @input=${(e: Event) =>
+                    (this._meForm = {
+                      ...this._meForm,
+                      given_names: (e.target as HTMLInputElement).value,
+                    })}
+                />
+                <input
+                  placeholder=${this._tt("surname")}
+                  .value=${this._meForm.surname || ""}
+                  @input=${(e: Event) =>
+                    (this._meForm = {
+                      ...this._meForm,
+                      surname: (e.target as HTMLInputElement).value,
+                    })}
+                />
+                <select
+                  .value=${this._meForm.sex || "unknown"}
+                  @change=${(e: Event) =>
+                    (this._meForm = {
+                      ...this._meForm,
+                      sex: (e.target as HTMLSelectElement).value,
+                    })}
+                >
+                  <option value="male">${this._tt("sex_male")}</option>
+                  <option value="female">${this._tt("sex_female")}</option>
+                  <option value="unknown">${this._tt("sex_unknown")}</option>
+                </select>
+                <button type="button" @click=${() => void this._createAndClaimMe()}>
+                  ${this._tt("save")}
+                </button>
+              </div>`
+            : nothing}`
         : nothing}
-    </section>`;
+    </div>`;
   }
 
   private _renderSettings() {
     const countries = (this._gazetteer?.countries as Array<Record<string, unknown>>) || [];
     const write = this._canWrite();
-    const importBody = html`<div class="form-section">
-      ${write
-        ? html`
-            <label class="check">
-              <input type="checkbox" .checked=${this._replaceImport}
-                @change=${(e: Event) => (this._replaceImport = (e.target as HTMLInputElement).checked)} />
-              ${this._tt("replace_import")}
-            </label>
-            <input type="file" accept=".ged,text/plain"
-              @change=${(e: Event) => {
-                const file = (e.target as HTMLInputElement).files?.[0];
-                if (file) void this._previewGedcom(file);
-                (e.target as HTMLInputElement).value = "";
-              }} />
-          `
-        : nothing}
-      <button type="button" @click=${() => this._exportGedcom()}>${this._tt("export_gedcom")}</button>
-      ${this._importStatus ? html`<p class="muted">${this._importStatus}</p>` : nothing}
+    const linkPersonMatches = this._peopleSearchMatches(this._linkPersonQuery);
+    const linkUserMatches = this._haUserMatches();
+    const gedcomBody = html`<div class="settings-subsections">
+      <div class="form-section">
+        <span class="form-section-title">${this._tt("import_gedcom")}</span>
+        ${write
+          ? html`
+              <label class="check">
+                <input
+                  type="checkbox"
+                  .checked=${this._replaceImport}
+                  @change=${(e: Event) =>
+                    (this._replaceImport = (e.target as HTMLInputElement).checked)}
+                />
+                ${this._tt("replace_import")}
+              </label>
+              ${mdButton(this._tt("import_gedcom"), {
+                variant: "outlined",
+                onClick: () => this._pickGedcomFile("ft-gedcom-settings-file"),
+              })}
+              <input
+                id="ft-gedcom-settings-file"
+                class="sr-only"
+                type="file"
+                accept=".ged,text/plain"
+                @change=${(e: Event) => this._onGedcomFilePicked(e)}
+              />
+            `
+          : html`<p class="muted">${this._tt("read_only")}</p>`}
+        ${this._importStatus ? html`<p class="muted">${this._importStatus}</p>` : nothing}
+      </div>
+      <div class="form-section">
+        <span class="form-section-title">${this._tt("export_gedcom")}</span>
+        <p class="muted">${this._tt("settings_gedcom_export_hint")}</p>
+        <button type="button" @click=${() => this._exportGedcom()}>${this._tt("export_gedcom")}</button>
+      </div>
     </div>`;
 
     const shortcutsBody = html`<div class="form-section">
@@ -3439,7 +3544,7 @@ export class FamilyTreePanel extends LitElement {
       <ul class="plain">
         ${this._userLinks.map(
           (l) => html`<li>
-            ${l.ha_user_id} → ${l.person_name || l.person_id}
+            ${this._haUserDisplayName(String(l.ha_user_id))} → ${l.person_name || l.person_id}
             ${write
               ? html`<button class="linkish" @click=${async () => {
                   await setUserLink(this.hass, String(l.ha_user_id), null);
@@ -3451,17 +3556,107 @@ export class FamilyTreePanel extends LitElement {
         ${!this._userLinks.length ? html`<li class="muted">—</li>` : nothing}
       </ul>
       ${write
-        ? html`<div class="inline-form">
-            <input id="link-user" placeholder="HA user id" />
-            <input id="link-person" placeholder="person id" />
-            <button type="button" @click=${async () => {
-              const u = (this.renderRoot.querySelector("#link-user") as HTMLInputElement)?.value;
-              const p = (this.renderRoot.querySelector("#link-person") as HTMLInputElement)?.value;
-              if (u && p) {
-                await setUserLink(this.hass, u, p);
-                await this._loadSettingsExtras();
-              }
-            }}>${this._tt("save")}</button>
+        ? html`<div class="user-link-form">
+            <label>
+              ${this._tt("link_ha_user")}
+              <input
+                type="search"
+                .value=${this._linkUserQuery}
+                placeholder=${this._tt("search_placeholder")}
+                @input=${(e: Event) => {
+                  this._linkUserQuery = (e.target as HTMLInputElement).value;
+                  this._linkSelectedUserId = "";
+                }}
+              />
+            </label>
+            ${this._linkSelectedUserId
+              ? html`<p class="muted">
+                  ${this._haUserDisplayName(this._linkSelectedUserId)}
+                  <button
+                    type="button"
+                    class="linkish"
+                    @click=${() => {
+                      this._linkSelectedUserId = "";
+                      this._linkUserQuery = "";
+                    }}
+                  >
+                    ×
+                  </button>
+                </p>`
+              : linkUserMatches.length
+                ? html`<ul class="plain me-hits">
+                    ${linkUserMatches.map(
+                      (u) => html`<li>
+                        <button
+                          type="button"
+                          class="linkish"
+                          @click=${() => {
+                            this._linkSelectedUserId = u.id;
+                            this._linkUserQuery = u.name || u.id;
+                          }}
+                        >
+                          <strong>${u.name || u.id}</strong>
+                          <span class="muted">${u.id}</span>
+                        </button>
+                      </li>`,
+                    )}
+                  </ul>`
+                : this._linkUserQuery.trim()
+                  ? html`<p class="muted">—</p>`
+                  : nothing}
+            <label>
+              ${this._tt("link_person")}
+              <input
+                type="search"
+                .value=${this._linkPersonQuery}
+                placeholder=${this._tt("search_placeholder")}
+                @input=${(e: Event) => {
+                  this._linkPersonQuery = (e.target as HTMLInputElement).value;
+                  this._linkPersonId = "";
+                }}
+              />
+            </label>
+            ${this._linkPersonId
+              ? html`<p class="muted">
+                  ${personDisplayName(
+                    this._people.find((p) => p.id === this._linkPersonId) || {
+                      id: this._linkPersonId,
+                      given_names: "",
+                      call_name: "",
+                      surname_prefix: "",
+                      surname: "",
+                      sex: "unknown",
+                      is_living: true,
+                      notes: "",
+                    },
+                  )}
+                  <button
+                    type="button"
+                    class="linkish"
+                    @click=${() => {
+                      this._linkPersonId = "";
+                      this._linkPersonQuery = "";
+                    }}
+                  >
+                    ×
+                  </button>
+                </p>`
+              : this._renderPersonSearchHits(
+                  linkPersonMatches,
+                  this._linkPersonQuery,
+                  (id) => {
+                    this._linkPersonId = id;
+                    const p = this._people.find((x) => x.id === id);
+                    if (p) this._linkPersonQuery = personDisplayName(p);
+                  },
+                )}
+            <button
+              type="button"
+              ?disabled=${!this._linkSelectedUserId || !this._linkPersonId}
+              @click=${() => void this._saveUserLinkFromForm()}
+            >
+              ${this._tt("save")}
+            </button>
           </div>`
         : nothing}
     </div>`;
@@ -3485,11 +3680,16 @@ export class FamilyTreePanel extends LitElement {
     </div>`;
 
     return html`
-      ${this._renderMeCard()}
       ${this._renderCollapsibleSection(
-        "settings-import",
-        `${this._tt("import_gedcom")} / ${this._tt("export_gedcom")}`,
-        importBody,
+        "settings-me",
+        this._tt("this_is_me"),
+        this._renderMeSettingsBody(),
+        true,
+      )}
+      ${this._renderCollapsibleSection(
+        "settings-gedcom",
+        this._tt("settings_gedcom"),
+        gedcomBody,
         true,
       )}
       ${this._renderCollapsibleSection(
@@ -4456,7 +4656,8 @@ export class FamilyTreePanel extends LitElement {
     .toolbar input[type="search"], .toolbar select, .filters select, .filters input[type="date"],
     .inline-form input, .inline-form select,
     .dialog input, .dialog select, .dialog textarea,
-    .me-card input, .me-card select {
+    .settings-me-body input, .settings-me-body select,
+    .user-link-form input {
       font: inherit;
       padding: 8px 12px;
       min-height: 40px;
@@ -5190,11 +5391,35 @@ export class FamilyTreePanel extends LitElement {
       background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
     }
     .form-section-title {
+      display: block;
+      margin: 0 0 8px;
       font-size: 0.75rem;
       font-weight: 600;
       color: var(--primary-color);
       text-transform: uppercase;
       letter-spacing: 0.04em;
+    }
+    .me-linked-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .user-link-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .user-link-form label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.9rem;
+    }
+    .settings-subsections {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
     .dialog label {
       display: flex;
@@ -5357,7 +5582,7 @@ export class FamilyTreePanel extends LitElement {
       color: inherit;
     }
     .collapse-body {
-      padding: 0 14px 14px;
+      padding: 8px 14px 14px;
       background: var(--card-background-color, var(--secondary-background-color));
     }
     .collapse--cards .collapse-body {
