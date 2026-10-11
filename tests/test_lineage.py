@@ -3,7 +3,13 @@
 from pathlib import Path
 
 from custom_components.family_tree.db import Database
-from custom_components.family_tree.lineage import ancestors, descendants, lineage_relation
+from custom_components.family_tree.lineage import (
+    ancestors,
+    descendants,
+    lineage_map,
+    lineage_relation,
+    would_create_parent_child_cycle,
+)
 from custom_components.family_tree.models import (
     ParentChild,
     ParentChildType,
@@ -55,6 +61,38 @@ def test_ancestors_and_descendants(tmp_path: Path):
     assert rel["type"] == "ancestor"
     assert rel["generation"] == 2
 
+    repo.db.close()
+
+
+def test_would_create_parent_child_cycle(tmp_path: Path):
+    repo = _repo(tmp_path)
+    parent = repo.add_person(Person(given_names="Parent"))
+    child = repo.add_person(Person(given_names="Child"))
+    repo.add_parent_child(
+        ParentChild(parent_id=parent.id, child_id=child.id, type=ParentChildType.BIOLOGICAL)
+    )
+    assert would_create_parent_child_cycle(repo.db, child.id, parent.id)
+    assert not would_create_parent_child_cycle(repo.db, parent.id, child.id)
+    assert would_create_parent_child_cycle(repo.db, parent.id, parent.id)
+    repo.db.close()
+
+
+def test_ancestors_terminates_on_existing_cycle(tmp_path: Path):
+    repo = _repo(tmp_path)
+    a = repo.add_person(Person(given_names="A"))
+    b = repo.add_person(Person(given_names="B"))
+    repo.add_parent_child(
+        ParentChild(parent_id=a.id, child_id=b.id, type=ParentChildType.BIOLOGICAL)
+    )
+    repo.db.execute(
+        "INSERT INTO parent_child (id, parent_id, child_id, type, union_id) "
+        "VALUES (?, ?, ?, ?, NULL)",
+        ("c" * 32, b.id, a.id, ParentChildType.BIOLOGICAL.value),
+    )
+    ups = ancestors(repo.db, a.id)
+    downs = descendants(repo.db, a.id)
+    assert lineage_map(repo.db, a.id)
+    assert len(ups) + len(downs) < 200
     repo.db.close()
 
 

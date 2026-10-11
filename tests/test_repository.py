@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from custom_components.family_tree.db import Database
 from custom_components.family_tree.models import (
     Event,
@@ -154,6 +156,18 @@ def test_life_events_for_persons(tmp_path: Path):
     assert repo.life_events_for_persons([]) == {}
     assert birth["date_text"] == "1 JAN 1990"
     assert birth["date_qualifier"] == "exact"
+    repo.db.close()
+
+
+def test_add_parent_child_rejects_cycle(tmp_path: Path):
+    repo = _repo(tmp_path)
+    grand = repo.add_person(Person(given_names="Grand"))
+    parent = repo.add_person(Person(given_names="Parent"))
+    child = repo.add_person(Person(given_names="Child"))
+    repo.add_parent_child(ParentChild(parent_id=grand.id, child_id=parent.id))
+    repo.add_parent_child(ParentChild(parent_id=parent.id, child_id=child.id))
+    with pytest.raises(ValueError, match="cycle"):
+        repo.add_parent_child(ParentChild(parent_id=child.id, child_id=grand.id))
     repo.db.close()
 
 
