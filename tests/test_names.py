@@ -3,8 +3,10 @@
 from custom_components.family_tree.models import Person
 from custom_components.family_tree.names import (
     display_name,
+    formal_subtitle,
     full_name,
     matches_family_shortcut,
+    normalize_imported_names,
     sort_key,
     split_surname,
 )
@@ -39,3 +41,24 @@ def test_family_shortcut():
     assert matches_family_shortcut(person, "van iersel")
     assert matches_family_shortcut(person, "iersel")
     assert not matches_family_shortcut(person, "smith")
+
+
+def test_normalize_imported_names_nick_in_parens():
+    given, call = normalize_imported_names("Marinus Theodorus", "Marinus (Rien)")
+    assert call == "Rien"
+    assert given == "Marinus Theodorus"
+
+
+def test_formal_subtitle_dedupes_preferred_in_given():
+    person = Person(
+        given_names="Wilhelmina Wilhelmina Huberdina",
+        call_name="Wilhelmina",
+        surname="Aerts",
+    )
+    assert display_name(person) == "Wilhelmina Aerts"
+    assert formal_subtitle(person) == "Wilhelmina Huberdina Aerts"
+
+
+def test_formal_subtitle_hidden_when_same_as_display():
+    person = Person(given_names="Ada", surname="Jansen")
+    assert formal_subtitle(person) == ""

@@ -6,7 +6,7 @@ from typing import Any
 
 from .db import Database
 from .models import EventType, Person, SubjectType
-from .names import display_name, full_name
+from .names import display_name, formal_subtitle, full_name
 from .repository import Repository
 
 
@@ -55,7 +55,7 @@ def _person_summary(repo: Repository, person: Person) -> dict[str, Any]:
     return {
         "id": person.id,
         "name": display_name(person),
-        "formal_name": full_name(person),
+        "formal_name": formal_subtitle(person),
         "given_names": person.given_names,
         "call_name": person.call_name,
         "surname_prefix": person.surname_prefix,

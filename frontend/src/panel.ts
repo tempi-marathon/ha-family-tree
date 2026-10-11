@@ -144,7 +144,8 @@ type DialogMode =
   | "pickPerson"
   | "parents"
   | "profilePhoto"
-  | "citation";
+  | "citation"
+  | "userLink";
 type RelationTarget =
   | { kind: "parent"; personId: string }
   | { kind: "partner"; personId: string }
@@ -264,6 +265,7 @@ export class FamilyTreePanel extends LitElement {
   @state() private _loading = true;
   @state() private _userLinks: Array<Record<string, unknown>> = [];
   @state() private _haUsers: HaUserDto[] = [];
+  @state() private _haUsersLoadError = "";
   @state() private _linkUserQuery = "";
   @state() private _linkSelectedUserId = "";
   @state() private _linkPersonQuery = "";
@@ -1359,9 +1361,17 @@ export class FamilyTreePanel extends LitElement {
     </th>`;
   }
 
-  private _personLink(ref: { id: string; name: string } | null | undefined) {
+  private _personLink(
+    ref: { id: string; name: string } | null | undefined,
+    opts?: { preview?: boolean },
+  ) {
     if (!ref) return html`<span class="muted">—</span>`;
-    return html`<button type="button" class="linkish" @click=${() => this._openPerson(ref.id)}>
+    const preview = opts?.preview === true;
+    return html`<button
+      type="button"
+      class="linkish"
+      @click=${() => (preview ? void this._openPersonPreview(ref.id) : void this._openPerson(ref.id))}
+    >
       ${ref.name}
     </button>`;
   }
@@ -1423,11 +1433,18 @@ export class FamilyTreePanel extends LitElement {
     return this._peopleSearchMatches(this._meQuery);
   }
 
+  private _linkedHaUserIds(): Set<string> {
+    return new Set(
+      this._userLinks.map((l) => String(l.ha_user_id || "")).filter(Boolean),
+    );
+  }
+
   private _haUserMatches(): HaUserDto[] {
     const q = this._linkUserQuery.trim().toLowerCase();
-    const pool = this._haUsers;
-    if (!q) return pool.slice(0, 12);
-    return pool
+    if (!q) return [];
+    const linked = this._linkedHaUserIds();
+    return this._haUsers
+      .filter((u) => !linked.has(u.id))
       .filter((u) => {
         const hay = [u.name, u.id].join(" ").toLowerCase();
         return hay.includes(q);
@@ -1805,13 +1822,32 @@ export class FamilyTreePanel extends LitElement {
       if (this._canWrite()) {
         try {
           this._haUsers = await listHaUsers(this.hass);
-        } catch {
+          this._haUsersLoadError = "";
+        } catch (err) {
           this._haUsers = [];
+          this._haUsersLoadError = formatHassError(err);
         }
+      } else {
+        this._haUsers = [];
+        this._haUsersLoadError = "";
       }
     } catch (err) {
       this._error = formatHassError(err);
     }
+  }
+
+  private _resetUserLinkForm() {
+    this._linkUserQuery = "";
+    this._linkPersonQuery = "";
+    this._linkSelectedUserId = "";
+    this._linkPersonId = "";
+  }
+
+  private _openUserLinkDialog() {
+    this._resetUserLinkForm();
+    this._error = "";
+    this._dialogMode = "userLink";
+    this._dialogOpen = true;
   }
 
   private async _saveUserLinkFromForm() {
@@ -1819,11 +1855,9 @@ export class FamilyTreePanel extends LitElement {
     if (!this._linkSelectedUserId || !this._linkPersonId) return;
     try {
       await setUserLink(this.hass, this._linkSelectedUserId, this._linkPersonId);
-      this._linkUserQuery = "";
-      this._linkPersonQuery = "";
-      this._linkSelectedUserId = "";
-      this._linkPersonId = "";
+      this._resetUserLinkForm();
       await this._loadSettingsExtras();
+      this._dialogOpen = false;
       this._error = "";
     } catch (err) {
       this._error = formatHassError(err);
@@ -2625,10 +2659,13 @@ export class FamilyTreePanel extends LitElement {
     const relKey = this._relatedEventTemplate(ev);
     if (relKey && ev.related_person_id) {
       const prefix = this._tt(relKey).split("%s")[0] || "";
-      return html`${prefix}${this._personLink({
-        id: ev.related_person_id,
-        name: ev.related_person_name || ev.related_person_id,
-      })}`;
+      return html`${prefix}${this._personLink(
+        {
+          id: ev.related_person_id,
+          name: ev.related_person_name || ev.related_person_id,
+        },
+        { preview: true },
+      )}`;
     }
     return this._eventTypeLabel(ev);
   }
@@ -2745,9 +2782,34 @@ export class FamilyTreePanel extends LitElement {
     `;
   }
 
+  private _unionEventPartners(ev: EventDto): { id: string; name: string }[] {
+    if (!ev.union_id || !this._detail) return [];
+    const selfId = this._detail.person.id;
+    const partners = (this._detail.tree?.partners || []) as TreeUnion[];
+    const union = partners.find((u) => u.union_id === ev.union_id);
+    if (!union) return [];
+    return (union.partners || [])
+      .map((p) => {
+        const rec = p as Record<string, unknown>;
+        const id = String(rec.id || "");
+        const name = nodeName(rec);
+        return { id, name };
+      })
+      .filter((p) => p.id && p.id !== selfId);
+  }
+
   private _renderEventCard(ev: EventDto) {
     const canEdit = this._canWrite() && ev.subject_type === "person";
     const lang = this.hass?.language;
+    const unionTypes = new Set(["marriage", "divorce", "partnership"]);
+    const partnerRefs =
+      unionTypes.has(ev.type) ? this._unionEventPartners(ev) : [];
+    const partnerNamesJoined = partnerRefs.map((p) => p.name).join(" & ");
+    const desc = (ev.description || "").trim();
+    const showDesc =
+      desc &&
+      (!partnerRefs.length ||
+        desc.localeCompare(partnerNamesJoined, undefined, { sensitivity: "accent" }) !== 0);
     return html`
       <div class="event-card">
         <div class="event-card-head">
@@ -2761,7 +2823,16 @@ export class FamilyTreePanel extends LitElement {
         </div>
         <div class="event-card-meta">${formatEventDate(ev, lang) || formatGedcomDate(ev.date_text)}</div>
         ${ev.place_name ? html`<div class="event-card-meta">${ev.place_name}</div>` : nothing}
-        ${ev.description ? html`<div class="event-card-desc">${ev.description}</div>` : nothing}
+        ${partnerRefs.length
+          ? html`<div class="event-card-meta">
+              ${partnerRefs.map((p, i) =>
+                i === 0
+                  ? this._personLink(p, { preview: true })
+                  : html` & ${this._personLink(p, { preview: true })}`,
+              )}
+            </div>`
+          : nothing}
+        ${showDesc ? html`<div class="event-card-desc">${desc}</div>` : nothing}
       </div>
     `;
   }
@@ -3773,55 +3844,179 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _renderLinkedUsersSettingsBody(
-    write: boolean,
-    linkPersonMatches: PersonDto[],
-    linkUserMatches: HaUserDto[],
-  ) {
+  private _renderUserLinkForm() {
+    const linkPersonMatches = this._peopleSearchMatches(this._linkPersonQuery);
+    const linkUserMatches = this._haUserMatches();
+    const userQuery = this._linkUserQuery.trim();
+    return html`<div class="form-stack user-link-form">
+      ${this._haUsersLoadError
+        ? html`<p class="muted">${this._tt("ha_users_load_failed")}</p>
+            <p class="muted">${this._haUsersLoadError}</p>`
+        : nothing}
+      <label>
+        ${this._tt("link_ha_user")}
+        <input
+          type="search"
+          .value=${this._linkUserQuery}
+          placeholder=${this._tt("search_placeholder")}
+          @input=${(e: Event) => {
+            this._linkUserQuery = (e.target as HTMLInputElement).value;
+            this._linkSelectedUserId = "";
+          }}
+        />
+      </label>
+      ${this._linkSelectedUserId
+        ? html`<p class="muted">
+            ${this._haUserDisplayName(this._linkSelectedUserId)}
+            <button
+              type="button"
+              class="linkish"
+              @click=${() => {
+                this._linkSelectedUserId = "";
+                this._linkUserQuery = "";
+              }}
+            >
+              ×
+            </button>
+          </p>`
+        : linkUserMatches.length
+          ? html`<ul class="plain me-hits">
+              ${linkUserMatches.map(
+                (u) => html`<li>
+                  <button
+                    type="button"
+                    class="linkish"
+                    @click=${() => {
+                      this._linkSelectedUserId = u.id;
+                      this._linkUserQuery = u.name || "";
+                    }}
+                  >
+                    <strong>${u.name || this._tt("linked_users")}</strong>
+                  </button>
+                </li>`,
+              )}
+            </ul>`
+          : userQuery && !linkUserMatches.length
+            ? html`<p class="muted">${this._tt("ha_users_no_match")}</p>`
+            : !userQuery && !this._haUsersLoadError
+              ? html`<p class="muted">${this._tt("search_ha_users_hint")}</p>`
+              : nothing}
+      <label>
+        ${this._tt("link_person")}
+        <input
+          type="search"
+          .value=${this._linkPersonQuery}
+          placeholder=${this._tt("search_placeholder")}
+          @input=${(e: Event) => {
+            this._linkPersonQuery = (e.target as HTMLInputElement).value;
+            this._linkPersonId = "";
+          }}
+        />
+      </label>
+      ${this._linkPersonId
+        ? html`<p class="muted">
+            ${personDisplayName(
+              this._people.find((p) => p.id === this._linkPersonId) || {
+                id: this._linkPersonId,
+                given_names: "",
+                call_name: "",
+                surname_prefix: "",
+                surname: "",
+                sex: "unknown",
+                is_living: true,
+                notes: "",
+              },
+            )}
+            <button
+              type="button"
+              class="linkish"
+              @click=${() => {
+                this._linkPersonId = "";
+                this._linkPersonQuery = "";
+              }}
+            >
+              ×
+            </button>
+          </p>`
+        : this._renderPersonSearchHits(linkPersonMatches, this._linkPersonQuery, (id) => {
+            this._linkPersonId = id;
+            const p = this._people.find((x) => x.id === id);
+            if (p) this._linkPersonQuery = personDisplayName(p);
+          })}
+    </div>`;
+  }
+
+  private _renderLinkedUsersSettingsBody(write: boolean) {
     const userName = this.hass?.user?.name || this.hass?.user?.id || "—";
+    const myHaId = String(this.hass?.user?.id || "");
     const personId = this._lineage?.person_id;
     const linkedName = this._lineage?.person_name;
-    const linkedPerson = personId
-      ? this._people.find((p) => p.id === personId)
-      : undefined;
+    const myLinkInGrid = this._userLinks.some((l) => String(l.ha_user_id) === myHaId);
     const matches = this._mePersonMatches();
 
     const linkCards = this._userLinks.length
-      ? html`<div class="settings-linked-grid">
+      ? html`<div class="settings-linked-users settings-linked-grid">
           ${this._userLinks.map((l) => {
             const pid = String(l.person_id || "");
             const person = this._people.find((p) => p.id === pid);
-            const account = this._haUserDisplayName(String(l.ha_user_id));
+            const haId = String(l.ha_user_id || "");
+            const account = this._haUserDisplayName(haId);
+            const isMe = haId === myHaId;
+            const subtitle = account
+              ? isMe
+                ? `${account} · ${this._tt("lineage_me")}`
+                : account
+              : isMe
+                ? this._tt("lineage_me")
+                : undefined;
             return html`<div class="person-card-wrap">
               ${person
                 ? this._renderPersonCard(person as unknown as Record<string, unknown>, {
                     preview: true,
-                    subtitle: account || undefined,
+                    subtitle,
                   })
                 : html`<div class="person-card">
                     <div class="person-card-title">${l.person_name || pid}</div>
-                    ${account ? html`<div class="person-card-meta">${account}</div>` : nothing}
+                    ${subtitle ? html`<div class="person-card-meta">${subtitle}</div>` : nothing}
                   </div>`}
-              ${write
+              ${isMe
                 ? html`<div class="rel-person-actions">
                     <button
                       type="button"
                       class="linkish danger"
-                      @click=${async () => {
-                        await setUserLink(this.hass, String(l.ha_user_id), null);
-                        await this._loadSettingsExtras();
-                      }}
+                      @click=${() => void this._claimMe(null)}
                     >
-                      ${this._tt("delete")}
+                      ${this._tt("unlink_me")}
                     </button>
                   </div>`
-                : nothing}
+                : write
+                  ? html`<div class="rel-person-actions">
+                      <button
+                        type="button"
+                        class="linkish danger"
+                        @click=${async () => {
+                          await setUserLink(this.hass, haId, null);
+                          await this._loadSettingsExtras();
+                        }}
+                      >
+                        ${this._tt("delete")}
+                      </button>
+                    </div>`
+                  : nothing}
             </div>`;
           })}
         </div>`
       : html`<p class="muted">—</p>`;
 
     return html`<div class="form-stack settings-me-body">
+      ${write
+        ? html`<div class="section-head">
+            ${mdButton(`+ ${this._tt("add_user_link")}`, {
+              variant: "filled",
+              onClick: () => this._openUserLinkDialog(),
+            })}
+          </div>`
+        : nothing}
       ${linkCards}
       <h3 class="settings-subhead">${this._tt("this_is_me")}</h3>
       <p class="muted">${userName}</p>
@@ -3829,199 +4024,80 @@ export class FamilyTreePanel extends LitElement {
         <span class="lineage-marker" aria-hidden="true">${icon(MDI_ACCOUNT_HEART)}</span>
         ${this._tt("settings_lineage_help")}
       </p>
-      ${linkedPerson
-        ? html`<div class="person-card-wrap me-linked-card settings-linked-grid">
-            <div class="person-card-wrap">
-              ${this._renderPersonCard(linkedPerson as unknown as Record<string, unknown>, {
-                preview: false,
-              })}
-              <div class="rel-person-actions">
-                <button type="button" class="linkish danger" @click=${() => void this._claimMe(null)}>
-                  ${this._tt("unlink_me")}
-                </button>
-              </div>
-            </div>
-          </div>`
-        : linkedName
+      ${personId && !myLinkInGrid
+        ? linkedName
           ? html`<p>
               <strong>${linkedName}</strong>
               <button type="button" class="linkish danger" @click=${() => void this._claimMe(null)}>
                 ${this._tt("unlink_me")}
               </button>
             </p>`
-          : html`<p class="muted">${this._tt("not_linked")}</p>`}
-      ${!personId
-        ? html`<label>
-            ${this._tt("search_person")}
-            <input
-              type="search"
-              .value=${this._meQuery}
-              placeholder=${this._tt("search_placeholder")}
-              @input=${(e: Event) => (this._meQuery = (e.target as HTMLInputElement).value)}
-            />
-          </label>
-          ${this._renderPersonSearchHits(matches, this._meQuery, (id) => void this._claimMe(id))}
-          <button
-            type="button"
-            class="linkish"
-            @click=${() => (this._meCreateOpen = !this._meCreateOpen)}
-          >
-            ${this._tt("create_my_person")}
-          </button>
-          ${this._meCreateOpen
-            ? html`<div class="inline-form me-create">
-                <input
-                  placeholder=${this._tt("given_names")}
-                  .value=${this._meForm.given_names || ""}
-                  @input=${(e: Event) =>
-                    (this._meForm = {
-                      ...this._meForm,
-                      given_names: (e.target as HTMLInputElement).value,
-                    })}
-                />
-                <input
-                  placeholder=${this._tt("surname")}
-                  .value=${this._meForm.surname || ""}
-                  @input=${(e: Event) =>
-                    (this._meForm = {
-                      ...this._meForm,
-                      surname: (e.target as HTMLInputElement).value,
-                    })}
-                />
-                <select
-                  .value=${this._meForm.sex || "unknown"}
-                  @change=${(e: Event) =>
-                    (this._meForm = {
-                      ...this._meForm,
-                      sex: (e.target as HTMLSelectElement).value,
-                    })}
-                >
-                  <option value="male">${this._tt("sex_male")}</option>
-                  <option value="female">${this._tt("sex_female")}</option>
-                  <option value="unknown">${this._tt("sex_unknown")}</option>
-                </select>
-                <button type="button" @click=${() => void this._createAndClaimMe()}>
-                  ${this._tt("save")}
-                </button>
-              </div>`
-            : nothing}`
-        : nothing}
-      ${write
-        ? html`<h3 class="settings-subhead">${this._tt("user_links")}</h3>
-            <div class="user-link-form form-stack">
+          : nothing
+        : !personId
+          ? html`<p class="muted">${this._tt("not_linked")}</p>
               <label>
-                ${this._tt("link_ha_user")}
+                ${this._tt("search_person")}
                 <input
                   type="search"
-                  .value=${this._linkUserQuery}
+                  .value=${this._meQuery}
                   placeholder=${this._tt("search_placeholder")}
-                  @input=${(e: Event) => {
-                    this._linkUserQuery = (e.target as HTMLInputElement).value;
-                    this._linkSelectedUserId = "";
-                  }}
+                  @input=${(e: Event) => (this._meQuery = (e.target as HTMLInputElement).value)}
                 />
               </label>
-              ${this._linkSelectedUserId
-                ? html`<p class="muted">
-                    ${this._haUserDisplayName(this._linkSelectedUserId)}
-                    <button
-                      type="button"
-                      class="linkish"
-                      @click=${() => {
-                        this._linkSelectedUserId = "";
-                        this._linkUserQuery = "";
-                      }}
+              ${this._renderPersonSearchHits(matches, this._meQuery, (id) => void this._claimMe(id))}
+              <button
+                type="button"
+                class="linkish"
+                @click=${() => (this._meCreateOpen = !this._meCreateOpen)}
+              >
+                ${this._tt("create_my_person")}
+              </button>
+              ${this._meCreateOpen
+                ? html`<div class="inline-form me-create">
+                    <input
+                      placeholder=${this._tt("given_names")}
+                      .value=${this._meForm.given_names || ""}
+                      @input=${(e: Event) =>
+                        (this._meForm = {
+                          ...this._meForm,
+                          given_names: (e.target as HTMLInputElement).value,
+                        })}
+                    />
+                    <input
+                      placeholder=${this._tt("surname")}
+                      .value=${this._meForm.surname || ""}
+                      @input=${(e: Event) =>
+                        (this._meForm = {
+                          ...this._meForm,
+                          surname: (e.target as HTMLInputElement).value,
+                        })}
+                    />
+                    <select
+                      .value=${this._meForm.sex || "unknown"}
+                      @change=${(e: Event) =>
+                        (this._meForm = {
+                          ...this._meForm,
+                          sex: (e.target as HTMLSelectElement).value,
+                        })}
                     >
-                      ×
+                      <option value="male">${this._tt("sex_male")}</option>
+                      <option value="female">${this._tt("sex_female")}</option>
+                      <option value="unknown">${this._tt("sex_unknown")}</option>
+                    </select>
+                    <button type="button" @click=${() => void this._createAndClaimMe()}>
+                      ${this._tt("save")}
                     </button>
-                  </p>`
-                : linkUserMatches.length
-                  ? html`<ul class="plain me-hits">
-                      ${linkUserMatches.map(
-                        (u) => html`<li>
-                          <button
-                            type="button"
-                            class="linkish"
-                            @click=${() => {
-                              this._linkSelectedUserId = u.id;
-                              this._linkUserQuery = u.name || "";
-                            }}
-                          >
-                            <strong>${u.name || this._tt("linked_users")}</strong>
-                          </button>
-                        </li>`,
-                      )}
-                    </ul>`
-                  : this._linkUserQuery.trim() && !linkUserMatches.length
-                    ? html`<p class="muted">${this._tt("no_people")}</p>`
-                    : nothing}
-              <label>
-                ${this._tt("link_person")}
-                <input
-                  type="search"
-                  .value=${this._linkPersonQuery}
-                  placeholder=${this._tt("search_placeholder")}
-                  @input=${(e: Event) => {
-                    this._linkPersonQuery = (e.target as HTMLInputElement).value;
-                    this._linkPersonId = "";
-                  }}
-                />
-              </label>
-              ${this._linkPersonId
-                ? html`<p class="muted">
-                    ${personDisplayName(
-                      this._people.find((p) => p.id === this._linkPersonId) || {
-                        id: this._linkPersonId,
-                        given_names: "",
-                        call_name: "",
-                        surname_prefix: "",
-                        surname: "",
-                        sex: "unknown",
-                        is_living: true,
-                        notes: "",
-                      },
-                    )}
-                    <button
-                      type="button"
-                      class="linkish"
-                      @click=${() => {
-                        this._linkPersonId = "";
-                        this._linkPersonQuery = "";
-                      }}
-                    >
-                      ×
-                    </button>
-                  </p>`
-                : this._renderPersonSearchHits(
-                    linkPersonMatches,
-                    this._linkPersonQuery,
-                    (id) => {
-                      this._linkPersonId = id;
-                      const p = this._people.find((x) => x.id === id);
-                      if (p) this._linkPersonQuery = personDisplayName(p);
-                    },
-                  )}
-              ${mdButton(this._tt("save"), {
-                variant: "filled",
-                disabled: !this._linkSelectedUserId || !this._linkPersonId,
-                onClick: () => void this._saveUserLinkFromForm(),
-              })}
-            </div>`
-        : nothing}
+                  </div>`
+                : nothing}`
+          : nothing}
     </div>`;
   }
 
   private _renderSettings() {
     const countries = (this._gazetteer?.countries as Array<Record<string, unknown>>) || [];
     const write = this._canWrite();
-    const linkPersonMatches = this._peopleSearchMatches(this._linkPersonQuery);
-    const linkUserMatches = this._haUserMatches();
     const surnameOptions = this._knownSurnames();
-    const linkedUsersBody = this._renderLinkedUsersSettingsBody(
-      write,
-      linkPersonMatches,
-      linkUserMatches,
-    );
+    const linkedUsersBody = this._renderLinkedUsersSettingsBody(write);
 
     const gedcomBody = html`<div class="settings-subsections form-stack">
       <div class="form-stack">
@@ -4118,7 +4194,10 @@ export class FamilyTreePanel extends LitElement {
           placeholder=${this._tt("gazetteer_search_placeholder")}
           @input=${(e: Event) => (this._gazQuery = (e.target as HTMLInputElement).value)}
         />
-        <button type="button" @click=${() => this._runGazSearch()}>${this._tt("search")}</button>
+        ${mdButton(this._tt("search"), {
+          variant: "filled",
+          onClick: () => this._runGazSearch(),
+        })}
       </div>
       <ul class="plain">
         ${this._gazHits.map(
@@ -4167,6 +4246,9 @@ export class FamilyTreePanel extends LitElement {
     this._previewDetail = null;
     this._previewLoading = false;
     this._resetProfileCropState();
+    if (this._dialogMode === "userLink") {
+      this._resetUserLinkForm();
+    }
     if (this._dialogMode === "import" && this._importPhase !== "importing") {
       this._importPhase = "";
       this._importFile = null;
@@ -4228,6 +4310,8 @@ export class FamilyTreePanel extends LitElement {
                     : this._tt("details")
                   : mode === "profilePhoto"
                     ? this._tt("edit_profile_photo")
+                  : mode === "userLink"
+                    ? this._tt("add_user_link")
                   : mode === "event"
                   ? this._editingEventId
                     ? this._tt("edit_event")
@@ -4738,6 +4822,8 @@ export class FamilyTreePanel extends LitElement {
       </label>
     </div>`;
 
+    const userLinkBody = this._renderUserLinkForm();
+
     const parentsBody = html`<div class="form-stack parent-link-form">
       ${this._renderParentLinkSlot("father")}
       ${this._renderParentLinkSlot("mother")}
@@ -4932,6 +5018,18 @@ export class FamilyTreePanel extends LitElement {
                   onClick: () => void this._saveProfilePhoto(),
                 })}
               `
+          : mode === "userLink"
+            ? html`
+                ${mdButton(this._tt("cancel"), {
+                  variant: "text",
+                  onClick: this._closeDialog,
+                })}
+                ${mdButton(this._tt("save"), {
+                  variant: "filled",
+                  disabled: !this._linkSelectedUserId || !this._linkPersonId,
+                  onClick: () => void this._saveUserLinkFromForm(),
+                })}
+              `
           : mode === "event"
             ? html`
                 ${mdButton(this._tt("cancel"), {
@@ -5004,6 +5102,8 @@ export class FamilyTreePanel extends LitElement {
                         ? previewBody
                         : mode === "profilePhoto"
                           ? profilePhotoBody
+                        : mode === "userLink"
+                          ? userLinkBody
                         : mode === "event"
                         ? eventBody
                         : personBody}
@@ -5968,6 +6068,9 @@ export class FamilyTreePanel extends LitElement {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      align-self: flex-start;
+      width: auto;
+      max-width: 100%;
       height: 36px;
       padding: 0 16px;
       border-radius: var(--ha-button-border-radius, var(--ha-border-radius-pill, 9999px));
@@ -6085,6 +6188,9 @@ export class FamilyTreePanel extends LitElement {
       margin: 16px 0 4px;
       font-size: 0.95rem;
       font-weight: 600;
+    }
+    .settings-linked-users {
+      align-items: flex-start;
     }
     .settings-linked-grid {
       display: flex;
