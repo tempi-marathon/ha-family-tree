@@ -1,5 +1,6 @@
 /** Websocket / DTO helpers for Family Tree. */
 
+import { apiUrl } from "./media";
 import type { HomeAssistant } from "./types";
 
 export interface LifeEventDto {
@@ -514,8 +515,15 @@ export async function deletePersonMedia(
   }) as Promise<{ ok: boolean }>;
 }
 
-export function personMediaUploadUrl(personId: string): string {
-  return `/api/family_tree/persons/${personId}/media`;
+export function personMediaUploadUrl(
+  personId: string,
+  hass?: HomeAssistant,
+  query?: Record<string, string>,
+): string {
+  const params = new URLSearchParams(query);
+  const qs = params.toString();
+  const path = `/api/family_tree/persons/${personId}/media${qs ? `?${qs}` : ""}`;
+  return apiUrl(hass, path);
 }
 
 export async function searchGazetteer(

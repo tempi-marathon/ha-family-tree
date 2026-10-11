@@ -37,6 +37,8 @@ export interface HomeAssistant {
     ) => Promise<() => void>;
   };
   localize: (key: string) => string;
+  /** Signs API paths for cookie-less authenticated requests (e.g. img src). */
+  hassUrl?: (path: string) => string;
 }
 
 export {};

@@ -252,6 +252,7 @@ class FamilyTreePersonMediaUploadView(HomeAssistantView):
             return self.json_message("No file uploaded", HTTPStatus.BAD_REQUEST)
 
         root = media_dir(hass)
+        set_profile = request.query.get("set_profile", "").lower() in ("1", "true", "yes")
 
         def _upload() -> dict:
             media = upload_person_media(
@@ -260,7 +261,10 @@ class FamilyTreePersonMediaUploadView(HomeAssistantView):
                 person_id,
                 data,
                 original_filename=filename,
+                set_profile_if_empty=False,
             )
+            if set_profile:
+                coordinator.repo.set_profile_media(person_id, media.id)
             return {"media": media.to_dict()}
 
         try:
