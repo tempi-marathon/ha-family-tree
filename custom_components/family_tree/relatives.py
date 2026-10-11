@@ -249,6 +249,63 @@ def enrich_event_dict(repo: Repository, event_dict: dict[str, Any]) -> dict[str,
     return {**event_dict, "place_name": place_name}
 
 
+def relative_vital_events_for_person(
+    repo: Repository, person_id: str
+) -> list[dict[str, Any]]:
+    """Read-only birth/death events for this person's children and partners."""
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def append_vitals(related: dict[str, Any], relation: str) -> None:
+        rel_id = str(related["id"])
+        name = str(related.get("name") or "")
+        for event_type, date_key, sort_key, place_key in (
+            ("birth", "birth_date_text", "birth_sort_date", "birth_place"),
+            ("death", "death_date_text", "death_sort_date", ""),
+        ):
+            date_text = str(related.get(date_key) or "").strip()
+            if not date_text:
+                continue
+            token = (rel_id, event_type, relation)
+            if token in seen:
+                continue
+            seen.add(token)
+            place_name = str(related.get(place_key) or "") if place_key else ""
+            sort_date = related.get(sort_key)
+            out.append(
+                {
+                    "id": f"rel:{rel_id}:{event_type}:{relation}",
+                    "subject_type": "related",
+                    "subject_id": person_id,
+                    "type": event_type,
+                    "place_id": None,
+                    "date_text": date_text,
+                    "date_qualifier": "exact",
+                    "date_from": None,
+                    "date_to": None,
+                    "sort_date": sort_date,
+                    "description": "",
+                    "place_name": place_name,
+                    "related_person_id": rel_id,
+                    "related_person_name": name,
+                    "relation": relation,
+                }
+            )
+
+    for child in children_of(repo, person_id):
+        append_vitals(child, "child")
+
+    for union in repo.list_unions_for_person(person_id):
+        for up in repo.list_union_partners(union.id):
+            if up.person_id == person_id:
+                continue
+            partner = repo.get_person(up.person_id)
+            if partner:
+                append_vitals(_person_summary(repo, partner), "partner")
+
+    return out
+
+
 def union_events_for_person(repo: Repository, person_id: str) -> list[dict[str, Any]]:
     """Marriage/divorce events for unions this person belongs to."""
     out: list[dict[str, Any]] = []

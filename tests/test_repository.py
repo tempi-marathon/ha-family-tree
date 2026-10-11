@@ -6,12 +6,14 @@ import pytest
 
 from custom_components.family_tree.db import Database
 from custom_components.family_tree.models import (
+    Citation,
     Event,
     EventType,
     ParentChild,
     Person,
     Place,
     Sex,
+    Source,
     SubjectType,
     Union,
     UnionType,
@@ -265,4 +267,84 @@ def test_family_shortcuts_meta(tmp_path: Path) -> None:
     saved = repo.set_family_shortcuts(["van Iersel", "Molenschot", "van Iersel"])
     assert saved == ["van Iersel", "Molenschot"]
     assert repo.get_family_shortcuts() == ["van Iersel", "Molenschot"]
+    repo.db.close()
+
+
+def test_source_and_citation_crud(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    person = repo.add_person(Person(given_names="Ada"))
+    source = repo.add_source(Source(title="Archive", url="https://example.com/doc"))
+    citation = repo.add_citation(
+        Citation(
+            source_id=source.id,
+            subject_type=SubjectType.PERSON,
+            subject_id=person.id,
+            detail="Page 3",
+        )
+    )
+    rows = repo.list_citations(SubjectType.PERSON, person.id)
+    assert len(rows) == 1
+    assert rows[0]["detail"] == "Page 3"
+    repo.update_source(
+        Source(
+            id=source.id,
+            title="Archive updated",
+            url=source.url,
+            created_at=source.created_at,
+        )
+    )
+    assert repo.get_source(source.id).title == "Archive updated"
+    repo.update_citation(
+        Citation(
+            id=citation.id,
+            source_id=source.id,
+            subject_type=SubjectType.PERSON,
+            subject_id=person.id,
+            detail="Page 4",
+        )
+    )
+    rows = repo.list_citations(SubjectType.PERSON, person.id)
+    assert rows[0]["detail"] == "Page 4"
+    assert repo.delete_citation(citation.id)
+    assert repo.list_citations(SubjectType.PERSON, person.id) == []
+    assert repo.soft_delete_source(source.id)
+    assert repo.get_source(source.id) is None
+    repo.db.close()
+
+
+def test_relative_vital_events_for_person(tmp_path: Path) -> None:
+    from custom_components.family_tree.relatives import relative_vital_events_for_person
+
+    repo = _repo(tmp_path)
+    parent = repo.add_person(Person(given_names="Pa", sex=Sex.MALE))
+    child = repo.add_person(Person(given_names="Kid"))
+    partner = repo.add_person(Person(given_names="Ma", sex=Sex.FEMALE))
+    repo.add_parent_child(ParentChild(parent_id=parent.id, child_id=child.id))
+    repo.add_union(
+        Union(type=UnionType.MARRIAGE),
+        partners=[(parent.id, 0), (partner.id, 1)],
+    )
+    repo.add_event(
+        Event(
+            subject_type=SubjectType.PERSON,
+            subject_id=child.id,
+            type=EventType.BIRTH,
+            date_text="2000",
+            sort_date="2000-01-01",
+        )
+    )
+    repo.add_event(
+        Event(
+            subject_type=SubjectType.PERSON,
+            subject_id=partner.id,
+            type=EventType.DEATH,
+            date_text="2020",
+            sort_date="2020-01-01",
+        )
+    )
+    events = relative_vital_events_for_person(repo, parent.id)
+    types = {(e["relation"], e["type"]) for e in events}
+    assert ("child", "birth") in types
+    assert ("partner", "death") in types
+    assert all(e["subject_type"] == "related" for e in events)
     repo.db.close()

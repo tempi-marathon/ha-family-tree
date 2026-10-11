@@ -7,12 +7,22 @@ export interface PeopleViewFilters {
   search: string;
   filterLiving: string;
   filterSex: string;
+  filterUserLinked: string;
   sort: PanelSort;
   sortDir?: SortDir;
   familyShortcut: string;
   filterPlace: string;
   dateFrom: string;
   dateTo: string;
+}
+
+export function matchesUserLinked(
+  personId: string,
+  filter: string,
+  linkedPersonIds: Set<string>,
+): boolean {
+  if (filter !== "linked") return true;
+  return linkedPersonIds.has(personId);
 }
 
 export interface PlaceOption {
@@ -96,12 +106,15 @@ export function placeOptionsFromPeople(people: PersonDto[]): PlaceOption[] {
 export function filterAndSortPeople(
   people: PersonDto[],
   filters: PeopleViewFilters,
+  linkedPersonIds?: Set<string>,
 ): PersonDto[] {
   const search = filters.search.trim().toLowerCase();
+  const linked = linkedPersonIds ?? new Set<string>();
   let list = people.filter((p) => {
     if (filters.filterLiving === "living" && !p.is_living) return false;
     if (filters.filterLiving === "deceased" && p.is_living) return false;
     if (filters.filterSex && p.sex !== filters.filterSex) return false;
+    if (!matchesUserLinked(p.id, filters.filterUserLinked, linked)) return false;
     if (!matchesFamilyShortcut(p, filters.familyShortcut)) return false;
     if (!matchesPlace(p, filters.filterPlace)) return false;
     if (!matchesDateRange(p, filters.dateFrom, filters.dateTo)) return false;

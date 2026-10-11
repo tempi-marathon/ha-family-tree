@@ -24,6 +24,7 @@ export interface PanelViewState {
   filterPlace: string;
   dateFrom: string;
   dateTo: string;
+  filterUserLinked: string;
   filtersOpen: boolean;
 }
 
@@ -38,6 +39,7 @@ export const DEFAULT_PANEL_VIEW: PanelViewState = {
   filterPlace: "",
   dateFrom: "",
   dateTo: "",
+  filterUserLinked: "",
   filtersOpen: false,
 };
 
@@ -91,6 +93,7 @@ export function loadPanelViewState(
       filterPlace: asString(parsed.filterPlace, ""),
       dateFrom: asString(parsed.dateFrom, ""),
       dateTo: asString(parsed.dateTo, ""),
+      filterUserLinked: asString(parsed.filterUserLinked, ""),
       filtersOpen: Boolean(parsed.filtersOpen),
     };
   } catch {

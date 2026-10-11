@@ -15,6 +15,7 @@ import {
   type TreeUnion,
   addParentChild,
   claimUserLink,
+  deleteCitation,
   deleteEvent,
   deletePerson,
   deleteUnion,
@@ -37,6 +38,7 @@ import {
   setProfileMedia,
   restorePerson,
   listPlaces,
+  saveCitation,
   saveEvent,
   saveFamilyShortcuts,
   savePerson,
@@ -139,7 +141,8 @@ type DialogMode =
   | "union"
   | "pickPerson"
   | "parents"
-  | "profilePhoto";
+  | "profilePhoto"
+  | "citation";
 type RelationTarget =
   | { kind: "parent"; personId: string }
   | { kind: "partner"; personId: string }
@@ -237,7 +240,12 @@ export class FamilyTreePanel extends LitElement {
   @state() private _filterPlace = "";
   @state() private _dateFrom = "";
   @state() private _dateTo = "";
+  @state() private _filterUserLinked = "";
   @state() private _filtersOpen = false;
+  @state() private _reopenParentsAfterSave = false;
+  @state() private _editingCitationId: string | null = null;
+  @state() private _citationForm: Record<string, string> = {};
+  @state() private _parentsPickRole: "father" | "mother" | null = null;
   @state() private _people: PersonDto[] = [];
   @state() private _total = 0;
   @state() private _stats: StatsDto | null = null;
@@ -290,7 +298,6 @@ export class FamilyTreePanel extends LitElement {
   @state() private _editingUnionId: string | null = null;
   @state() private _pickPersonQuery = "";
   @state() private _pickPersonRole: "partner" | "father" | "mother" | null = null;
-  @state() private _parentsForm: Record<string, string> = {};
   @state() private _placeSuggestions: PlaceDto[] = [];
   @state() private _placeSuggestOpen = false;
   @state() private _personPlaceField: "birth_place" | "death_place" | null = null;
@@ -404,6 +411,7 @@ export class FamilyTreePanel extends LitElement {
     this._filterPlace = saved.filterPlace;
     this._dateFrom = saved.dateFrom;
     this._dateTo = saved.dateTo;
+    this._filterUserLinked = saved.filterUserLinked;
     this._filtersOpen = saved.filtersOpen;
     this._view = saved.view === "person" ? "people" : saved.view;
     this._viewHydrated = true;
@@ -424,6 +432,7 @@ export class FamilyTreePanel extends LitElement {
         filterPlace: this._filterPlace,
         dateFrom: this._dateFrom,
         dateTo: this._dateTo,
+        filterUserLinked: this._filterUserLinked,
         filtersOpen: this._filtersOpen,
       },
       this._entryId(),
@@ -453,7 +462,7 @@ export class FamilyTreePanel extends LitElement {
     if (!this.hass) return;
     try {
       const trashed = this._view === "trash";
-      const [list, stats, settings, lineage] = await Promise.all([
+      const [list, stats, settings, lineage, userLinks] = await Promise.all([
         listPersons(this.hass, {
           trashed,
           // Full tree — filters apply client-side (ready-home pattern).
@@ -462,6 +471,7 @@ export class FamilyTreePanel extends LitElement {
         getStats(this.hass),
         getSettings(this.hass),
         getMyLineage(this.hass).catch(() => null),
+        listUserLinks(this.hass).catch(() => ({ links: [] as Array<Record<string, unknown>> })),
       ]);
       this._people = list.persons;
       this._total = list.total;
@@ -469,6 +479,7 @@ export class FamilyTreePanel extends LitElement {
       this._settings = settings;
       this._syncShortcutsDraft();
       this._lineage = lineage;
+      this._userLinks = userLinks.links;
       if (this._detail) {
         this._detail = await getPerson(this.hass, this._detail.person.id);
       }
@@ -486,7 +497,17 @@ export class FamilyTreePanel extends LitElement {
     if (this._filterPlace) n += 1;
     if (this._dateFrom) n += 1;
     if (this._dateTo) n += 1;
+    if (this._filterUserLinked) n += 1;
     return n;
+  }
+
+  private _linkedPersonIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const link of this._userLinks) {
+      const pid = String(link.person_id || "");
+      if (pid) ids.add(pid);
+    }
+    return ids;
   }
 
   private _resetFilters = () => {
@@ -496,6 +517,7 @@ export class FamilyTreePanel extends LitElement {
     this._filterPlace = "";
     this._dateFrom = "";
     this._dateTo = "";
+    this._filterUserLinked = "";
     this._persistViewState();
   };
 
@@ -906,8 +928,25 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _openAddRelation(target: RelationTarget) {
+    const parentSex =
+      target.kind === "parent" && this._parentsPickRole
+        ? this._parentsPickRole === "mother"
+          ? "female"
+          : "male"
+        : null;
     this._relationTarget = target;
     this._openCreate(false);
+    if (parentSex) {
+      this._form = { ...this._form, sex: parentSex };
+    }
+  }
+
+  private _openAddParentFromDialog(role: "father" | "mother") {
+    if (!this._detail) return;
+    this._parentsPickRole = role;
+    this._reopenParentsAfterSave = true;
+    this._dialogOpen = false;
+    this._openAddRelation({ kind: "parent", personId: this._detail.person.id });
   }
 
   private async _openSiblingsDialog(personId: string, personName?: string) {
@@ -1484,6 +1523,11 @@ export class FamilyTreePanel extends LitElement {
       } else {
         await this._openPerson(focusPersonId);
       }
+      if (this._reopenParentsAfterSave && target?.kind === "parent") {
+        this._reopenParentsAfterSave = false;
+        this._parentsPickRole = null;
+        this._openParentsDialog();
+      }
     } catch (err) {
       this._error = formatHassError(err);
     } finally {
@@ -1915,17 +1959,22 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private get _filteredPeople(): PersonDto[] {
-    return filterAndSortPeople(this._people, {
-      search: this._search,
-      filterLiving: this._filterLiving,
-      filterSex: this._filterSex,
-      sort: this._sort,
-      sortDir: this._sortDir,
-      familyShortcut: this._familyShortcut,
-      filterPlace: this._filterPlace,
-      dateFrom: this._dateFrom,
-      dateTo: this._dateTo,
-    });
+    return filterAndSortPeople(
+      this._people,
+      {
+        search: this._search,
+        filterLiving: this._filterLiving,
+        filterSex: this._filterSex,
+        filterUserLinked: this._filterUserLinked,
+        sort: this._sort,
+        sortDir: this._sortDir,
+        familyShortcut: this._familyShortcut,
+        filterPlace: this._filterPlace,
+        dateFrom: this._dateFrom,
+        dateTo: this._dateTo,
+      },
+      this._linkedPersonIds(),
+    );
   }
 
   private _toggleSidebar() {
@@ -2029,8 +2078,12 @@ export class FamilyTreePanel extends LitElement {
             </div>
           </section>`
         : nothing}
-      <section class="two-col">
-        <div class="block">
+      <section class="dashboard-row">
+        <div class="block dashboard-panel">
+          <h3>${this._tt("linked_users")}</h3>
+          ${this._renderLinkedUsersDashboard()}
+        </div>
+        <div class="block dashboard-panel">
           <h3>${this._tt("upcoming_birthdays")}</h3>
           <ul class="plain">
             ${upcoming.length
@@ -2045,7 +2098,7 @@ export class FamilyTreePanel extends LitElement {
               : html`<li class="muted">—</li>`}
           </ul>
         </div>
-        <div class="block">
+        <div class="block dashboard-panel">
           <h3 class="heading-with-tip">
             ${this._tt("upcoming_anniversaries")}
             ${tooltip(
@@ -2083,6 +2136,44 @@ export class FamilyTreePanel extends LitElement {
     `;
   }
 
+  private _haAccountLabelsForPerson(personId: string): string {
+    const names: string[] = [];
+    for (const link of this._userLinks) {
+      if (String(link.person_id) !== personId) continue;
+      const label =
+        this._haUserDisplayName(String(link.ha_user_id)) ||
+        String(link.person_name || "");
+      if (label) names.push(label);
+    }
+    return names.join(", ");
+  }
+
+  private _renderLinkedUsersDashboard() {
+    const seen = new Set<string>();
+    const cards: PersonDto[] = [];
+    for (const link of this._userLinks) {
+      const pid = String(link.person_id || "");
+      if (!pid || seen.has(pid)) continue;
+      seen.add(pid);
+      const person = this._people.find((p) => p.id === pid);
+      if (person) cards.push(person);
+    }
+    if (!cards.length) {
+      return html`<p class="muted">—</p>`;
+    }
+    return html`<div class="card-list people-cards dashboard-linked-cards">
+      ${cards.map((p) => {
+        const accounts = this._haAccountLabelsForPerson(p.id);
+        return html`<div class="person-card-wrap">
+          ${this._renderPersonCard(p as unknown as Record<string, unknown>, {
+            preview: true,
+            subtitle: accounts || undefined,
+          })}
+        </div>`;
+      })}
+    </div>`;
+  }
+
   private _activeFilterChips() {
     const chips: Array<{ label: string; clear: () => void }> = [];
     if (this._search.trim()) {
@@ -2112,6 +2203,15 @@ export class FamilyTreePanel extends LitElement {
         label: this._tt(key) !== key ? this._tt(key) : this._filterSex,
         clear: () => {
           this._filterSex = "";
+          this._persistViewState();
+        },
+      });
+    }
+    if (this._filterUserLinked) {
+      chips.push({
+        label: this._tt("filter_linked_users"),
+        clear: () => {
+          this._filterUserLinked = "";
           this._persistViewState();
         },
       });
@@ -2237,6 +2337,17 @@ export class FamilyTreePanel extends LitElement {
               <option value="unknown">${this._tt("sex_unknown")}</option>
             </select>
             <select
+              aria-label=${this._tt("linked_users")}
+              .value=${this._filterUserLinked}
+              @change=${(e: Event) => {
+                this._filterUserLinked = (e.target as HTMLSelectElement).value;
+                this._persistViewState();
+              }}
+            >
+              <option value="">${this._tt("filter_all")}</option>
+              <option value="linked">${this._tt("filter_linked_users")}</option>
+            </select>
+            <select
               aria-label=${this._tt("filter_family")}
               .value=${this._familyShortcut}
               @change=${(e: Event) => {
@@ -2309,6 +2420,7 @@ export class FamilyTreePanel extends LitElement {
           this._search ||
           this._filterLiving !== "all" ||
           this._filterSex ||
+          this._filterUserLinked ||
           chips.length
           ? html`<p>${this._tt("no_people")}</p>`
           : this._renderEmptyCta()
@@ -2481,9 +2593,38 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _eventTypeLabel(type: string): string {
+  private _plainEventTypeLabel(type: string): string {
     const key = EVENT_TYPE_KEYS[type];
     return key ? this._tt(key) : type;
+  }
+
+  private _relatedEventTemplate(ev: EventDto): LocaleKey | null {
+    if (ev.subject_type !== "related" || !ev.relation) return null;
+    if (ev.type === "birth" && ev.relation === "child") return "event_child_birth";
+    if (ev.type === "death" && ev.relation === "child") return "event_child_death";
+    if (ev.type === "birth" && ev.relation === "partner") return "event_partner_birth";
+    if (ev.type === "death" && ev.relation === "partner") return "event_partner_death";
+    return null;
+  }
+
+  private _eventTypeLabel(ev: EventDto): string {
+    const relKey = this._relatedEventTemplate(ev);
+    if (relKey) {
+      return this._tt(relKey).replace("%s", ev.related_person_name || "");
+    }
+    return this._plainEventTypeLabel(ev.type);
+  }
+
+  private _renderEventTypeHeading(ev: EventDto) {
+    const relKey = this._relatedEventTemplate(ev);
+    if (relKey && ev.related_person_id) {
+      const prefix = this._tt(relKey).split("%s")[0] || "";
+      return html`${prefix}${this._personLink({
+        id: ev.related_person_id,
+        name: ev.related_person_name || ev.related_person_id,
+      })}`;
+    }
+    return this._eventTypeLabel(ev);
   }
 
   private _formatUnionDate(dateText: string | null | undefined, lang?: string): string {
@@ -2604,7 +2745,7 @@ export class FamilyTreePanel extends LitElement {
     return html`
       <div class="event-card">
         <div class="event-card-head">
-          <strong>${this._eventTypeLabel(ev.type)}</strong>
+          <strong>${this._renderEventTypeHeading(ev)}</strong>
           ${canEdit
             ? html`<span class="row-actions">
                 <button class="linkish" @click=${() => this._openEditEvent(ev)}>${this._tt("edit")}</button>
@@ -2659,14 +2800,45 @@ export class FamilyTreePanel extends LitElement {
     this._error = "";
   }
 
-  private _openParentsDialog() {
+  private _renderParentLinkSlot(role: "father" | "mother") {
     const parents = (this._detail?.tree?.parents || []) as Array<Record<string, unknown>>;
-    const father = parents.find((p) => p.sex === "male");
-    const mother = parents.find((p) => p.sex === "female");
-    this._parentsForm = {
-      father_id: father ? String(father.id) : "",
-      mother_id: mother ? String(mother.id) : "",
-    };
+    const current = parents.find((p) =>
+      role === "father" ? p.sex === "male" : p.sex === "female",
+    );
+    const label = role === "father" ? this._tt("father") : this._tt("mother");
+    const addLabel = role === "father" ? this._tt("add_father") : this._tt("add_mother");
+    return html`<div class="parent-slot-row">
+      <div class="parent-slot-head">
+        <span class="muted">${label}</span>
+        ${current
+          ? html`<strong>${nodeName(current)}</strong>`
+          : html`<span class="muted">—</span>`}
+      </div>
+      <div class="row-actions">
+        ${current
+          ? html`<button type="button" class="linkish" @click=${() => this._openPickPerson(role)}>
+              ${this._tt("change")}
+            </button>`
+          : html`
+              <button type="button" class="linkish" @click=${() => this._openPickPerson(role)}>
+                ${this._tt("link_existing_person")}
+              </button>
+              ${this._canWrite()
+                ? html`<button
+                    type="button"
+                    class="linkish"
+                    @click=${() => this._openAddParentFromDialog(role)}
+                  >
+                    ${addLabel}
+                  </button>`
+                : nothing}
+            `}
+      </div>
+    </div>`;
+  }
+
+  private _openParentsDialog() {
+    this._parentsPickRole = null;
     this._dialogMode = "parents";
     this._dialogOpen = true;
     this._error = "";
@@ -2709,33 +2881,14 @@ export class FamilyTreePanel extends LitElement {
           child_id: selfId,
         });
       }
+      const role = this._pickPersonRole;
       this._dialogOpen = false;
       this._pickPersonRole = null;
       this._detail = await getPerson(this.hass, selfId);
       await this._refreshAll();
-    } catch (err) {
-      this._error = formatHassError(err);
-    } finally {
-      this._saving = false;
-    }
-  }
-
-  private async _saveParentsLinks() {
-    if (!this.hass || !this._detail) return;
-    const selfId = this._detail.person.id;
-    const fatherId = (this._parentsForm.father_id || "").trim();
-    const motherId = (this._parentsForm.mother_id || "").trim();
-    this._saving = true;
-    try {
-      if (fatherId) {
-        await addParentChild(this.hass, { parent_id: fatherId, child_id: selfId });
+      if (role === "father" || role === "mother") {
+        this._openParentsDialog();
       }
-      if (motherId) {
-        await addParentChild(this.hass, { parent_id: motherId, child_id: selfId });
-      }
-      this._dialogOpen = false;
-      this._detail = await getPerson(this.hass, selfId);
-      await this._refreshAll();
     } catch (err) {
       this._error = formatHassError(err);
     } finally {
@@ -3449,20 +3602,114 @@ export class FamilyTreePanel extends LitElement {
           ? this._renderRelationshipsTab(d)
           : this._personTab === "tree"
             ? this._renderTreeTab(d)
-            : html`<ul class="plain">
-              ${(d.citations || []).map(
-                (c) => html`<li>
-                  <strong>${c.source_title || "Source"}</strong>
-                  ${c.source_url
-                    ? isSafeUrl(String(c.source_url))
-                      ? html`<a href=${String(c.source_url)} target="_blank" rel="noopener">${c.source_url}</a>`
-                      : html`<span>${c.source_url}</span>`
-                    : nothing}
-                  ${c.detail ? html`<span class="muted"> — ${c.detail}</span>` : nothing}
-                </li>`,
-              )}
-              ${(d.citations || []).length === 0 ? html`<li class="muted">—</li>` : nothing}
-            </ul>`}
+            : this._renderSourcesTab(d)}
+    `;
+  }
+
+  private _openCitationDialog(citation?: Record<string, unknown>) {
+    this._editingCitationId = citation ? String(citation.id) : null;
+    this._citationForm = {
+      title: String(citation?.source_title || ""),
+      url: String(citation?.source_url || ""),
+      author: "",
+      repository: "",
+      detail: String(citation?.detail || ""),
+      source_id: String(citation?.source_id || ""),
+    };
+    this._dialogMode = "citation";
+    this._dialogOpen = true;
+    this._error = "";
+  }
+
+  private async _saveCitationForm() {
+    if (!this.hass || !this._detail || !this._canWrite()) return;
+    const title = (this._citationForm.title || "").trim();
+    if (!title && !this._citationForm.source_id) {
+      this._error = this._tt("field_required");
+      return;
+    }
+    this._saving = true;
+    this._error = "";
+    try {
+      await saveCitation(this.hass, {
+        citation_id: this._editingCitationId || undefined,
+        source_id: this._citationForm.source_id || undefined,
+        subject_type: "person",
+        subject_id: this._detail.person.id,
+        title,
+        url: this._citationForm.url || "",
+        author: this._citationForm.author || "",
+        repository: this._citationForm.repository || "",
+        detail: this._citationForm.detail || "",
+      });
+      this._dialogOpen = false;
+      this._editingCitationId = null;
+      this._detail = await getPerson(this.hass, this._detail.person.id);
+    } catch (err) {
+      this._error = formatHassError(err);
+    } finally {
+      this._saving = false;
+    }
+  }
+
+  private async _deleteCitationById(citationId: string) {
+    if (!this.hass || !this._detail || !this._canWrite()) return;
+    if (!confirm(this._tt("confirm_delete_citation"))) return;
+    try {
+      await deleteCitation(this.hass, citationId);
+      this._detail = await getPerson(this.hass, this._detail.person.id);
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
+  }
+
+  private _renderSourcesTab(d: PersonDetail) {
+    const citations = d.citations || [];
+    const write = this._canWrite();
+    return html`
+      ${write
+        ? html`<div class="section-head">
+            ${mdButton(`+ ${this._tt("add_source")}`, {
+              variant: "filled",
+              onClick: () => this._openCitationDialog(),
+            })}
+          </div>`
+        : nothing}
+      <ul class="plain source-list">
+        ${citations.map((c) => {
+          const title = String(c.source_title || "Source");
+          const url = String(c.source_url || "");
+          const titleNode =
+            url && isSafeUrl(url)
+              ? html`<a href=${url} target="_blank" rel="noopener">${title}</a>`
+              : html`<strong>${title}</strong>`;
+          return html`<li class="source-row">
+            <span class="source-row-main">
+              ${titleNode}
+              ${c.detail ? html`<span class="muted"> — ${c.detail}</span>` : nothing}
+            </span>
+            ${write
+              ? html`<span class="row-actions">
+                  <button
+                    type="button"
+                    class="linkish"
+                    @click=${() => this._openCitationDialog(c)}
+                  >
+                    ${this._tt("edit")}
+                  </button>
+                  <button
+                    type="button"
+                    class="linkish danger"
+                    @click=${() => void this._deleteCitationById(String(c.id))}
+                  >
+                    ${this._tt("delete")}
+                  </button>
+                </span>`
+              : nothing}
+          </li>`;
+        })}
+        ${citations.length === 0 ? html`<li class="muted">—</li>` : nothing}
+      </ul>
     `;
   }
 
@@ -3914,6 +4161,10 @@ export class FamilyTreePanel extends LitElement {
             ? this._tt("link_existing_person")
             : mode === "parents"
               ? this._tt("add_parents")
+              : mode === "citation"
+                ? this._editingCitationId
+                  ? this._tt("edit_source")
+                  : this._tt("add_source")
               : mode === "siblings"
                 ? this._tt("siblings_of").replace("%s", this._siblingsPersonName || "")
                 : mode === "preview"
@@ -4149,7 +4400,7 @@ export class FamilyTreePanel extends LitElement {
               const disabled =
                 UNIQUE_PERSON_EVENT_TYPES.has(t) && usedTypes.has(t);
               return html`<option value=${t} ?disabled=${disabled}>
-                ${this._eventTypeLabel(t)}${disabled ? ` (${this._tt("already_added")})` : ""}
+                ${this._plainEventTypeLabel(t)}${disabled ? ` (${this._tt("already_added")})` : ""}
               </option>`;
             })}
           </select>
@@ -4372,42 +4623,69 @@ export class FamilyTreePanel extends LitElement {
       </ul>
     </div>`;
 
-    const parentsBody = html`<div class="form-section">
-      <p class="muted">${this._tt("search_to_link")}</p>
-      <label>${this._tt("father")}
+    const citationBody = html`<div class="form-section">
+      <label
+        >${this._tt("source_title")}
         <input
-          type="search"
-          placeholder=${this._tt("search_placeholder")}
-          @change=${(e: Event) => {
-            const q = (e.target as HTMLInputElement).value.toLowerCase();
-            const hit = this._people.find((p) =>
-              personDisplayName(p).toLowerCase().includes(q),
-            );
-            if (hit) this._parentsForm = { ...this._parentsForm, father_id: hit.id };
-          }}
+          .value=${this._citationForm.title || ""}
+          @input=${(e: Event) =>
+            (this._citationForm = {
+              ...this._citationForm,
+              title: (e.target as HTMLInputElement).value,
+            })}
         />
       </label>
-      <label>${this._tt("mother")}
+      <label
+        >${this._tt("source_url")}
         <input
-          type="search"
-          placeholder=${this._tt("search_placeholder")}
-          @change=${(e: Event) => {
-            const q = (e.target as HTMLInputElement).value.toLowerCase();
-            const hit = this._people.find((p) =>
-              personDisplayName(p).toLowerCase().includes(q),
-            );
-            if (hit) this._parentsForm = { ...this._parentsForm, mother_id: hit.id };
-          }}
+          type="url"
+          .value=${this._citationForm.url || ""}
+          @input=${(e: Event) =>
+            (this._citationForm = {
+              ...this._citationForm,
+              url: (e.target as HTMLInputElement).value,
+            })}
         />
       </label>
-      <div class="row-actions">
-        <button type="button" class="linkish" @click=${() => this._openPickPerson("father")}>
-          ${this._tt("link_existing_person")} (${this._tt("father")})
-        </button>
-        <button type="button" class="linkish" @click=${() => this._openPickPerson("mother")}>
-          ${this._tt("link_existing_person")} (${this._tt("mother")})
-        </button>
-      </div>
+      <label
+        >${this._tt("source_author")}
+        <input
+          .value=${this._citationForm.author || ""}
+          @input=${(e: Event) =>
+            (this._citationForm = {
+              ...this._citationForm,
+              author: (e.target as HTMLInputElement).value,
+            })}
+        />
+      </label>
+      <label
+        >${this._tt("source_repository")}
+        <input
+          .value=${this._citationForm.repository || ""}
+          @input=${(e: Event) =>
+            (this._citationForm = {
+              ...this._citationForm,
+              repository: (e.target as HTMLInputElement).value,
+            })}
+        />
+      </label>
+      <label
+        >${this._tt("citation_detail")}
+        <textarea
+          rows="3"
+          .value=${this._citationForm.detail || ""}
+          @input=${(e: Event) =>
+            (this._citationForm = {
+              ...this._citationForm,
+              detail: (e.target as HTMLTextAreaElement).value,
+            })}
+        ></textarea>
+      </label>
+    </div>`;
+
+    const parentsBody = html`<div class="form-section parent-link-form">
+      ${this._renderParentLinkSlot("father")}
+      ${this._renderParentLinkSlot("mother")}
     </div>`;
 
     const profilePhotoBody = html`<div class="form-section profile-photo-editor">
@@ -4530,17 +4808,22 @@ export class FamilyTreePanel extends LitElement {
                 onClick: this._closeDialog,
               })
             : mode === "parents"
-              ? html`
-                  ${mdButton(this._tt("cancel"), {
-                    variant: "text",
-                    onClick: this._closeDialog,
-                  })}
-                  ${mdButton(this._tt("save"), {
-                    variant: "filled",
-                    disabled: this._saving,
-                    onClick: () => void this._saveParentsLinks(),
-                  })}
-                `
+              ? mdButton(this._tt("close"), {
+                  variant: "text",
+                  onClick: this._closeDialog,
+                })
+              : mode === "citation"
+                ? html`
+                    ${mdButton(this._tt("cancel"), {
+                      variant: "text",
+                      onClick: this._closeDialog,
+                    })}
+                    ${mdButton(this._tt("save"), {
+                      variant: "filled",
+                      disabled: this._saving,
+                      onClick: () => void this._saveCitationForm(),
+                    })}
+                  `
               : mode === "siblings"
           ? mdButton(this._tt("close"), {
               variant: "text",
@@ -4658,6 +4941,8 @@ export class FamilyTreePanel extends LitElement {
                   ? pickBody
                   : mode === "parents"
                     ? parentsBody
+                    : mode === "citation"
+                      ? citationBody
                     : mode === "siblings"
                       ? siblingsBody
                       : mode === "preview"
@@ -4799,6 +5084,52 @@ export class FamilyTreePanel extends LitElement {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 16px;
+    }
+    .dashboard-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+    }
+    @media (max-width: 960px) {
+      .dashboard-row {
+        grid-template-columns: 1fr;
+      }
+    }
+    .dashboard-panel {
+      padding: 12px;
+      border-radius: var(--ha-card-border-radius, 12px);
+      border: 1px solid var(--divider-color);
+      background: var(--card-background-color, var(--secondary-background-color));
+      box-shadow: var(--ha-card-box-shadow, none);
+      margin-bottom: 0;
+    }
+    .dashboard-linked-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .parent-slot-row {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .parent-slot-head {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .source-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .source-row-main {
+      flex: 1;
+      min-width: 0;
     }
     .block { margin-bottom: 20px; }
     .block h3 { margin: 0 0 8px; font-size: 1.05rem; font-weight: 500; }

@@ -4,6 +4,7 @@ import {
   matchesDateRange,
   matchesFamilyShortcut,
   matchesPlace,
+  matchesUserLinked,
   personDisplayName,
   placeOptionsFromPeople,
 } from "./people_view";
@@ -38,6 +39,7 @@ const baseFilters = {
   search: "",
   filterLiving: "all",
   filterSex: "",
+  filterUserLinked: "",
   sort: "surname" as const,
   familyShortcut: "",
   filterPlace: "",
@@ -135,6 +137,15 @@ describe("placeOptionsFromPeople", () => {
       { id: "a", label: "Amsterdam" },
       { id: "b", label: "Breda" },
     ]);
+  });
+});
+
+describe("matchesUserLinked", () => {
+  it("filters to linked person ids only", () => {
+    const linked = new Set(["a"]);
+    expect(matchesUserLinked("a", "linked", linked)).toBe(true);
+    expect(matchesUserLinked("b", "linked", linked)).toBe(false);
+    expect(matchesUserLinked("b", "", linked)).toBe(true);
   });
 });
 
