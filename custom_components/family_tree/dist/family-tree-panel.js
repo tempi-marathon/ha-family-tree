@@ -26,7 +26,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     aria-hidden="true"
   >
     <path fill="currentColor" d=${Wf} />
-  </svg>`}function Kf(e){let t=Y(e).trim();if(!t)return`?`;let n=t.split(/\s+/).filter(Boolean);if(n.length>=2)return(n[0][0]+n[n.length-1][0]).toUpperCase();let r=n[0];return r.length>=2?r.slice(0,2).toUpperCase():r[0].toUpperCase()}function qf(e){return e===`male`?`person-avatar--male`:e===`female`?`person-avatar--female`:`person-avatar--unknown`}function Jf(e,t={}){let n=t.size??`sm`,r=Hf[n],i=t.sex??(typeof e.sex==`string`?e.sex:`unknown`),a=t.profileMediaId??(typeof e.profile_media_id==`string`?e.profile_media_id:null),o=t.isLiving??e.is_living!==!1,s=t.title??Y(e),c=t.deceasedOverlay&&!o,l=Uf(r),u=n===`lg`||n===`detail`;if(a)return W`<span
+  </svg>`}function Kf(e){let t=Y(e).trim();if(!t)return`?`;let n=t.split(/\s+/).filter(Boolean);if(n.length>=2)return(n[0][0]+n[n.length-1][0]).toUpperCase();let r=n[0];return r.length>=2?r.slice(0,2).toUpperCase():r[0].toUpperCase()}function qf(e){return e===`male`?`person-avatar--male`:e===`female`?`person-avatar--female`:`person-avatar--unknown`}function Jf(e,t={}){let n=t.size??`sm`,r=Hf[n],i=t.sex??(typeof e.sex==`string`?e.sex:`unknown`),a=t.profileMediaId??(typeof e.profile_media_id==`string`?e.profile_media_id:null),o=t.isLiving??e.is_living!==!1,s=t.title??Y(e),c=t.deceasedOverlay&&!o,l=t.deceasedMarkPx??Uf(r),u=n===`lg`||n===`detail`;if(a)return W`<span
       class="person-avatar person-avatar--photo ${qf(i)} person-avatar--${n}"
       style="width:${r}px;height:${r}px"
       title=${s}
@@ -703,9 +703,9 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
                 aria-label=${this._tt(`edit_profile_photo`)}
                 @click=${()=>this._openProfilePhotoEditor()}
               >
-                ${Jf(t,{size:`detail`,hass:this.hass,deceasedOverlay:!0})}
+                ${Jf(t,{size:`detail`,hass:this.hass,deceasedOverlay:!0,deceasedMarkPx:20})}
                 <span class="person-avatar-edit-label">${this._tt(`edit`)}</span>
-              </button>`:Jf(t,{size:`detail`,hass:this.hass,deceasedOverlay:!0})}
+              </button>`:Jf(t,{size:`detail`,hass:this.hass,deceasedOverlay:!0,deceasedMarkPx:20})}
           <h2>
             ${this._deceasedIcon(t.is_living)} ${Y(t)}
             ${this._lineageBadge(t.id,Y(t))}
@@ -1380,7 +1380,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
         >
           <div class="dialog-header">
             <h2 class=${t===`preview`&&b?`dialog-preview-head`:``}>
-              ${t===`preview`&&b?W`${Jf(b.person,{size:`md`,hass:this.hass,deceasedOverlay:!0})}
+              ${t===`preview`&&b?W`${Jf(b.person,{size:`md`,hass:this.hass,deceasedOverlay:!0,deceasedMarkPx:16})}
                     <span class="dialog-preview-head-text">
                       <span class="dialog-title-text"
                         >${this._deceasedIcon(b.person.is_living)}
@@ -2131,7 +2131,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       justify-content: center;
       border-radius: 50%;
       flex-shrink: 0;
-      overflow: visible;
+      overflow: hidden;
       box-sizing: border-box;
       border: 1px solid var(--divider-color);
       font-weight: 600;

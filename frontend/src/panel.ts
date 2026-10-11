@@ -3726,6 +3726,7 @@ export class FamilyTreePanel extends LitElement {
                   size: "detail",
                   hass: this.hass,
                   deceasedOverlay: true,
+                  deceasedMarkPx: 20,
                 })}
                 <span class="person-avatar-edit-label">${this._tt("edit")}</span>
               </button>`
@@ -3733,6 +3734,7 @@ export class FamilyTreePanel extends LitElement {
                 size: "detail",
                 hass: this.hass,
                 deceasedOverlay: true,
+                deceasedMarkPx: 20,
               })}
           <h2>
             ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
@@ -5150,6 +5152,7 @@ export class FamilyTreePanel extends LitElement {
                     size: "md",
                     hass: this.hass,
                     deceasedOverlay: true,
+                    deceasedMarkPx: 16,
                   })}
                     <span class="dialog-preview-head-text">
                       <span class="dialog-title-text"
@@ -5930,7 +5933,7 @@ export class FamilyTreePanel extends LitElement {
       justify-content: center;
       border-radius: 50%;
       flex-shrink: 0;
-      overflow: visible;
+      overflow: hidden;
       box-sizing: border-box;
       border: 1px solid var(--divider-color);
       font-weight: 600;
