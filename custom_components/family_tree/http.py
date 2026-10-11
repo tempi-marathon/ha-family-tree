@@ -1,4 +1,4 @@
-"""HTTP endpoints for GEDCOM import/export."""
+"""HTTP endpoints for GEDCOM import/export and person media."""
 
 from __future__ import annotations
 
@@ -9,10 +9,13 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DOMAIN, MAX_IMPORT_BYTES
+from .const import DOMAIN, MAX_IMPORT_BYTES, MAX_PHOTO_BYTES
 from .gedcom_export import export_gedcom
 from .gedcom_import import GedcomImporter, preview_gedcom
-from .helpers import get_coordinator
+from .helpers import get_coordinator, media_dir
+from .media_files import read_media_file
+from .media_service import upload_person_media
+from .validation import normalize_entity_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,7 +88,7 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
             return self.json({"ok": True, "preview": True, "report": report})
 
         def _import() -> dict:
-            importer = GedcomImporter(coordinator.repo)
+            importer = GedcomImporter(coordinator.repo, media_dir(hass))
             report = importer.import_text(text, replace=replace)
             return report.to_dict()
 
@@ -124,6 +127,157 @@ class FamilyTreeExportGedcomView(HomeAssistantView):
         )
 
 
+class FamilyTreeMediaView(HomeAssistantView):
+    """GET /api/family_tree/media/{media_id} — authenticated."""
+
+    url = f"/api/{DOMAIN}/media/{{media_id}}"
+    name = f"api:{DOMAIN}:media"
+    requires_auth = True
+
+    async def get(self, request: web.Request, media_id: str) -> web.StreamResponse:
+        """Serve full or thumbnail image bytes."""
+        hass: HomeAssistant = request.app["hass"]
+        if not normalize_entity_id(media_id):
+            return self.json_message("Not found", HTTPStatus.NOT_FOUND)
+
+        variant = (request.query.get("variant") or "thumb").lower()
+        thumb = variant != "full"
+        content_type = "image/webp" if thumb else None
+
+        try:
+            coordinator = get_coordinator(hass)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Media coordinator lookup failed")
+            return self.json_message("Not found", HTTPStatus.NOT_FOUND)
+
+        root = media_dir(hass)
+
+        def _read() -> tuple[bytes, str] | None:
+            media = coordinator.repo.get_visible_person_media(media_id)
+            if media is None:
+                return None
+            ct = content_type or media.content_type
+            data = read_media_file(
+                root,
+                media.person_id,
+                media.id,
+                media.content_type,
+                thumb=thumb,
+            )
+            if data is None:
+                return None
+            return data, ct
+
+        try:
+            payload = await hass.async_add_executor_job(_read)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Failed to read media %s", media_id)
+            return self.json_message("Not found", HTTPStatus.NOT_FOUND)
+
+        if payload is None:
+            return self.json_message("Not found", HTTPStatus.NOT_FOUND)
+
+        body, ct = payload
+        etag = f'"{media_id}-{variant}"'
+        if request.headers.get("If-None-Match") == etag:
+            return web.Response(status=304)
+
+        return web.Response(
+            body=body,
+            content_type=ct,
+            headers={
+                "Cache-Control": "private",
+                "ETag": etag,
+                "X-Content-Type-Options": "nosniff",
+                "Content-Disposition": "inline",
+            },
+        )
+
+
+class FamilyTreePersonMediaUploadView(HomeAssistantView):
+    """POST /api/family_tree/persons/{person_id}/media — admin only."""
+
+    url = f"/api/{DOMAIN}/persons/{{person_id}}/media"
+    name = f"api:{DOMAIN}:person_media_upload"
+    requires_auth = True
+
+    async def post(self, request: web.Request, person_id: str) -> web.Response:
+        """Upload a photo for a person (multipart)."""
+        hass: HomeAssistant = request.app["hass"]
+        user = request["hass_user"]
+        if user is None or not user.is_admin:
+            return self.json_message("Unauthorized", HTTPStatus.UNAUTHORIZED)
+
+        if not normalize_entity_id(person_id):
+            return self.json_message("Not found", HTTPStatus.NOT_FOUND)
+
+        try:
+            coordinator = get_coordinator(hass)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Media upload coordinator lookup failed")
+            return self.json_message("Family Tree is not available", HTTPStatus.BAD_REQUEST)
+
+        content_type = (request.content_type or "").lower()
+        filename = ""
+        data: bytes | None = None
+
+        try:
+            if "multipart/" in content_type:
+                reader = await request.multipart()
+                while True:
+                    part = await reader.next()
+                    if part is None:
+                        break
+                    chunk = await part.read(decode=False)
+                    if len(chunk) > MAX_PHOTO_BYTES:
+                        return self.json_message(
+                            "File too large",
+                            HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                        )
+                    data = chunk
+                    filename = part.filename or ""
+            else:
+                body = await request.read()
+                if len(body) > MAX_PHOTO_BYTES:
+                    return self.json_message(
+                        "File too large",
+                        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                    )
+                data = body
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Failed to read media upload")
+            return self.json_message("Upload failed", HTTPStatus.BAD_REQUEST)
+
+        if not data:
+            return self.json_message("No file uploaded", HTTPStatus.BAD_REQUEST)
+
+        root = media_dir(hass)
+
+        def _upload() -> dict:
+            media = upload_person_media(
+                coordinator.repo,
+                root,
+                person_id,
+                data,
+                original_filename=filename,
+            )
+            return {"media": media.to_dict()}
+
+        try:
+            result = await hass.async_add_executor_job(_upload)
+        except LookupError:
+            return self.json_message("Not found", HTTPStatus.NOT_FOUND)
+        except OverflowError as err:
+            return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
+        except ValueError:
+            return self.json_message("Invalid image", HTTPStatus.BAD_REQUEST)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Media upload failed for person %s", person_id)
+            return self.json_message("Upload failed", HTTPStatus.BAD_REQUEST)
+
+        return self.json({"ok": True, **result})
+
+
 @callback
 def async_register_http(hass: HomeAssistant) -> None:
     """Register HTTP views once."""
@@ -131,4 +285,6 @@ def async_register_http(hass: HomeAssistant) -> None:
         return
     hass.http.register_view(FamilyTreeImportGedcomView())
     hass.http.register_view(FamilyTreeExportGedcomView())
+    hass.http.register_view(FamilyTreeMediaView())
+    hass.http.register_view(FamilyTreePersonMediaUploadView())
     hass.data[_HTTP_KEY] = True

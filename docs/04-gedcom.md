@@ -11,6 +11,7 @@ Import and export use GEDCOM 5.5.1.
 - Places: `PLAC` + `MAP`/`LATI`/`LONG`
 - Sources: `SOUR` with `TITL`, `WWW`, `AUTH`, `PUBL`; citations with `PAGE`
 - Dates: `ABT`, `BEF`, `AFT`, `EST`, `CAL`, `BET`/`AND`, `FROM`/`TO`
+- Photos: `OBJE` with `FILE` when `FILE` is an `http://` or `https://` URL (downloaded into local storage). Relative file paths are skipped with an import warning.
 
 ## Import modes
 

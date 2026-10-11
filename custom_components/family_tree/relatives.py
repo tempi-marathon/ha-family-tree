@@ -62,6 +62,7 @@ def _person_summary(repo: Repository, person: Person) -> dict[str, Any]:
         "surname": person.surname,
         "sex": person.sex.value,
         "is_living": person.is_living,
+        "profile_media_id": person.profile_media_id,
         "sibling_count": _sibling_count(repo, person.id),
         **_vital_fields(repo, person.id),
     }

@@ -16,6 +16,7 @@ from .const import (
     CONF_GAZETTEER_COUNTRIES,
     CONF_NAME,
     DOMAIN,
+    MAX_CAPTION,
     MAX_NAME,
     MAX_NOTES,
     MAX_PERSONS,
@@ -25,8 +26,9 @@ from .const import (
 )
 from .coordinator import FamilyTreeCoordinator
 from .dates import parse_gedcom_date
-from .helpers import get_coordinator, profile_name
+from .helpers import get_coordinator, media_dir, profile_name
 from .lineage import ancestors, descendants, lineage_map, lineage_relation
+from .media_service import purge_person_media_files, remove_media
 from .models import (
     UNIQUE_PERSON_EVENT_TYPES,
     Event,
@@ -765,11 +767,131 @@ async def ws_persons_purge(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
-    ok = await hass.async_add_executor_job(
-        coordinator.repo.force_delete_person, msg["person_id"]
-    )
+    person_id = msg["person_id"]
+    root = media_dir(hass)
+
+    def _purge() -> bool:
+        ok = coordinator.repo.force_delete_person(person_id)
+        if ok:
+            purge_person_media_files(root, person_id)
+        return ok
+
+    ok = await hass.async_add_executor_job(_purge)
     if not ok:
         connection.send_error(msg["id"], "not_found", "Person not found")
+        return
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/persons/media/list",
+        vol.Required("person_id"): str,
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_persons_media_list(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    coordinator = _coordinator(hass, msg)
+
+    def _run() -> dict[str, Any]:
+        items = coordinator.repo.list_person_media(msg["person_id"])
+        person = coordinator.repo.get_person(msg["person_id"])
+        profile_id = person.profile_media_id if person else None
+        return {
+            "media": [m.to_dict() for m in items],
+            "profile_media_id": profile_id,
+        }
+
+    connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/persons/media/set_profile",
+        vol.Required("person_id"): str,
+        vol.Required("media_id"): str,
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_persons_media_set_profile(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+    ok = await hass.async_add_executor_job(
+        coordinator.repo.set_profile_media, msg["person_id"], msg["media_id"]
+    )
+    if not ok:
+        connection.send_error(msg["id"], "not_found", "Not found")
+        return
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/persons/media/update",
+        vol.Required("media_id"): str,
+        vol.Optional("caption"): _bounded_string(MAX_CAPTION),
+        vol.Optional("sort_order"): int,
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_persons_media_update(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+    updated = await hass.async_add_executor_job(
+        lambda: coordinator.repo.update_person_media(
+            msg["media_id"],
+            caption=msg.get("caption"),
+            sort_order=msg.get("sort_order"),
+        )
+    )
+    if updated is None:
+        connection.send_error(msg["id"], "not_found", "Not found")
+        return
+    connection.send_result(msg["id"], {"media": updated.to_dict()})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/persons/media/delete",
+        vol.Required("media_id"): str,
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_persons_media_delete(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+    root = media_dir(hass)
+
+    def _delete() -> bool:
+        return remove_media(coordinator.repo, root, msg["media_id"])
+
+    ok = await hass.async_add_executor_job(_delete)
+    if not ok:
+        connection.send_error(msg["id"], "not_found", "Not found")
         return
     connection.send_result(msg["id"], {"ok": True})
 
@@ -1267,6 +1389,10 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_persons_delete,
         ws_persons_restore,
         ws_persons_purge,
+        ws_persons_media_list,
+        ws_persons_media_set_profile,
+        ws_persons_media_update,
+        ws_persons_media_delete,
         ws_tree,
         ws_lineage,
         ws_lineage_mine,

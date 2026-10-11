@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from custom_components.family_tree.validation import normalize_country_codes, normalize_source_url
+from custom_components.family_tree.validation import (
+    is_fetchable_http_url,
+    normalize_country_codes,
+    normalize_entity_id,
+    normalize_source_url,
+)
 
 
 def test_normalize_source_url_allows_http_https() -> None:
@@ -28,3 +33,25 @@ def test_normalize_country_codes_iso_only() -> None:
 def test_normalize_country_codes_empty() -> None:
     assert normalize_country_codes(None) == []
     assert normalize_country_codes([]) == []
+
+
+def test_normalize_entity_id() -> None:
+    hex_id = "a" * 32
+    assert normalize_entity_id(hex_id) == hex_id
+    assert normalize_entity_id("UPPER" + "a" * 27) is None
+    assert normalize_entity_id("../etc") is None
+
+
+def test_is_fetchable_http_url_blocks_localhost() -> None:
+    assert not is_fetchable_http_url("http://127.0.0.1/photo.jpg")
+    assert not is_fetchable_http_url("http://localhost/x")
+
+
+def test_is_fetchable_http_url_allows_public_example() -> None:
+    from unittest.mock import patch
+
+    with patch(
+        "custom_components.family_tree.validation.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 0))],
+    ):
+        assert is_fetchable_http_url("https://example.com/photo.jpg")

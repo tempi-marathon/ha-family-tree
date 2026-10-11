@@ -17,6 +17,7 @@ from .const import (
     DEFAULT_PROFILE_NAME,
     DOMAIN,
     GAZETTEER_DB_FILENAME,
+    MEDIA_DIR_NAME,
     VERSION,
 )
 
@@ -56,6 +57,13 @@ def db_path(hass: HomeAssistant) -> Path:
 def gazetteer_db_path(hass: HomeAssistant) -> Path:
     """Return the gazetteer SQLite database path."""
     return data_dir(hass) / GAZETTEER_DB_FILENAME
+
+
+def media_dir(hass: HomeAssistant) -> Path:
+    """Return ``config/family_tree/media`` and ensure it exists."""
+    path = data_dir(hass) / MEDIA_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def get_coordinator(

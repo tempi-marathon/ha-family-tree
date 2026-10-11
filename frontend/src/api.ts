@@ -56,6 +56,22 @@ export interface PersonDto {
   children_count?: number;
   birth?: VitalSummary | null;
   death?: VitalSummary | null;
+  profile_media_id?: string | null;
+}
+
+export interface PersonMediaDto {
+  id: string;
+  person_id: string;
+  content_type: string;
+  original_filename: string;
+  caption: string;
+  byte_size: number;
+  width: number | null;
+  height: number | null;
+  sort_order: number;
+  source_url: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface EventDto {
@@ -443,6 +459,50 @@ export async function claimUserLink(
     person_id: string | null;
     person_name: string | null;
   }>;
+}
+
+export async function listPersonMedia(
+  hass: HomeAssistant,
+  personId: string,
+): Promise<{ media: PersonMediaDto[]; profile_media_id: string | null }> {
+  return msg(hass, "family_tree/persons/media/list", {
+    person_id: personId,
+  }) as Promise<{ media: PersonMediaDto[]; profile_media_id: string | null }>;
+}
+
+export async function setProfileMedia(
+  hass: HomeAssistant,
+  personId: string,
+  mediaId: string,
+): Promise<{ ok: boolean }> {
+  return msg(hass, "family_tree/persons/media/set_profile", {
+    person_id: personId,
+    media_id: mediaId,
+  }) as Promise<{ ok: boolean }>;
+}
+
+export async function updatePersonMedia(
+  hass: HomeAssistant,
+  mediaId: string,
+  data: { caption?: string; sort_order?: number },
+): Promise<{ media: PersonMediaDto }> {
+  return msg(hass, "family_tree/persons/media/update", {
+    media_id: mediaId,
+    ...data,
+  }) as Promise<{ media: PersonMediaDto }>;
+}
+
+export async function deletePersonMedia(
+  hass: HomeAssistant,
+  mediaId: string,
+): Promise<{ ok: boolean }> {
+  return msg(hass, "family_tree/persons/media/delete", {
+    media_id: mediaId,
+  }) as Promise<{ ok: boolean }>;
+}
+
+export function personMediaUploadUrl(personId: string): string {
+  return `/api/family_tree/persons/${personId}/media`;
 }
 
 export async function searchGazetteer(

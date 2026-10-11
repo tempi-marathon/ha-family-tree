@@ -8,7 +8,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from .const import META_FAMILY_SHORTCUTS
+from .const import MAX_MEDIA_TOTAL_BYTES, MAX_PHOTOS_PER_PERSON, META_FAMILY_SHORTCUTS
 from .db import Database
 from .lineage import would_create_parent_child_cycle
 from .models import (
@@ -17,6 +17,7 @@ from .models import (
     ExternalRef,
     ParentChild,
     Person,
+    PersonMedia,
     Place,
     Sex,
     Source,
@@ -28,7 +29,7 @@ from .models import (
 )
 from .names import display_name
 from .shortcuts import normalize_family_shortcuts
-from .validation import normalize_source_url
+from .validation import normalize_caption, normalize_entity_id, normalize_source_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +92,10 @@ def vital_summary(life_events: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _row_person(row: Any) -> Person:
     return Person.from_dict(dict(row))
+
+
+def _row_media(row: Any) -> PersonMedia:
+    return PersonMedia.from_dict(dict(row))
 
 
 def _row_union(row: Any) -> Union:
@@ -1046,6 +1051,7 @@ class Repository:
                 "parent_child",
                 "union_partners",
                 "unions",
+                "person_media",
                 "persons",
                 "places",
                 "sources",
@@ -1065,6 +1071,204 @@ class Repository:
             self._batch_depth -= 1
         self._notify()
         return result
+
+    # --- Person media ------------------------------------------------------
+
+    def get_person_media(self, media_id: str) -> PersonMedia | None:
+        mid = normalize_entity_id(media_id)
+        if not mid:
+            return None
+        row = self.db.fetchone("SELECT * FROM person_media WHERE id = ?", (mid,))
+        return _row_media(row) if row else None
+
+    def get_visible_person_media(self, media_id: str) -> PersonMedia | None:
+        """Return media only when the person exists and is not in trash."""
+        mid = normalize_entity_id(media_id)
+        if not mid:
+            return None
+        row = self.db.fetchone(
+            "SELECT m.* FROM person_media m "
+            "JOIN persons p ON p.id = m.person_id "
+            "WHERE m.id = ? AND p.deleted_at IS NULL",
+            (mid,),
+        )
+        return _row_media(row) if row else None
+
+    def list_person_media(self, person_id: str) -> list[PersonMedia]:
+        pid = normalize_entity_id(person_id)
+        if not pid:
+            return []
+        person = self.get_person(person_id)
+        if person is None or person.deleted_at:
+            return []
+        rows = self.db.fetchall(
+            "SELECT * FROM person_media WHERE person_id = ? ORDER BY sort_order, created_at",
+            (pid,),
+        )
+        return [_row_media(r) for r in rows]
+
+    def profile_media_ids_for_persons(
+        self, person_ids: list[str]
+    ) -> dict[str, str | None]:
+        if not person_ids:
+            return {}
+        ids = [normalize_entity_id(pid) for pid in person_ids]
+        ids = [i for i in ids if i]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        rows = self.db.fetchall(
+            f"SELECT id, profile_media_id FROM persons WHERE id IN ({placeholders})",
+            ids,
+        )
+        return {
+            str(r["id"]): str(r["profile_media_id"]) if r["profile_media_id"] else None
+            for r in rows
+        }
+
+    def total_media_bytes(self) -> int:
+        row = self.db.fetchone(
+            "SELECT COALESCE(SUM(byte_size), 0) AS t FROM person_media"
+        )
+        return int(row["t"] if row else 0)
+
+    def count_person_media(self, person_id: str) -> int:
+        pid = normalize_entity_id(person_id)
+        if not pid:
+            return 0
+        row = self.db.fetchone(
+            "SELECT COUNT(*) AS c FROM person_media WHERE person_id = ?", (pid,)
+        )
+        return int(row["c"] if row else 0)
+
+    def add_person_media(
+        self,
+        media: PersonMedia,
+        *,
+        set_profile_if_empty: bool = True,
+    ) -> PersonMedia:
+        pid = normalize_entity_id(media.person_id)
+        if not pid:
+            raise ValueError("Invalid person id")
+        person = self.get_person(pid)
+        if person is None or person.deleted_at:
+            raise LookupError("Person not found")
+        if self.count_person_media(pid) >= MAX_PHOTOS_PER_PERSON:
+            raise OverflowError("Maximum photos per person reached")
+        if self.total_media_bytes() + media.byte_size > MAX_MEDIA_TOTAL_BYTES:
+            raise OverflowError("Maximum media storage reached")
+
+        def _do() -> PersonMedia:
+            self.db.execute(
+                "INSERT INTO person_media "
+                "(id, person_id, content_type, original_filename, caption, byte_size, "
+                "width, height, sort_order, source_url, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    media.id,
+                    pid,
+                    media.content_type,
+                    media.original_filename,
+                    media.caption,
+                    media.byte_size,
+                    media.width,
+                    media.height,
+                    media.sort_order,
+                    normalize_source_url(media.source_url) or "",
+                    media.created_at,
+                    media.updated_at,
+                ),
+            )
+            if set_profile_if_empty and not person.profile_media_id:
+                self.db.execute(
+                    "UPDATE persons SET profile_media_id = ?, updated_at = ? WHERE id = ?",
+                    (media.id, _now(), pid),
+                )
+            return media
+
+        return self._mutate(_do)
+
+    def update_person_media(
+        self,
+        media_id: str,
+        *,
+        caption: str | None = None,
+        sort_order: int | None = None,
+    ) -> PersonMedia | None:
+        mid = normalize_entity_id(media_id)
+        if not mid:
+            return None
+        existing = self.get_person_media(mid)
+        if existing is None:
+            return None
+
+        def _do() -> PersonMedia:
+            new_caption = (
+                normalize_caption(caption) if caption is not None else existing.caption
+            )
+            new_order = sort_order if sort_order is not None else existing.sort_order
+            updated_at = _now()
+            self.db.execute(
+                "UPDATE person_media SET caption = ?, sort_order = ?, updated_at = ? "
+                "WHERE id = ?",
+                (new_caption, new_order, updated_at, mid),
+            )
+            return PersonMedia(
+                id=existing.id,
+                person_id=existing.person_id,
+                content_type=existing.content_type,
+                original_filename=existing.original_filename,
+                caption=new_caption,
+                byte_size=existing.byte_size,
+                width=existing.width,
+                height=existing.height,
+                sort_order=new_order,
+                source_url=existing.source_url,
+                created_at=existing.created_at,
+                updated_at=updated_at,
+            )
+
+        return self._mutate(_do)
+
+    def set_profile_media(self, person_id: str, media_id: str) -> bool:
+        pid = normalize_entity_id(person_id)
+        mid = normalize_entity_id(media_id)
+        if not pid or not mid:
+            return False
+        media = self.get_person_media(mid)
+        if media is None or media.person_id != pid:
+            return False
+        person = self.get_person(pid)
+        if person is None or person.deleted_at:
+            return False
+
+        def _do() -> bool:
+            self.db.execute(
+                "UPDATE persons SET profile_media_id = ?, updated_at = ? WHERE id = ?",
+                (mid, _now(), pid),
+            )
+            return True
+
+        return self._mutate(_do)
+
+    def delete_person_media(self, media_id: str) -> PersonMedia | None:
+        mid = normalize_entity_id(media_id)
+        if not mid:
+            return None
+        existing = self.get_person_media(mid)
+        if existing is None:
+            return None
+
+        def _do() -> PersonMedia:
+            self.db.execute(
+                "UPDATE persons SET profile_media_id = NULL, updated_at = ? "
+                "WHERE profile_media_id = ?",
+                (_now(), mid),
+            )
+            self.db.execute("DELETE FROM person_media WHERE id = ?", (mid,))
+            return existing
+
+        return self._mutate(_do)
 
     # --- Meta / panel settings ---------------------------------------------
 

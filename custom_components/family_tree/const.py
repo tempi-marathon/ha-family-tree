@@ -46,14 +46,22 @@ MAX_NAME: Final = 200
 MAX_NOTES: Final = 10000
 MAX_URL: Final = 2000
 MAX_SEARCH: Final = 100
+MAX_PHOTO_BYTES: Final = 5 * 1024 * 1024  # 5 MiB
+MAX_PHOTOS_PER_PERSON: Final = 50
+MAX_CAPTION: Final = 500
+MAX_MEDIA_TOTAL_BYTES: Final = 500 * 1024 * 1024  # 500 MiB per tree
+MAX_PHOTO_PIXELS: Final = 20_000_000
+MAX_PHOTO_DIMENSION: Final = 8000
 # Biological lineage walks (and parent-cycle checks) never exceed this depth.
 MAX_LINEAGE_GENERATIONS: Final = 64
+MEDIA_DIR_NAME: Final = "media"
+ENTITY_ID_HEX_LEN: Final = 32
 
 # Storage paths relative to HA config
 DATA_DIR_NAME: Final = "family_tree"
 DB_FILENAME: Final = "family_tree.db"
 GAZETTEER_DB_FILENAME: Final = "gazetteer.db"
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
 
 # Events
 EVENT_BIRTHDAY: Final = f"{DOMAIN}_birthday"
