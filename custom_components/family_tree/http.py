@@ -229,13 +229,18 @@ class FamilyTreePersonMediaUploadView(HomeAssistantView):
                     if part is None:
                         break
                     chunk = await part.read(decode=False)
+                    if not chunk:
+                        continue
                     if len(chunk) > MAX_PHOTO_BYTES:
                         return self.json_message(
                             "File too large",
                             HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
                         )
-                    data = chunk
-                    filename = part.filename or ""
+                    part_name = part.filename or ""
+                    if part_name or data is None:
+                        data = chunk
+                        if part_name:
+                            filename = part_name
             else:
                 body = await request.read()
                 if len(body) > MAX_PHOTO_BYTES:
@@ -273,8 +278,8 @@ class FamilyTreePersonMediaUploadView(HomeAssistantView):
             return self.json_message("Not found", HTTPStatus.NOT_FOUND)
         except OverflowError as err:
             return self.json_message(str(err), HTTPStatus.BAD_REQUEST)
-        except ValueError:
-            return self.json_message("Invalid image", HTTPStatus.BAD_REQUEST)
+        except ValueError as err:
+            return self.json_message(str(err) or "Invalid image", HTTPStatus.BAD_REQUEST)
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Media upload failed for person %s", person_id)
             return self.json_message("Upload failed", HTTPStatus.BAD_REQUEST)

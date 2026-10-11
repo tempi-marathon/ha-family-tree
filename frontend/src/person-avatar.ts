@@ -15,12 +15,9 @@ const SIZE_PX: Record<AvatarSize, number> = {
   lg: 96,
 };
 
-const DECEASED_ICON_PX: Record<AvatarSize, number> = {
-  sm: 10,
-  md: 11,
-  detail: 12,
-  lg: 14,
-};
+function deceasedMarkPx(avatarPx: number): number {
+  return Math.max(10, Math.round(avatarPx * 0.22));
+}
 
 const MDI_BOOKMARK_OUTLINE =
   "M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5A2,2 0 0,0 17,3Z";
@@ -87,7 +84,7 @@ export function renderPersonAvatar(
     opts.title ??
     personDisplayName(person as PersonDto);
   const deceasedMark = opts.deceasedOverlay && !isLiving;
-  const markPx = DECEASED_ICON_PX[size];
+  const markPx = deceasedMarkPx(px);
   const useFull = size === "lg" || size === "detail";
 
   if (profileId) {
@@ -96,13 +93,15 @@ export function renderPersonAvatar(
       style="width:${px}px;height:${px}px"
       title=${title}
     >
-      <ft-authenticated-media-img
-        .hass=${opts.hass}
-        mediaId=${profileId}
-        variant=${useFull ? "full" : "thumb"}
-        width=${px}
-        height=${px}
-      ></ft-authenticated-media-img>
+      <span class="person-avatar__inner">
+        <ft-authenticated-media-img
+          .hass=${opts.hass}
+          mediaId=${profileId}
+          variant=${useFull ? "full" : "thumb"}
+          width=${px}
+          height=${px}
+        ></ft-authenticated-media-img>
+      </span>
       ${deceasedMark ? deceasedMarkSvg(markPx) : nothing}
     </span>`;
   }

@@ -93,6 +93,7 @@ import {
   drawProfileCropPreview,
   loadImageFromBlob,
   loadImageFromFile,
+  encodeImageForUpload,
   renderCroppedJpeg,
   type CropTransform,
 } from "./profile-photo-editor";
@@ -711,9 +712,12 @@ export class FamilyTreePanel extends LitElement {
       const blob = await renderCroppedJpeg(this._profileCropImage, this._profileCropTransform);
       const form = new FormData();
       form.append("file", blob, "profile.jpg");
-      const url = personMediaUploadUrl(this._detail.person.id, this.hass, {
-        set_profile: "1",
-      });
+      const url = apiUrl(
+        this.hass,
+        personMediaUploadUrl(this._detail.person.id, this.hass, {
+          set_profile: "1",
+        }),
+      );
       const resp = await fetch(url, {
         method: "POST",
         body: form,
@@ -721,7 +725,9 @@ export class FamilyTreePanel extends LitElement {
         headers: await this._authHeaders(),
       });
       if (!resp.ok) {
-        throw new Error(`Upload failed (${resp.status})`);
+        throw new Error(
+          await this._uploadErrorMessage(resp, `Upload failed (${resp.status})`),
+        );
       }
       await this._loadPersonMedia();
       await this._refreshAll();
@@ -738,17 +744,21 @@ export class FamilyTreePanel extends LitElement {
   private async _uploadPersonPhoto(file: File) {
     if (!this.hass || !this._detail || !this._canWrite()) return;
     const personId = this._detail.person.id;
-    const form = new FormData();
-    form.append("file", file);
     try {
-      const resp = await fetch(personMediaUploadUrl(personId, this.hass), {
+      const blob = await encodeImageForUpload(file);
+      const form = new FormData();
+      const baseName = file.name.replace(/\.[^.]+$/, "") || "photo";
+      form.append("file", blob, `${baseName}.jpg`);
+      const resp = await fetch(apiUrl(this.hass, personMediaUploadUrl(personId, this.hass)), {
         method: "POST",
         body: form,
         credentials: "same-origin",
         headers: await this._authHeaders(),
       });
       if (!resp.ok) {
-        throw new Error(`Upload failed (${resp.status})`);
+        throw new Error(
+          await this._uploadErrorMessage(resp, `Upload failed (${resp.status})`),
+        );
       }
       await this._loadPersonMedia();
       await this._refreshAll();
@@ -1695,6 +1705,16 @@ export class FamilyTreePanel extends LitElement {
 
   private async _authHeaders(): Promise<Record<string, string>> {
     return hassAuthHeaders(this.hass);
+  }
+
+  private async _uploadErrorMessage(resp: Response, fallback: string): Promise<string> {
+    try {
+      const body = (await resp.json()) as { message?: string };
+      if (body.message) return body.message;
+    } catch {
+      /* not JSON */
+    }
+    return fallback;
   }
 
   private async _previewGedcom(file: File) {
@@ -2673,7 +2693,9 @@ export class FamilyTreePanel extends LitElement {
   private _eventTypeLabel(ev: EventDto): string {
     const relKey = this._relatedEventTemplate(ev);
     if (relKey) {
-      return this._tt(relKey).replace("%s", ev.related_person_name || "");
+      const name = ev.related_person_name || "";
+      const prefix = (this._tt(relKey).split("%s")[0] || this._tt(relKey)).trimEnd();
+      return name ? `${prefix} — ${name}` : prefix;
     }
     return this._plainEventTypeLabel(ev.type);
   }
@@ -2700,7 +2722,7 @@ export class FamilyTreePanel extends LitElement {
     }
     const relKey = this._relatedEventTemplate(ev);
     if (relKey && ev.related_person_id) {
-      const label = (this._tt(relKey).split("%s")[0] || "").trimEnd();
+      const label = (this._tt(relKey).split("%s")[0] || this._tt(relKey)).trimEnd();
       return html`<span class="event-card-title"
         ><strong>${label}</strong> —
         ${this._personLink(
@@ -5131,7 +5153,8 @@ export class FamilyTreePanel extends LitElement {
                   })}
                     <span class="dialog-preview-head-text">
                       <span class="dialog-title-text"
-                        >${personDisplayName(preview.person)}</span
+                        >${this._deceasedIcon(preview.person.is_living)}
+                        ${personDisplayName(preview.person)}</span
                       >
                       ${this._lineageBadge(
                         preview.person.id,
@@ -5760,6 +5783,9 @@ export class FamilyTreePanel extends LitElement {
     }
     .event-card-title .linkish {
       font-weight: 400;
+      padding: 0;
+      min-height: 0;
+      gap: 0;
     }
     .event-card-desc { margin-top: 6px; }
     .import-counts li { justify-content: space-between; }
@@ -5850,7 +5876,7 @@ export class FamilyTreePanel extends LitElement {
       display: inline-flex;
       vertical-align: middle;
     }
-    .deceased-icon svg { width: 14px; height: 14px; }
+    .deceased-icon svg { width: 1em; height: 1em; }
     .person-card-head {
       display: flex;
       align-items: center;
@@ -5904,15 +5930,24 @@ export class FamilyTreePanel extends LitElement {
       justify-content: center;
       border-radius: 50%;
       flex-shrink: 0;
-      overflow: hidden;
-      overflow: hidden;
+      overflow: visible;
       box-sizing: border-box;
       border: 1px solid var(--divider-color);
       font-weight: 600;
       font-size: 0.75rem;
       line-height: 1;
     }
-    .person-avatar img {
+    .person-avatar__inner {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .person-avatar img,
+    .person-avatar ft-authenticated-media-img {
       width: 100%;
       height: 100%;
       object-fit: cover;
