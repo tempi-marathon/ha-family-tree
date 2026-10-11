@@ -626,7 +626,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       ${t}
     </div>`}_treeCard(e,t=``,n={}){return e?W`<div class="tree-card-wrap ${t} ${[n.stemDown?`tree-card-wrap--stem-down`:``,n.stemUp?`tree-card-wrap--stem-up`:``].filter(Boolean).join(` `)}">
       ${this._renderPersonCard(e,{hideSiblings:n.hideSiblings})}
-    </div>`:W`<div class="tree-card-wrap tree-card-wrap--empty"></div>`}_treeAddParentsSlot(e){return W`<div class="tree-card-wrap">
+    </div>`:W`<div class="tree-card-wrap tree-card-wrap--empty"></div>`}_treeAddParentsSlot(e,t=``){return W`<div class="tree-card-wrap ${t}">
       <button
         type="button"
         class="add-slot"
@@ -638,18 +638,17 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
           <button type="button" class="add-slot" @click=${()=>this._openParentsDialog()}>
             ${Z(up)} ${this._tt(`add_parents`)}
           </button>
-        </div>`:this._treeCard(null),T=(e,t)=>e?this._treeCard(e,``,{stemUp:!!e.has_parent}):t&&v?this._treeAddParentsSlot(String(t.id)):this._treeCard(null),E=d>0||!!C,ee=[];for(let e=0;e<l.length;e+=4)ee.push(l.slice(e,e+4).map(e=>e));let te=l.length>0,ne=te||d>0||E;return W`
+        </div>`:this._treeCard(null),T=(e,t,n)=>e?this._treeCard(e,``,{stemUp:!!e.has_parent}):n&&t&&v?this._treeAddParentsSlot(String(t.id)):this._treeCard(null),E=(e,t,n,r)=>{let i=[e,t].filter(Boolean).length;return i===0&&n&&v?W`<div class="tree-grid-pair ${r}">
+          ${this._treeAddParentsSlot(String(n.id),`tree-card-wrap--gp-add`)}
+        </div>`:W`<div class="tree-grid-pair ${r}">
+        ${T(e,n,i===1&&!e)}
+        ${T(t,n,i===1&&!t)}
+      </div>`},ee=d>0||!!C,te=[];for(let e=0;e<l.length;e+=4)te.push(l.slice(e,e+4).map(e=>e));let ne=l.length>0,re=ne||d>0||ee;return W`
       <div class="tree-scroll">
         <div class="tree-box view-tree">
           ${x?this._renderTreeRow(this._tt(`grandparents`),W`<div class="tree-grid-row tree-grid-row--gp">
-                  <div class="tree-grid-pair tree-grid-pair--left">
-                    ${T(g[0],p)}
-                    ${T(g[1],p)}
-                  </div>
-                  <div class="tree-grid-pair tree-grid-pair--right">
-                    ${T(g[2],m)}
-                    ${T(g[3],m)}
-                  </div>
+                  ${E(g[0],g[1],p,`tree-grid-pair--left`)}
+                  ${E(g[2],g[3],m,`tree-grid-pair--right`)}
                 </div>`):G}
           ${this._renderTreeRow(this._tt(`parents`),W`<div class="tree-grid-row tree-grid-row--parents">
               ${this._treeCell(1,2,w(p,!p),`tree-grid-cell--span2`)}
@@ -668,13 +667,13 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
                         </button>`)}
                     </div>`:G}
                 ${this._renderTreeRow(this._tt(`partners`),W`<div
-                    class="tree-grid-row tree-grid-row--partner ${ne?`tree-grid-row--stem-down`:``}"
+                    class="tree-grid-row tree-grid-row--partner ${re?`tree-grid-row--stem-down`:``}"
                   >
                     ${this._treeCell(2,2,W`${(o?.partners||[]).map(e=>W`<div class="tree-card-wrap">
                           ${this._renderPersonCard(e,{subtitle:_})}
                         </div>`)}`,`tree-grid-cell--center`)}
                   </div>`)}
-                ${te?W`${ee.map((e,t)=>{let n=this._childrenBusStyle(e.length),r=e.length>=2;return this._renderTreeRow(t===0?this._tt(`children`):null,W`<div
+                ${ne?W`${te.map((e,t)=>{let n=this._childrenBusStyle(e.length),r=e.length>=2;return this._renderTreeRow(t===0?this._tt(`children`):null,W`<div
                           class="tree-grid-row tree-grid-row--children ${t===0?``:`tree-grid-row--children-cont`} ${r?`tree-grid-row--children-bus`:``}"
                           style=${n}
                         >
@@ -682,7 +681,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
                               ${e.map(e=>this._treeCard(e,``,{hideSiblings:!0,stemDown:Number(e.children_count||0)>0}))}
                             </div>`,`tree-grid-cell--children-group`)}
                         </div>`)})}`:G}
-                ${E?this._renderTreeRow(te?null:this._tt(`children`),W`<div class="tree-grid-row tree-grid-row--add-child">
+                ${ee?this._renderTreeRow(ne?null:this._tt(`children`),W`<div class="tree-grid-row tree-grid-row--add-child">
                         ${this._treeCell(2,2,W`<div class="tree-card-wrap">
                             ${this._renderChildExtras(d,C)}
                           </div>`,`tree-grid-cell--center`)}
@@ -1790,7 +1789,6 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       justify-content: flex-start;
       position: relative;
       min-width: 0;
-      height: 100%;
     }
     .tree-grid-cell--span2,
     .tree-grid-cell--center {
@@ -1802,6 +1800,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       grid-column: span 2;
       position: relative;
       align-items: stretch;
+      justify-items: center;
     }
     .tree-grid-pair--left { grid-column: 1 / 3; }
     .tree-grid-pair--right { grid-column: 3 / 5; }
@@ -1814,6 +1813,9 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       border-top: 2px solid var(--tree-line-color);
       z-index: 0;
       pointer-events: none;
+    }
+    .tree-grid-pair:has(.tree-card-wrap--gp-add)::before {
+      display: none;
     }
     .tree-grid-row--parents::before {
       content: "";
@@ -1865,16 +1867,17 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     }
     .tree-grid-cell--children-group {
       width: 100%;
-      height: 100%;
+      align-items: center;
     }
     .tree-children-group {
       display: flex;
       justify-content: center;
       align-items: stretch;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: var(--tree-gap);
-      width: 100%;
-      height: 100%;
+      width: fit-content;
+      max-width: 100%;
+      margin-inline: auto;
       position: relative;
     }
     .tree-grid-row--children-bus .tree-children-group {
@@ -1899,18 +1902,32 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       position: relative;
       display: flex;
       flex-direction: column;
+      box-sizing: border-box;
       width: var(--tree-card-width);
-      max-width: 100%;
-      flex: 1 1 auto;
-      align-self: stretch;
-      min-height: 100%;
+      min-width: var(--tree-card-width);
+      max-width: var(--tree-card-width);
+      flex: 0 0 auto;
       z-index: 1;
+    }
+    /* Grid cells are column flex: grow height only to match taller siblings on the same row. */
+    .tree-grid-cell > .tree-card-wrap {
+      flex: 1 0 auto;
+    }
+    /* Children group is row flex: lock width; stretch height to tallest sibling. */
+    .tree-children-group > .tree-card-wrap {
+      flex: 0 0 var(--tree-card-width);
+      align-self: stretch;
+    }
+    .tree-card-wrap--gp-add {
+      grid-column: 1 / -1;
+      justify-self: center;
     }
     .tree-card-wrap--empty {
       min-height: 1px;
       width: var(--tree-card-width);
-      flex: 1 1 auto;
-      align-self: stretch;
+      min-width: var(--tree-card-width);
+      max-width: var(--tree-card-width);
+      flex: 0 0 auto;
     }
     .tree-grid-row:not(.tree-grid-row--children):not(.tree-grid-row--add-child) .tree-card-wrap:not(.tree-card-wrap--empty)::after,
     .tree-grid-row--children .tree-card-wrap--stem-down::after {
@@ -1949,7 +1966,13 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       display: flex;
       flex-direction: column;
       min-height: 0;
-      height: 100%;
+    }
+    .tree-card-wrap .add-slot,
+    .tree-card-wrap .more-children-card {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 6px;
     }
     .tree-card-wrap .person-card-footer {
       margin-top: auto;
