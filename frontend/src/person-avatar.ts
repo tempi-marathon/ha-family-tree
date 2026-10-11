@@ -64,6 +64,7 @@ export interface PersonAvatarOptions {
   sex?: string;
   isLiving?: boolean;
   deceasedOverlay?: boolean;
+  deceasedMarkPx?: number;
   title?: string;
 }
 
@@ -84,7 +85,7 @@ export function renderPersonAvatar(
     opts.title ??
     personDisplayName(person as PersonDto);
   const deceasedMark = opts.deceasedOverlay && !isLiving;
-  const markPx = deceasedMarkPx(px);
+  const markPx = opts.deceasedMarkPx ?? deceasedMarkPx(px);
   const useFull = size === "lg" || size === "detail";
 
   if (profileId) {
