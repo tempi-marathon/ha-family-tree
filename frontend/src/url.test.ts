@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isSafeUrl } from "./url";
+import { isHttpUrl, isSafeUrl } from "./url";
+
+describe("isHttpUrl", () => {
+  it("allows http and https only", () => {
+    expect(isHttpUrl("https://example.com/path")).toBe(true);
+    expect(isHttpUrl("http://example.com")).toBe(true);
+    expect(isHttpUrl("mailto:family@example.com")).toBe(false);
+  });
+});
 
 describe("isSafeUrl", () => {
   it("allows http, https, and mailto", () => {

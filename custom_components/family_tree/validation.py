@@ -33,6 +33,17 @@ def normalize_source_url(url: str | None) -> str:
     return text
 
 
+def normalize_http_source_url(url: str | None) -> str:
+    """Return a normalized http(s) source URL or empty string if invalid."""
+    normalized = normalize_source_url(url)
+    if not normalized:
+        return ""
+    parsed = urlparse(normalized)
+    if parsed.scheme.lower() not in _FETCH_URL_SCHEMES:
+        return ""
+    return normalized
+
+
 def normalize_country_codes(raw: object) -> list[str]:
     """Normalize gazetteer country codes to unique ISO 3166-1 alpha-2 values."""
     if not raw:

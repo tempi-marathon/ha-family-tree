@@ -6,6 +6,7 @@ from custom_components.family_tree.validation import (
     is_fetchable_http_url,
     normalize_country_codes,
     normalize_entity_id,
+    normalize_http_source_url,
     normalize_source_url,
 )
 
@@ -23,6 +24,12 @@ def test_normalize_source_url_rejects_javascript_and_data() -> None:
 
 def test_normalize_source_url_enforces_max_length() -> None:
     assert normalize_source_url("https://" + "a" * 3000) == ""
+
+
+def test_normalize_http_source_url_http_https_only() -> None:
+    assert normalize_http_source_url("https://example.com/x") == "https://example.com/x"
+    assert normalize_http_source_url("http://example.com") == "http://example.com"
+    assert normalize_http_source_url("mailto:a@b.co") == ""
 
 
 def test_normalize_country_codes_iso_only() -> None:

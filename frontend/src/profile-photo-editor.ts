@@ -13,19 +13,47 @@ export function defaultCropTransform(): CropTransform {
   return { scale: 1, offsetX: 0, offsetY: 0 };
 }
 
+async function loadImageFromObjectUrl(url: string): Promise<HTMLImageElement> {
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("Could not load image"));
+    img.src = url;
+  });
+  return img;
+}
+
 export async function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   const url = URL.createObjectURL(file);
   try {
-    const img = new Image();
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("Could not load image"));
-      img.src = url;
-    });
-    return img;
+    return await loadImageFromObjectUrl(url);
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+export async function loadImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
+  const url = URL.createObjectURL(blob);
+  try {
+    return await loadImageFromObjectUrl(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Pan offsets are in preview canvas pixels; scale for a different output size. */
+export function cropTransformForCanvasSize(
+  t: CropTransform,
+  fromSize: number,
+  toSize: number,
+): CropTransform {
+  if (fromSize === toSize) return t;
+  const factor = toSize / fromSize;
+  return {
+    scale: t.scale,
+    offsetX: t.offsetX * factor,
+    offsetY: t.offsetY * factor,
+  };
 }
 
 function imageDrawRect(
@@ -69,6 +97,7 @@ export function renderCroppedJpeg(
   img: HTMLImageElement,
   t: CropTransform,
   outputSize = PROFILE_CROP_OUTPUT_PX,
+  previewSize = PROFILE_CROP_CANVAS_PX,
 ): Promise<Blob> {
   const canvas = document.createElement("canvas");
   canvas.width = outputSize;
@@ -77,7 +106,8 @@ export function renderCroppedJpeg(
   if (!ctx) {
     return Promise.reject(new Error("Canvas unavailable"));
   }
-  const { x, y, w, h } = imageDrawRect(img, outputSize, t);
+  const scaled = cropTransformForCanvasSize(t, previewSize, outputSize);
+  const { x, y, w, h } = imageDrawRect(img, outputSize, scaled);
   ctx.drawImage(img, x, y, w, h);
   return new Promise((resolve, reject) => {
     canvas.toBlob(

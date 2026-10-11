@@ -1,6 +1,20 @@
 /** Allowed schemes for citation / source links rendered in the panel. */
 const ALLOWED_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
+/** Return true for http(s) source link URLs (GEDCOM web citations). */
+export function isHttpUrl(href: string): boolean {
+  const text = href.trim();
+  if (!text || text.length > 2000) {
+    return false;
+  }
+  try {
+    const parsed = new URL(text);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** Return true when ``href`` is safe to bind in an anchor element. */
 export function isSafeUrl(href: string): boolean {
   const text = href.trim();

@@ -67,7 +67,7 @@ import {
   isoToGedcomDate,
 } from "./dates_view";
 import { formatHassError } from "./errors";
-import { isSafeUrl } from "./url";
+import { isHttpUrl } from "./url";
 import { type LocaleKey, t } from "./i18n";
 import {
   loadPanelViewState,
@@ -86,11 +86,12 @@ import { nodeName } from "./tree_view";
 import { renderPersonAvatar } from "./person-avatar";
 import { hassAuthHeaders } from "./auth";
 import "./authenticated-media-img";
-import { apiUrl } from "./media";
+import { apiUrl, personMediaApiPath } from "./media";
 import {
   PROFILE_CROP_CANVAS_PX,
   defaultCropTransform,
   drawProfileCropPreview,
+  loadImageFromBlob,
   loadImageFromFile,
   renderCroppedJpeg,
   type CropTransform,
@@ -607,12 +608,34 @@ export class FamilyTreePanel extends LitElement {
 
   private _openProfilePhotoEditor() {
     if (!this._canWrite()) return;
-    this._profileCropImage = null;
-    this._profileCropHasImage = false;
-    this._profileCropTransform = defaultCropTransform();
+    this._resetProfileCropState();
     this._error = "";
     this._dialogMode = "profilePhoto";
     this._dialogOpen = true;
+    void this._bootstrapProfilePhotoEditor();
+  }
+
+  private async _bootstrapProfilePhotoEditor() {
+    const profileId = this._detail?.person.profile_media_id;
+    if (!profileId || !this.hass) return;
+    const path = personMediaApiPath(profileId, "full");
+    if (!path) return;
+    try {
+      const resp = await fetch(path, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: await this._authHeaders(),
+      });
+      if (!resp.ok) return;
+      const blob = await resp.blob();
+      this._profileCropImage = await loadImageFromBlob(blob);
+      this._profileCropTransform = defaultCropTransform();
+      this._profileCropHasImage = true;
+      await this.updateComplete;
+      this._redrawProfileCropCanvas();
+    } catch {
+      /* user can choose a new image */
+    }
   }
 
   private _resetProfileCropState() {
@@ -2655,19 +2678,44 @@ export class FamilyTreePanel extends LitElement {
     return this._plainEventTypeLabel(ev.type);
   }
 
+  private _renderEventPartnerLinks(partners: { id: string; name: string }[]) {
+    return partners.map((p, i) =>
+      i === 0
+        ? this._personLink(p, { preview: true })
+        : html` & ${this._personLink(p, { preview: true })}`,
+    );
+  }
+
   private _renderEventTypeHeading(ev: EventDto) {
+    const unionTypes = new Set(["marriage", "divorce", "partnership"]);
+    if (unionTypes.has(ev.type)) {
+      const partners = this._unionEventPartners(ev);
+      const label = this._plainEventTypeLabel(ev.type);
+      if (partners.length) {
+        return html`<span class="event-card-title"
+          ><strong>${label}</strong> — ${this._renderEventPartnerLinks(partners)}</span
+        >`;
+      }
+      return html`<strong>${label}</strong>`;
+    }
     const relKey = this._relatedEventTemplate(ev);
     if (relKey && ev.related_person_id) {
-      const prefix = this._tt(relKey).split("%s")[0] || "";
-      return html`${prefix}${this._personLink(
-        {
-          id: ev.related_person_id,
-          name: ev.related_person_name || ev.related_person_id,
-        },
-        { preview: true },
-      )}`;
+      const label = (this._tt(relKey).split("%s")[0] || "").trimEnd();
+      return html`<span class="event-card-title"
+        ><strong>${label}</strong> —
+        ${this._personLink(
+          {
+            id: ev.related_person_id,
+            name: ev.related_person_name || ev.related_person_id,
+          },
+          { preview: true },
+        )}</span
+      >`;
     }
-    return this._eventTypeLabel(ev);
+    if (relKey) {
+      return html`<strong>${this._eventTypeLabel(ev)}</strong>`;
+    }
+    return html`<strong>${this._plainEventTypeLabel(ev.type)}</strong>`;
   }
 
   private _formatUnionDate(dateText: string | null | undefined, lang?: string): string {
@@ -2805,6 +2853,7 @@ export class FamilyTreePanel extends LitElement {
     const partnerRefs =
       unionTypes.has(ev.type) ? this._unionEventPartners(ev) : [];
     const partnerNamesJoined = partnerRefs.map((p) => p.name).join(" & ");
+    const titleShowsPartners = unionTypes.has(ev.type) && partnerRefs.length > 0;
     const desc = (ev.description || "").trim();
     const showDesc =
       desc &&
@@ -2813,7 +2862,7 @@ export class FamilyTreePanel extends LitElement {
     return html`
       <div class="event-card">
         <div class="event-card-head">
-          <strong>${this._renderEventTypeHeading(ev)}</strong>
+          ${this._renderEventTypeHeading(ev)}
           ${canEdit
             ? html`<span class="row-actions">
                 <button class="linkish" @click=${() => this._openEditEvent(ev)}>${this._tt("edit")}</button>
@@ -2823,13 +2872,9 @@ export class FamilyTreePanel extends LitElement {
         </div>
         <div class="event-card-meta">${formatEventDate(ev, lang) || formatGedcomDate(ev.date_text)}</div>
         ${ev.place_name ? html`<div class="event-card-meta">${ev.place_name}</div>` : nothing}
-        ${partnerRefs.length
+        ${partnerRefs.length && !titleShowsPartners
           ? html`<div class="event-card-meta">
-              ${partnerRefs.map((p, i) =>
-                i === 0
-                  ? this._personLink(p, { preview: true })
-                  : html` & ${this._personLink(p, { preview: true })}`,
-              )}
+              ${this._renderEventPartnerLinks(partnerRefs)}
             </div>`
           : nothing}
         ${showDesc ? html`<div class="event-card-desc">${desc}</div>` : nothing}
@@ -3702,8 +3747,8 @@ export class FamilyTreePanel extends LitElement {
     this._citationForm = {
       title: String(citation?.source_title || ""),
       url: String(citation?.source_url || ""),
-      author: "",
-      repository: "",
+      author: String(citation?.source_author || ""),
+      repository: String(citation?.source_repository || ""),
       detail: String(citation?.detail || ""),
       source_id: String(citation?.source_id || ""),
     };
@@ -3717,6 +3762,11 @@ export class FamilyTreePanel extends LitElement {
     const title = (this._citationForm.title || "").trim();
     if (!title && !this._citationForm.source_id) {
       this._error = this._tt("field_required");
+      return;
+    }
+    const urlTrim = (this._citationForm.url || "").trim();
+    if (urlTrim && !isHttpUrl(urlTrim)) {
+      this._error = this._tt("source_url_invalid");
       return;
     }
     this._saving = true;
@@ -3770,14 +3820,20 @@ export class FamilyTreePanel extends LitElement {
         ${citations.map((c) => {
           const title = String(c.source_title || "Source");
           const url = String(c.source_url || "");
+          const author = String(c.source_author || "").trim();
+          const repository = String(c.source_repository || "").trim();
+          const metaParts = [author, repository].filter(Boolean);
           const titleNode =
-            url && isSafeUrl(url)
+            url && isHttpUrl(url)
               ? html`<a href=${url} target="_blank" rel="noopener">${title}</a>`
               : html`<strong>${title}</strong>`;
           return html`<li class="source-row">
             <span class="source-row-main">
               ${titleNode}
               ${c.detail ? html`<span class="muted"> — ${c.detail}</span>` : nothing}
+              ${metaParts.length
+                ? html`<span class="muted source-row-extra">${metaParts.join(" · ")}</span>`
+                : nothing}
             </span>
             ${write
               ? html`<span class="row-actions">
@@ -4019,7 +4075,7 @@ export class FamilyTreePanel extends LitElement {
         : nothing}
       ${linkCards}
       <h3 class="settings-subhead">${this._tt("this_is_me")}</h3>
-      <p class="muted">${userName}</p>
+      ${myLinkInGrid ? nothing : html`<p class="muted settings-me-username">${userName}</p>`}
       <p class="lineage-legend muted">
         <span class="lineage-marker" aria-hidden="true">${icon(MDI_ACCOUNT_HEART)}</span>
         ${this._tt("settings_lineage_help")}
@@ -4128,7 +4184,7 @@ export class FamilyTreePanel extends LitElement {
           : html`<p class="muted">${this._tt("read_only")}</p>`}
         ${this._importStatus ? html`<p class="muted">${this._importStatus}</p>` : nothing}
       </div>
-      <div class="form-stack">
+      <div class="form-stack settings-gedcom-export">
         <span class="form-stack-title">${this._tt("export_gedcom")}</span>
         <p class="muted">${this._tt("settings_gedcom_export_hint")}</p>
         ${mdButton(this._tt("export_gedcom"), {
@@ -5066,12 +5122,22 @@ export class FamilyTreePanel extends LitElement {
           @click=${(e: Event) => e.stopPropagation()}
         >
           <div class="dialog-header">
-            <h2>
+            <h2 class=${mode === "preview" && preview ? "dialog-preview-head" : ""}>
               ${mode === "preview" && preview
-                ? html`${this._deceasedIcon(preview.person.is_living)}
-                    ${this._sexIconBadge(preview.person.sex)}
-                    <span class="dialog-title-text">${personDisplayName(preview.person)}</span>
-                    ${this._lineageBadge(preview.person.id, personDisplayName(preview.person))}`
+                ? html`${renderPersonAvatar(preview.person, {
+                    size: "md",
+                    hass: this.hass,
+                    deceasedOverlay: true,
+                  })}
+                    <span class="dialog-preview-head-text">
+                      <span class="dialog-title-text"
+                        >${personDisplayName(preview.person)}</span
+                      >
+                      ${this._lineageBadge(
+                        preview.person.id,
+                        personDisplayName(preview.person),
+                      )}
+                    </span>`
                 : dialogTitle}
             </h2>
             <button
@@ -5285,6 +5351,13 @@ export class FamilyTreePanel extends LitElement {
     .source-row-main {
       flex: 1;
       min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .source-row-extra {
+      display: block;
+      font-size: 0.85em;
     }
     .block { margin-bottom: 20px; }
     .block h3 { margin: 0 0 8px; font-size: 1.05rem; font-weight: 500; }
@@ -5684,6 +5757,9 @@ export class FamilyTreePanel extends LitElement {
     }
     .event-card-head {
       display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    }
+    .event-card-title .linkish {
+      font-weight: 400;
     }
     .event-card-desc { margin-top: 6px; }
     .import-counts li { justify-content: space-between; }
@@ -6149,6 +6225,18 @@ export class FamilyTreePanel extends LitElement {
       flex-wrap: wrap;
     }
     .dialog-title-text { min-width: 0; }
+    .dialog-preview-head {
+      align-items: center;
+      gap: 12px;
+    }
+    .dialog-preview-head-text {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      flex: 1;
+    }
     .dialog-close {
       flex-shrink: 0;
       margin: -8px -8px -8px 0;
@@ -6235,6 +6323,26 @@ export class FamilyTreePanel extends LitElement {
       display: flex;
       flex-direction: column;
       gap: 12px;
+    }
+    .settings-gedcom-export {
+      border-top: 1px solid var(--divider-color);
+      padding-top: 16px;
+      margin-top: 4px;
+    }
+    .settings-me-body {
+      gap: 8px;
+    }
+    .settings-me-body .settings-subhead {
+      margin: 12px 0 0;
+    }
+    .settings-me-body .settings-subhead:first-of-type {
+      margin-top: 0;
+    }
+    .settings-me-body p {
+      margin: 0;
+    }
+    .settings-me-username {
+      margin: 0;
     }
     .dialog label {
       display: flex;
