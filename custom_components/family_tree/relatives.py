@@ -6,7 +6,7 @@ from typing import Any
 
 from .db import Database
 from .models import EventType, Person, SubjectType
-from .names import display_name, formal_subtitle, full_name
+from .names import display_name, formal_subtitle
 from .repository import Repository
 
 
