@@ -624,28 +624,36 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     </div>`}_renderTreeRow(e,t){return W`<div class="gen-row">
       <span class="gen-label muted ${e?``:`gen-label--empty`}">${e??``}</span>
       ${t}
-    </div>`}_treeCard(e,t=``){return e?W`<div class="tree-card-wrap ${t}">
-      ${this._renderPersonCard(e)}
-    </div>`:W`<div class="tree-card-wrap tree-card-wrap--empty"></div>`}_treeCell(e,t,n,r=``){return W`<div class="tree-grid-cell ${r}" style=${e===1&&t===1?``:`grid-column:${e}/span ${t}`}>${n}</div>`}_childrenBusStyle(e){if(e<2)return``;let t=1156,n=e*280+(e-1)*12,r=(t-n)/2,i=r+n;return`--tree-bus-left:${(r+140)/t*100}%;--tree-bus-right:${(t-(i-140))/t*100}%`}_grandparentSlots(e,t){let n=t.find(e=>e.sex===`male`)||t[0],r=t.find(e=>e.sex===`female`&&e!==n)||t.find(e=>e!==n)||null,i=n&&e?.grandparents?.[String(n.id)]||[],a=r&&e?.grandparents?.[String(r.id)]||[],o=this._sortParents(i),s=this._sortParents(a);return[o[0]||null,o[1]||null,s[0]||null,s[1]||null]}_renderTreeTab(e){let t=e.person,n=e.tree,r=this.hass?.language,i=n?.partners||[],a=Math.min(this._treeUnion,Math.max(0,i.length-1)),o=i[a],s=Number(n?.person?.sibling_count||n?.siblings?.length||0),c={id:t.id,name:Y(t),given_names:t.given_names,call_name:t.call_name,surname_prefix:t.surname_prefix,surname:t.surname,sex:t.sex,is_living:t.is_living,sibling_count:s,...n?.person||{}},l=o?.children||[],u=o?.known_children_count,d=u!=null&&u>l.length?u-l.length:0,f=this._sortParents(n?.parents||[]),p=f.find(e=>e.sex===`male`)||f[0],m=f.find(e=>e.sex===`female`&&e!==p)||f.find(e=>e!==p)||null,h=this._canWrite()&&f.length<2,g=this._grandparentSlots(n,f),_=this._unionMetaSubtitle(o,r),v=String(o?.partners?.[0]?.id||``),y=this._canWrite()?()=>this._openAddRelation({kind:`child`,personId:t.id,unionId:o?.union_id,coParentId:v}):void 0,b=(e,t)=>e?this._treeCard(e):h&&t?W`<div class="tree-card-wrap">
+    </div>`}_treeCard(e,t=``,n={}){return e?W`<div class="tree-card-wrap ${t} ${[n.stemDown?`tree-card-wrap--stem-down`:``,n.stemUp?`tree-card-wrap--stem-up`:``].filter(Boolean).join(` `)}">
+      ${this._renderPersonCard(e,{hideSiblings:n.hideSiblings})}
+    </div>`:W`<div class="tree-card-wrap tree-card-wrap--empty"></div>`}_treeAddParentsSlot(e){return W`<div class="tree-card-wrap">
+      <button
+        type="button"
+        class="add-slot"
+        @click=${()=>{this._openPerson(e).then(()=>this._openParentsDialog())}}
+      >
+        ${Z(up)} ${this._tt(`add_parents`)}
+      </button>
+    </div>`}_treeCell(e,t,n,r=``){return W`<div class="tree-grid-cell ${r}" style=${e===1&&t===1?``:`grid-column:${e}/span ${t}`}>${n}</div>`}_childrenBusStyle(e){if(e<2)return``;let t=1156,n=e*280+(e-1)*12,r=(t-n)/2,i=r+n;return`--tree-bus-left:${(r+140)/t*100}%;--tree-bus-right:${(t-(i-140))/t*100}%`}_grandparentSlots(e,t){let n=t.find(e=>e.sex===`male`)||t[0],r=t.find(e=>e.sex===`female`&&e!==n)||t.find(e=>e!==n)||null,i=n&&e?.grandparents?.[String(n.id)]||[],a=r&&e?.grandparents?.[String(r.id)]||[],o=this._sortParents(i),s=this._sortParents(a);return[o[0]||null,o[1]||null,s[0]||null,s[1]||null]}_renderTreeTab(e){let t=e.person,n=e.tree,r=this.hass?.language,i=n?.partners||[],a=Math.min(this._treeUnion,Math.max(0,i.length-1)),o=i[a],s=Number(n?.person?.sibling_count||n?.siblings?.length||0),c={id:t.id,name:Y(t),given_names:t.given_names,call_name:t.call_name,surname_prefix:t.surname_prefix,surname:t.surname,sex:t.sex,is_living:t.is_living,sibling_count:s,...n?.person||{}},l=o?.children||[],u=o?.known_children_count,d=u!=null&&u>l.length?u-l.length:0,f=this._sortParents(n?.parents||[]),p=f.find(e=>e.sex===`male`)||f[0],m=f.find(e=>e.sex===`female`&&e!==p)||f.find(e=>e!==p)||null,h=this._canWrite()&&f.length<2,g=this._grandparentSlots(n,f),_=this._unionMetaSubtitle(o,r),v=this._canWrite(),y=[g[0],g[1]].filter(Boolean).length,b=[g[2],g[3]].filter(Boolean).length,x=g.some(Boolean)||v&&(!!p&&y<2||!!m&&b<2),S=String(o?.partners?.[0]?.id||``),C=v?()=>this._openAddRelation({kind:`child`,personId:t.id,unionId:o?.union_id,coParentId:S}):void 0,w=(e,t)=>e?this._treeCard(e):h&&t?W`<div class="tree-card-wrap">
           <button type="button" class="add-slot" @click=${()=>this._openParentsDialog()}>
             ${Z(up)} ${this._tt(`add_parents`)}
           </button>
-        </div>`:this._treeCard(null),x=d>0||!!y,S=[];for(let e=0;e<l.length;e+=4)S.push(l.slice(e,e+4).map(e=>e));let C=l.length>0,w=C||d>0||x;return W`
+        </div>`:this._treeCard(null),T=(e,t)=>e?this._treeCard(e,``,{stemUp:!!e.has_parent}):t&&v?this._treeAddParentsSlot(String(t.id)):this._treeCard(null),E=d>0||!!C,ee=[];for(let e=0;e<l.length;e+=4)ee.push(l.slice(e,e+4).map(e=>e));let te=l.length>0,ne=te||d>0||E;return W`
       <div class="tree-scroll">
         <div class="tree-box view-tree">
-          ${g.some(Boolean)?this._renderTreeRow(this._tt(`grandparents`),W`<div class="tree-grid-row tree-grid-row--gp">
+          ${x?this._renderTreeRow(this._tt(`grandparents`),W`<div class="tree-grid-row tree-grid-row--gp">
                   <div class="tree-grid-pair tree-grid-pair--left">
-                    ${this._treeCard(g[0])}
-                    ${this._treeCard(g[1])}
+                    ${T(g[0],p)}
+                    ${T(g[1],p)}
                   </div>
                   <div class="tree-grid-pair tree-grid-pair--right">
-                    ${this._treeCard(g[2])}
-                    ${this._treeCard(g[3])}
+                    ${T(g[2],m)}
+                    ${T(g[3],m)}
                   </div>
                 </div>`):G}
           ${this._renderTreeRow(this._tt(`parents`),W`<div class="tree-grid-row tree-grid-row--parents">
-              ${this._treeCell(1,2,b(p,!p),`tree-grid-cell--span2`)}
-              ${this._treeCell(3,2,b(m??void 0,!m),`tree-grid-cell--span2`)}
+              ${this._treeCell(1,2,w(p,!p),`tree-grid-cell--span2`)}
+              ${this._treeCell(3,2,w(m??void 0,!m),`tree-grid-cell--span2`)}
             </div>`)}
           ${this._renderTreeRow(null,W`<div class="tree-grid-row tree-grid-row--focus">
               ${this._treeCell(2,2,this._treeCard(c),`tree-grid-cell--center tree-grid-cell--stem-down`)}
@@ -660,23 +668,23 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
                         </button>`)}
                     </div>`:G}
                 ${this._renderTreeRow(this._tt(`partners`),W`<div
-                    class="tree-grid-row tree-grid-row--partner ${w?`tree-grid-row--stem-down`:``}"
+                    class="tree-grid-row tree-grid-row--partner ${ne?`tree-grid-row--stem-down`:``}"
                   >
                     ${this._treeCell(2,2,W`${(o?.partners||[]).map(e=>W`<div class="tree-card-wrap">
                           ${this._renderPersonCard(e,{subtitle:_})}
                         </div>`)}`,`tree-grid-cell--center`)}
                   </div>`)}
-                ${C?this._renderTreeRow(this._tt(`children`),W`${S.map((e,t)=>{let n=this._childrenBusStyle(e.length),r=e.length>=2;return W`<div
+                ${te?W`${ee.map((e,t)=>{let n=this._childrenBusStyle(e.length),r=e.length>=2;return this._renderTreeRow(t===0?this._tt(`children`):null,W`<div
                           class="tree-grid-row tree-grid-row--children ${t===0?``:`tree-grid-row--children-cont`} ${r?`tree-grid-row--children-bus`:``}"
                           style=${n}
                         >
                           ${this._treeCell(1,4,W`<div class="tree-children-group">
-                              ${e.map(e=>this._treeCard(e))}
+                              ${e.map(e=>this._treeCard(e,``,{hideSiblings:!0,stemDown:Number(e.children_count||0)>0}))}
                             </div>`,`tree-grid-cell--children-group`)}
-                        </div>`})}`):G}
-                ${x?this._renderTreeRow(C?null:this._tt(`children`),W`<div class="tree-grid-row tree-grid-row--add-child">
+                        </div>`)})}`:G}
+                ${E?this._renderTreeRow(te?null:this._tt(`children`),W`<div class="tree-grid-row tree-grid-row--add-child">
                         ${this._treeCell(2,2,W`<div class="tree-card-wrap">
-                            ${this._renderChildExtras(d,y)}
+                            ${this._renderChildExtras(d,C)}
                           </div>`,`tree-grid-cell--center`)}
                       </div>`):G}
               </div>`:this._canWrite()?this._renderTreeRow(this._tt(`partners`),W`<div class="tree-grid-row">
@@ -1772,6 +1780,9 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     .tree-grid-row--children-cont::before {
       display: none;
     }
+    .tree-grid-row--gp {
+      padding-top: var(--tree-connector);
+    }
     .tree-grid-cell {
       display: flex;
       flex-direction: column;
@@ -1779,6 +1790,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       justify-content: flex-start;
       position: relative;
       min-width: 0;
+      height: 100%;
     }
     .tree-grid-cell--span2,
     .tree-grid-cell--center {
@@ -1841,7 +1853,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     .tree-grid-row--partner {
       padding-bottom: calc(var(--tree-row-gap) / 2);
     }
-    .tree-grid-row--children::before {
+    .tree-grid-row--children-bus::before {
       content: "";
       position: absolute;
       top: 0;
@@ -1853,13 +1865,16 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     }
     .tree-grid-cell--children-group {
       width: 100%;
+      height: 100%;
     }
     .tree-children-group {
       display: flex;
       justify-content: center;
+      align-items: stretch;
       flex-wrap: wrap;
       gap: var(--tree-gap);
       width: 100%;
+      height: 100%;
       position: relative;
     }
     .tree-grid-row--children-bus .tree-children-group {
@@ -1886,18 +1901,34 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       flex-direction: column;
       width: var(--tree-card-width);
       max-width: 100%;
-      flex: 0 0 auto;
+      flex: 1 1 auto;
+      align-self: stretch;
+      min-height: 100%;
       z-index: 1;
     }
     .tree-card-wrap--empty {
       min-height: 1px;
       width: var(--tree-card-width);
-      flex: 0 0 auto;
+      flex: 1 1 auto;
+      align-self: stretch;
     }
-    .tree-grid-row:not(.tree-grid-row--children):not(.tree-grid-row--add-child) .tree-card-wrap:not(.tree-card-wrap--empty)::after {
+    .tree-grid-row:not(.tree-grid-row--children):not(.tree-grid-row--add-child) .tree-card-wrap:not(.tree-card-wrap--empty)::after,
+    .tree-grid-row--children .tree-card-wrap--stem-down::after {
       content: "";
       position: absolute;
       bottom: calc(-1 * var(--tree-connector));
+      left: 50%;
+      margin-left: -1px;
+      width: 0;
+      height: var(--tree-connector);
+      border-left: 2px solid var(--tree-line-color);
+      z-index: 0;
+      pointer-events: none;
+    }
+    .tree-grid-row--gp .tree-card-wrap--stem-up::before {
+      content: "";
+      position: absolute;
+      top: calc(-1 * var(--tree-connector));
       left: 50%;
       margin-left: -1px;
       width: 0;
@@ -1918,6 +1949,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       display: flex;
       flex-direction: column;
       min-height: 0;
+      height: 100%;
     }
     .tree-card-wrap .person-card-footer {
       margin-top: auto;
