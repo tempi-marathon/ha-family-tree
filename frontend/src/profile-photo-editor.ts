@@ -93,6 +93,37 @@ export function drawProfileCropPreview(
   ctx.stroke();
 }
 
+/** Scale down if needed and encode as JPEG for gallery upload. */
+export async function encodeImageForUpload(file: File, maxEdge = 2048): Promise<Blob> {
+  const img = await loadImageFromFile(file);
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (w <= 0 || h <= 0) {
+    throw new Error("Invalid image dimensions");
+  }
+  const scale = Math.min(1, maxEdge / Math.max(w, h));
+  const outW = Math.max(1, Math.round(w * scale));
+  const outH = Math.max(1, Math.round(h * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Canvas unavailable");
+  }
+  ctx.drawImage(img, 0, 0, outW, outH);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Export failed"));
+      },
+      "image/jpeg",
+      0.9,
+    );
+  });
+}
+
 export function renderCroppedJpeg(
   img: HTMLImageElement,
   t: CropTransform,
