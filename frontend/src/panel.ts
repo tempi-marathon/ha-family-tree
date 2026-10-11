@@ -3462,8 +3462,8 @@ export class FamilyTreePanel extends LitElement {
     </div>`;
   }
 
-  private _treeAddParentsSlot(parentId: string) {
-    return html`<div class="tree-card-wrap">
+  private _treeAddParentsSlot(parentId: string, extraClass = "") {
+    return html`<div class="tree-card-wrap ${extraClass}">
       <button
         type="button"
         class="add-slot"
@@ -3599,16 +3599,36 @@ export class FamilyTreePanel extends LitElement {
     const renderGpSlot = (
       gp: Record<string, unknown> | null,
       sideParent: Record<string, unknown> | undefined | null,
+      allowAdd: boolean,
     ) => {
       if (gp) {
         return this._treeCard(gp, "", {
           stemUp: Boolean(gp.has_parent),
         });
       }
-      if (sideParent && canWrite) {
+      if (allowAdd && sideParent && canWrite) {
         return this._treeAddParentsSlot(String(sideParent.id));
       }
       return this._treeCard(null);
+    };
+
+    /** One Add parents card when a side has zero grandparents; otherwise fill missing slots. */
+    const renderGpPair = (
+      gp0: Record<string, unknown> | null,
+      gp1: Record<string, unknown> | null,
+      sideParent: Record<string, unknown> | undefined | null,
+      pairClass: string,
+    ) => {
+      const knownCount = [gp0, gp1].filter(Boolean).length;
+      if (knownCount === 0 && sideParent && canWrite) {
+        return html`<div class="tree-grid-pair ${pairClass}">
+          ${this._treeAddParentsSlot(String(sideParent.id), "tree-card-wrap--gp-add")}
+        </div>`;
+      }
+      return html`<div class="tree-grid-pair ${pairClass}">
+        ${renderGpSlot(gp0, sideParent, knownCount === 1 && !gp0)}
+        ${renderGpSlot(gp1, sideParent, knownCount === 1 && !gp1)}
+      </div>`;
     };
 
     const showChildExtras = unknownCount > 0 || Boolean(onAddChild);
@@ -3628,14 +3648,8 @@ export class FamilyTreePanel extends LitElement {
             ? this._renderTreeRow(
                 this._tt("grandparents"),
                 html`<div class="tree-grid-row tree-grid-row--gp">
-                  <div class="tree-grid-pair tree-grid-pair--left">
-                    ${renderGpSlot(gpSlots[0], father)}
-                    ${renderGpSlot(gpSlots[1], father)}
-                  </div>
-                  <div class="tree-grid-pair tree-grid-pair--right">
-                    ${renderGpSlot(gpSlots[2], mother)}
-                    ${renderGpSlot(gpSlots[3], mother)}
-                  </div>
+                  ${renderGpPair(gpSlots[0], gpSlots[1], father, "tree-grid-pair--left")}
+                  ${renderGpPair(gpSlots[2], gpSlots[3], mother, "tree-grid-pair--right")}
                 </div>`,
               )
             : nothing}
@@ -5640,7 +5654,6 @@ export class FamilyTreePanel extends LitElement {
       justify-content: flex-start;
       position: relative;
       min-width: 0;
-      height: 100%;
     }
     .tree-grid-cell--span2,
     .tree-grid-cell--center {
@@ -5652,6 +5665,7 @@ export class FamilyTreePanel extends LitElement {
       grid-column: span 2;
       position: relative;
       align-items: stretch;
+      justify-items: center;
     }
     .tree-grid-pair--left { grid-column: 1 / 3; }
     .tree-grid-pair--right { grid-column: 3 / 5; }
@@ -5664,6 +5678,9 @@ export class FamilyTreePanel extends LitElement {
       border-top: 2px solid var(--tree-line-color);
       z-index: 0;
       pointer-events: none;
+    }
+    .tree-grid-pair:has(.tree-card-wrap--gp-add)::before {
+      display: none;
     }
     .tree-grid-row--parents::before {
       content: "";
@@ -5715,16 +5732,17 @@ export class FamilyTreePanel extends LitElement {
     }
     .tree-grid-cell--children-group {
       width: 100%;
-      height: 100%;
+      align-items: center;
     }
     .tree-children-group {
       display: flex;
       justify-content: center;
       align-items: stretch;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: var(--tree-gap);
-      width: 100%;
-      height: 100%;
+      width: fit-content;
+      max-width: 100%;
+      margin-inline: auto;
       position: relative;
     }
     .tree-grid-row--children-bus .tree-children-group {
@@ -5749,18 +5767,32 @@ export class FamilyTreePanel extends LitElement {
       position: relative;
       display: flex;
       flex-direction: column;
+      box-sizing: border-box;
       width: var(--tree-card-width);
-      max-width: 100%;
-      flex: 1 1 auto;
-      align-self: stretch;
-      min-height: 100%;
+      min-width: var(--tree-card-width);
+      max-width: var(--tree-card-width);
+      flex: 0 0 auto;
       z-index: 1;
+    }
+    /* Grid cells are column flex: grow height only to match taller siblings on the same row. */
+    .tree-grid-cell > .tree-card-wrap {
+      flex: 1 0 auto;
+    }
+    /* Children group is row flex: lock width; stretch height to tallest sibling. */
+    .tree-children-group > .tree-card-wrap {
+      flex: 0 0 var(--tree-card-width);
+      align-self: stretch;
+    }
+    .tree-card-wrap--gp-add {
+      grid-column: 1 / -1;
+      justify-self: center;
     }
     .tree-card-wrap--empty {
       min-height: 1px;
       width: var(--tree-card-width);
-      flex: 1 1 auto;
-      align-self: stretch;
+      min-width: var(--tree-card-width);
+      max-width: var(--tree-card-width);
+      flex: 0 0 auto;
     }
     .tree-grid-row:not(.tree-grid-row--children):not(.tree-grid-row--add-child) .tree-card-wrap:not(.tree-card-wrap--empty)::after,
     .tree-grid-row--children .tree-card-wrap--stem-down::after {
@@ -5799,7 +5831,13 @@ export class FamilyTreePanel extends LitElement {
       display: flex;
       flex-direction: column;
       min-height: 0;
-      height: 100%;
+    }
+    .tree-card-wrap .add-slot,
+    .tree-card-wrap .more-children-card {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 6px;
     }
     .tree-card-wrap .person-card-footer {
       margin-top: auto;
