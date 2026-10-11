@@ -46,7 +46,6 @@ from .models import (
     UnionType,
 )
 from .names import display_name, matches_family_shortcut
-from .validation import normalize_http_source_url
 from .relatives import (
     enrich_event_dict,
     relative_vital_events_for_person,
@@ -57,6 +56,7 @@ from .relatives import (
 from .repository import event_sort_key, vital_summary
 from .shortcuts import normalize_family_shortcuts
 from .stats import compute_stats
+from .validation import normalize_http_source_url
 
 _LOGGER = logging.getLogger(__name__)
 
