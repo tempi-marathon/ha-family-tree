@@ -31,6 +31,7 @@ from .lineage import ancestors, descendants, lineage_map, lineage_relation
 from .media_service import purge_person_media_files, remove_media
 from .models import (
     UNIQUE_PERSON_EVENT_TYPES,
+    Citation,
     Event,
     EventType,
     ParentChild,
@@ -38,13 +39,20 @@ from .models import (
     Person,
     Place,
     Sex,
+    Source,
     SubjectType,
     Union,
     UnionStatus,
     UnionType,
 )
 from .names import display_name, matches_family_shortcut
-from .relatives import enrich_event_dict, siblings_of, tree_for, union_events_for_person
+from .relatives import (
+    enrich_event_dict,
+    relative_vital_events_for_person,
+    siblings_of,
+    tree_for,
+    union_events_for_person,
+)
 from .repository import event_sort_key, vital_summary
 from .shortcuts import normalize_family_shortcuts
 from .stats import compute_stats
@@ -215,6 +223,7 @@ async def ws_persons_get(
         for e in coordinator.repo.list_events(SubjectType.PERSON, person.id):
             events.append(enrich_event_dict(coordinator.repo, e.to_dict()))
         events.extend(union_events_for_person(coordinator.repo, person.id))
+        events.extend(relative_vital_events_for_person(coordinator.repo, person.id))
         events.sort(key=event_sort_key)
         citations = coordinator.repo.list_citations(SubjectType.PERSON, person.id)
         life_events = [
@@ -501,6 +510,207 @@ async def ws_sources_list(
         return {"sources": [s.to_dict() for s in sources]}
 
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/sources/save",
+        vol.Required("title"): _bounded_string(MAX_NAME),
+        vol.Optional("source_id"): str,
+        vol.Optional("url", default=""): str,
+        vol.Optional("author", default=""): str,
+        vol.Optional("repository", default=""): str,
+        vol.Optional("notes", default=""): _bounded_string(MAX_NOTES),
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_sources_save(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+
+    def _run() -> dict[str, Any]:
+        source_id = msg.get("source_id")
+        if source_id:
+            existing = coordinator.repo.get_source(source_id)
+            if existing is None:
+                raise LookupError("Source not found")
+            source = Source(
+                id=existing.id,
+                title=msg["title"],
+                url=msg.get("url") or "",
+                author=msg.get("author") or "",
+                repository=msg.get("repository") or "",
+                notes=msg.get("notes") or "",
+                created_at=existing.created_at,
+            )
+            saved = coordinator.repo.update_source(source)
+        else:
+            source = Source(
+                title=msg["title"],
+                url=msg.get("url") or "",
+                author=msg.get("author") or "",
+                repository=msg.get("repository") or "",
+                notes=msg.get("notes") or "",
+            )
+            saved = coordinator.repo.add_source(source)
+        return {"source": saved.to_dict()}
+
+    try:
+        result = await hass.async_add_executor_job(_run)
+    except LookupError as err:
+        connection.send_error(msg["id"], "not_found", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/sources/delete",
+        vol.Required("source_id"): str,
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_sources_delete(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+    ok = await hass.async_add_executor_job(
+        coordinator.repo.soft_delete_source, msg["source_id"]
+    )
+    if not ok:
+        connection.send_error(msg["id"], "not_found", "Source not found")
+        return
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/citations/save",
+        vol.Required("subject_type"): vol.In([SubjectType.PERSON.value]),
+        vol.Required("subject_id"): str,
+        vol.Optional("citation_id"): str,
+        vol.Optional("source_id"): str,
+        vol.Optional("detail", default=""): _bounded_string(MAX_NOTES),
+        vol.Optional("title"): _bounded_string(MAX_NAME),
+        vol.Optional("url", default=""): str,
+        vol.Optional("author", default=""): str,
+        vol.Optional("repository", default=""): str,
+        vol.Optional("source_notes", default=""): _bounded_string(MAX_NOTES),
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_citations_save(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+
+    def _run() -> dict[str, Any]:
+        source_id = msg.get("source_id")
+        if not source_id:
+            title = (msg.get("title") or "").strip()
+            if not title:
+                raise ValueError("Source title is required")
+            url = (msg.get("url") or "").strip()
+            found = coordinator.repo.find_source_by_url(url) if url else None
+            if found:
+                source_id = found.id
+            else:
+                by_title = coordinator.repo.find_source_by_title(title)
+                if by_title:
+                    source_id = by_title.id
+                else:
+                    source_id = coordinator.repo.add_source(
+                        Source(
+                            title=title,
+                            url=url,
+                            author=msg.get("author") or "",
+                            repository=msg.get("repository") or "",
+                            notes=msg.get("source_notes") or "",
+                        )
+                    ).id
+        citation_id = msg.get("citation_id")
+        subject_type = SubjectType(msg["subject_type"])
+        detail = msg.get("detail") or ""
+        if citation_id:
+            existing = coordinator.repo.get_citation(citation_id)
+            if existing is None:
+                raise LookupError("Citation not found")
+            saved = coordinator.repo.update_citation(
+                Citation(
+                    id=existing.id,
+                    source_id=source_id,
+                    subject_type=subject_type,
+                    subject_id=msg["subject_id"],
+                    detail=detail,
+                )
+            )
+        else:
+            saved = coordinator.repo.add_citation(
+                Citation(
+                    source_id=source_id,
+                    subject_type=subject_type,
+                    subject_id=msg["subject_id"],
+                    detail=detail,
+                )
+            )
+        rows = coordinator.repo.list_citations(subject_type, msg["subject_id"])
+        row = next((r for r in rows if r["id"] == saved.id), None)
+        return {"citation": row or {**saved.to_dict(), "source_title": "", "source_url": ""}}
+
+    try:
+        result = await hass.async_add_executor_job(_run)
+    except LookupError as err:
+        connection.send_error(msg["id"], "not_found", str(err))
+        return
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_info", str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/citations/delete",
+        vol.Required("citation_id"): str,
+        **_OPTIONAL_ENTRY,
+    }
+)
+@websocket_api.async_response
+async def ws_citations_delete(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+    coordinator = _coordinator(hass, msg)
+    ok = await hass.async_add_executor_job(
+        coordinator.repo.delete_citation, msg["citation_id"]
+    )
+    if not ok:
+        connection.send_error(msg["id"], "not_found", "Citation not found")
+        return
+    connection.send_result(msg["id"], {"ok": True})
 
 
 @websocket_api.websocket_command(
@@ -1406,6 +1616,10 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_places_list,
         ws_places_save,
         ws_sources_list,
+        ws_sources_save,
+        ws_sources_delete,
+        ws_citations_save,
+        ws_citations_delete,
         ws_events_save,
         ws_events_delete,
         ws_user_links_list,

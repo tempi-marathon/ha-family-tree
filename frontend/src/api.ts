@@ -90,6 +90,9 @@ export interface EventDto {
   place_name?: string;
   union_id?: string;
   partner_names?: string[];
+  related_person_id?: string;
+  related_person_name?: string;
+  relation?: "child" | "partner";
 }
 
 export interface PlaceDto {
@@ -384,6 +387,52 @@ export async function listSources(
   return msg(hass, "family_tree/sources/list", params) as Promise<{
     sources: Array<Record<string, unknown>>;
   }>;
+}
+
+export async function saveSource(
+  hass: HomeAssistant,
+  data: Record<string, unknown>,
+): Promise<{ source: Record<string, unknown> }> {
+  const { id, source_id, ...rest } = data;
+  const payload = {
+    ...rest,
+    ...(source_id || id ? { source_id: String(source_id || id) } : {}),
+  };
+  return msg(hass, "family_tree/sources/save", payload) as Promise<{
+    source: Record<string, unknown>;
+  }>;
+}
+
+export async function deleteSource(
+  hass: HomeAssistant,
+  sourceId: string,
+): Promise<{ ok: boolean }> {
+  return msg(hass, "family_tree/sources/delete", {
+    source_id: sourceId,
+  }) as Promise<{ ok: boolean }>;
+}
+
+export async function saveCitation(
+  hass: HomeAssistant,
+  data: Record<string, unknown>,
+): Promise<{ citation: Record<string, unknown> }> {
+  const { id, citation_id, ...rest } = data;
+  const payload = {
+    ...rest,
+    ...(citation_id || id ? { citation_id: String(citation_id || id) } : {}),
+  };
+  return msg(hass, "family_tree/citations/save", payload) as Promise<{
+    citation: Record<string, unknown>;
+  }>;
+}
+
+export async function deleteCitation(
+  hass: HomeAssistant,
+  citationId: string,
+): Promise<{ ok: boolean }> {
+  return msg(hass, "family_tree/citations/delete", {
+    citation_id: citationId,
+  }) as Promise<{ ok: boolean }>;
 }
 
 export async function saveEvent(

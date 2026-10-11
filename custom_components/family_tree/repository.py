@@ -904,6 +904,82 @@ class Repository:
 
         return self._mutate(_do)
 
+    def get_citation(self, citation_id: str) -> Citation | None:
+        row = self.db.fetchone(
+            "SELECT * FROM citations WHERE id=?", (citation_id,)
+        )
+        if not row:
+            return None
+        return Citation.from_dict(dict(row))
+
+    def update_citation(self, citation: Citation) -> Citation:
+        def _do() -> Citation:
+            self.db.execute(
+                "UPDATE citations SET source_id=?, subject_type=?, subject_id=?, detail=? "
+                "WHERE id=?",
+                (
+                    citation.source_id,
+                    citation.subject_type.value,
+                    citation.subject_id,
+                    citation.detail,
+                    citation.id,
+                ),
+            )
+            return citation
+
+        return self._mutate(_do)
+
+    def delete_citation(self, citation_id: str) -> bool:
+        def _do() -> bool:
+            cur = self.db.execute("DELETE FROM citations WHERE id=?", (citation_id,))
+            return cur.rowcount > 0
+
+        return self._mutate(_do)
+
+    def update_source(self, source: Source) -> Source:
+        safe_url = normalize_source_url(source.url)
+
+        def _do() -> Source:
+            updated = Source(
+                id=source.id,
+                title=source.title,
+                url=safe_url,
+                author=source.author,
+                repository=source.repository,
+                notes=source.notes,
+                created_at=source.created_at,
+                updated_at=_now(),
+                deleted_at=source.deleted_at,
+            )
+            self.db.execute(
+                "UPDATE sources SET title=?, url=?, author=?, repository=?, notes=?, "
+                "updated_at=?, deleted_at=? WHERE id=?",
+                (
+                    updated.title,
+                    updated.url,
+                    updated.author,
+                    updated.repository,
+                    updated.notes,
+                    updated.updated_at,
+                    updated.deleted_at,
+                    updated.id,
+                ),
+            )
+            return updated
+
+        return self._mutate(_do)
+
+    def soft_delete_source(self, source_id: str) -> bool:
+        def _do() -> bool:
+            cur = self.db.execute(
+                "UPDATE sources SET deleted_at=?, updated_at=? "
+                "WHERE id=? AND deleted_at IS NULL",
+                (_now(), _now(), source_id),
+            )
+            return cur.rowcount > 0
+
+        return self._mutate(_do)
+
     def list_citations(
         self, subject_type: SubjectType, subject_id: str
     ) -> list[dict[str, Any]]:
