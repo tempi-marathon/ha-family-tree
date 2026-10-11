@@ -27,8 +27,8 @@ from .const import (
 from .coordinator import FamilyTreeCoordinator
 from .dates import parse_gedcom_date
 from .helpers import get_coordinator, media_dir, profile_name
-from .media_service import purge_person_media_files, remove_media
 from .lineage import ancestors, descendants, lineage_map, lineage_relation
+from .media_service import purge_person_media_files, remove_media
 from .models import (
     UNIQUE_PERSON_EVENT_TYPES,
     Event,

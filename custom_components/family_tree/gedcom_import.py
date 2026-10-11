@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from .dates import parse_gedcom_date
+from .media_fetch import fetch_http_image
+from .media_service import upload_person_media
 from .models import (
     Citation,
     Event,
@@ -27,8 +29,6 @@ from .models import (
     new_id,
 )
 from .names import split_surname
-from .media_fetch import fetch_http_image
-from .media_service import upload_person_media
 from .repository import Repository
 from .validation import normalize_source_url
 
