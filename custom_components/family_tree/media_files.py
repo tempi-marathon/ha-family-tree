@@ -104,7 +104,7 @@ def process_image_data(data: bytes) -> ProcessedImage:
     if content_type is None:
         raise ValueError("Unsupported image format")
 
-    from PIL import Image
+    from PIL import Image, ImageOps
 
     try:
         img = Image.open(io.BytesIO(data))
@@ -112,6 +112,7 @@ def process_image_data(data: bytes) -> ProcessedImage:
     except OSError as err:
         raise ValueError("Invalid image data") from err
 
+    img = ImageOps.exif_transpose(img)
     width, height = img.size
     if width <= 0 or height <= 0:
         raise ValueError("Invalid image dimensions")

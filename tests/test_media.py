@@ -52,7 +52,7 @@ def test_sniff_jpeg() -> None:
     assert sniff_image_type(b"not an image") is None
 
 
-def test_upload_and_profile(media_repo: tuple[Repository, Path]) -> None:
+def test_upload_does_not_auto_set_profile(media_repo: tuple[Repository, Path]) -> None:
     repo, root = media_repo
     person = Person(given_names="Test", surname="User")
     repo.add_person(person)
@@ -62,8 +62,21 @@ def test_upload_and_profile(media_repo: tuple[Repository, Path]) -> None:
     assert media.id
     loaded = repo.get_person(person.id)
     assert loaded is not None
-    assert loaded.profile_media_id == media.id
+    assert loaded.profile_media_id is None
     assert repo.count_person_media(person.id) == 1
+
+
+def test_upload_set_profile_explicit(media_repo: tuple[Repository, Path]) -> None:
+    repo, root = media_repo
+    person = Person(given_names="Test", surname="User")
+    repo.add_person(person)
+    media = upload_person_media(
+        repo, root, person.id, _tiny_jpeg(), original_filename="x.jpg"
+    )
+    assert repo.set_profile_media(person.id, media.id)
+    loaded = repo.get_person(person.id)
+    assert loaded is not None
+    assert loaded.profile_media_id == media.id
 
 
 def test_set_profile_wrong_person(media_repo: tuple[Repository, Path]) -> None:
@@ -101,3 +114,18 @@ def test_path_containment(media_repo: tuple[Repository, Path]) -> None:
 def test_process_image_rejects_html() -> None:
     with pytest.raises(ValueError):
         process_image_data(b"<html>not image</html>")
+
+
+def test_process_image_exif_transpose() -> None:
+    import io
+
+    from PIL import Image
+
+    img = Image.new("RGB", (4, 6), color=(200, 100, 50))
+    exif = img.getexif()
+    exif[274] = 6
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif.tobytes())
+    processed = process_image_data(buf.getvalue())
+    assert processed.width == 6
+    assert processed.height == 4

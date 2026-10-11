@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { personMediaUrl } from "./media";
+import { apiUrl, personMediaUrl } from "./media";
+import type { HomeAssistant } from "./types";
 
 describe("personMediaUrl", () => {
   it("builds thumb URL for valid id", () => {
@@ -9,5 +10,21 @@ describe("personMediaUrl", () => {
 
   it("rejects invalid ids", () => {
     expect(personMediaUrl("not-valid", "full")).toBe("");
+  });
+
+  it("uses hassUrl when provided", () => {
+    const id = "b".repeat(32);
+    const hass = {
+      hassUrl: (p: string) => `/signed${p}`,
+    } as HomeAssistant;
+    expect(personMediaUrl(id, "thumb", hass)).toBe(
+      `/signed/api/family_tree/media/${id}?variant=thumb`,
+    );
+  });
+});
+
+describe("apiUrl", () => {
+  it("returns path unchanged without hass", () => {
+    expect(apiUrl(undefined, "/api/foo")).toBe("/api/foo");
   });
 });

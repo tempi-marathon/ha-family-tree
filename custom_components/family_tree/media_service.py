@@ -27,7 +27,7 @@ def upload_person_media(
     original_filename: str = "",
     caption: str = "",
     source_url: str = "",
-    set_profile_if_empty: bool = True,
+    set_profile_if_empty: bool = False,
 ) -> PersonMedia:
     """Process bytes, write files, and insert metadata."""
     processed = process_image_data(data)

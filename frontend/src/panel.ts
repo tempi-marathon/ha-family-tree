@@ -82,7 +82,15 @@ import {
 } from "./people_view";
 import { nodeName } from "./tree_view";
 import { renderPersonAvatar } from "./person-avatar";
-import { personMediaUrl } from "./media";
+import { apiUrl, personMediaUrl } from "./media";
+import {
+  PROFILE_CROP_CANVAS_PX,
+  defaultCropTransform,
+  drawProfileCropPreview,
+  loadImageFromFile,
+  renderCroppedJpeg,
+  type CropTransform,
+} from "./profile-photo-editor";
 import type { HomeAssistant } from "./types";
 
 const PANEL_TAG = "family-tree-panel";
@@ -130,7 +138,8 @@ type DialogMode =
   | "preview"
   | "union"
   | "pickPerson"
-  | "parents";
+  | "parents"
+  | "profilePhoto";
 type RelationTarget =
   | { kind: "parent"; personId: string }
   | { kind: "partner"; personId: string }
@@ -176,7 +185,8 @@ function icon(path: string) {
 
 function brandLogo(hass?: HomeAssistant, alt = "") {
   const dark = Boolean(hass?.themes?.darkMode);
-  const src = dark ? BRAND_LOGO_DARK_URL : BRAND_LOGO_URL;
+  const path = dark ? BRAND_LOGO_DARK_URL : BRAND_LOGO_URL;
+  const src = apiUrl(hass, path);
   return html`<img class="brand-logo" src=${src} alt=${alt} height="36" />`;
 }
 
@@ -295,6 +305,15 @@ export class FamilyTreePanel extends LitElement {
   @state() private _shortcutsSaving = false;
   @state() private _personMedia: PersonMediaDto[] = [];
   @state() private _photoLightbox: string | null = null;
+  @state() private _profileCropTransform: CropTransform = defaultCropTransform();
+  @state() private _profileCropHasImage = false;
+
+  private _profileCropImage: HTMLImageElement | null = null;
+  private _profileCropDrag: { active: boolean; lastX: number; lastY: number } = {
+    active: false,
+    lastX: 0,
+    lastY: 0,
+  };
 
   private _unsub: (() => void) | null = null;
   private _placeSearchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -560,13 +579,120 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
+  private _openProfilePhotoEditor() {
+    if (!this._canWrite()) return;
+    this._profileCropImage = null;
+    this._profileCropHasImage = false;
+    this._profileCropTransform = defaultCropTransform();
+    this._error = "";
+    this._dialogMode = "profilePhoto";
+    this._dialogOpen = true;
+  }
+
+  private _resetProfileCropState() {
+    this._profileCropImage = null;
+    this._profileCropHasImage = false;
+    this._profileCropTransform = defaultCropTransform();
+    this._profileCropDrag = { active: false, lastX: 0, lastY: 0 };
+  }
+
+  private _redrawProfileCropCanvas() {
+    const canvas = this.renderRoot.querySelector(
+      "#profile-crop-canvas",
+    ) as HTMLCanvasElement | null;
+    if (!canvas || !this._profileCropImage) return;
+    drawProfileCropPreview(canvas, this._profileCropImage, this._profileCropTransform);
+  }
+
+  private async _onProfilePhotoFileChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    try {
+      this._profileCropImage = await loadImageFromFile(file);
+      this._profileCropTransform = defaultCropTransform();
+      this._profileCropHasImage = true;
+      await this.updateComplete;
+      this._redrawProfileCropCanvas();
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
+  }
+
+  private _onProfileCropPointerDown(e: PointerEvent) {
+    if (!this._profileCropHasImage) return;
+    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
+    this._profileCropDrag = { active: true, lastX: e.clientX, lastY: e.clientY };
+  }
+
+  private _onProfileCropPointerMove(e: PointerEvent) {
+    if (!this._profileCropDrag.active) return;
+    const dx = e.clientX - this._profileCropDrag.lastX;
+    const dy = e.clientY - this._profileCropDrag.lastY;
+    this._profileCropDrag = { active: true, lastX: e.clientX, lastY: e.clientY };
+    this._profileCropTransform = {
+      ...this._profileCropTransform,
+      offsetX: this._profileCropTransform.offsetX + dx,
+      offsetY: this._profileCropTransform.offsetY + dy,
+    };
+    this._redrawProfileCropCanvas();
+  }
+
+  private _onProfileCropPointerUp(e: PointerEvent) {
+    if (!this._profileCropDrag.active) return;
+    this._profileCropDrag = { active: false, lastX: 0, lastY: 0 };
+    try {
+      (e.target as HTMLCanvasElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private _onProfileCropZoom(e: Event) {
+    const v = Number((e.target as HTMLInputElement).value);
+    this._profileCropTransform = { ...this._profileCropTransform, scale: v };
+    this._redrawProfileCropCanvas();
+  }
+
+  private async _saveProfilePhoto() {
+    if (!this.hass || !this._detail || !this._profileCropImage || !this._canWrite()) return;
+    this._saving = true;
+    try {
+      const blob = await renderCroppedJpeg(this._profileCropImage, this._profileCropTransform);
+      const form = new FormData();
+      form.append("file", blob, "profile.jpg");
+      const url = personMediaUploadUrl(this._detail.person.id, this.hass, {
+        set_profile: "1",
+      });
+      const resp = await fetch(url, {
+        method: "POST",
+        body: form,
+        credentials: "same-origin",
+        headers: await this._authHeaders(),
+      });
+      if (!resp.ok) {
+        throw new Error(`Upload failed (${resp.status})`);
+      }
+      await this._loadPersonMedia();
+      await this._refreshAll();
+      this._error = "";
+      this._dialogOpen = false;
+      this._resetProfileCropState();
+    } catch (err) {
+      this._error = formatHassError(err);
+    } finally {
+      this._saving = false;
+    }
+  }
+
   private async _uploadPersonPhoto(file: File) {
     if (!this.hass || !this._detail || !this._canWrite()) return;
     const personId = this._detail.person.id;
     const form = new FormData();
     form.append("file", file);
     try {
-      const resp = await fetch(personMediaUploadUrl(personId), {
+      const resp = await fetch(personMediaUploadUrl(personId, this.hass), {
         method: "POST",
         body: form,
         credentials: "same-origin",
@@ -2222,7 +2348,7 @@ export class FamilyTreePanel extends LitElement {
       <div class="person-card-wrap">
         <button type="button" class="person-card" @click=${() => this._openPerson(p.id)}>
           <div class="person-card-head person-card-head--with-avatar">
-            ${renderPersonAvatar(p, { size: "sm", deceasedOverlay: true })}
+            ${renderPersonAvatar(p, { size: "sm", hass: this.hass, deceasedOverlay: true })}
             <div class="person-card-head-text">
               <div class="person-card-title-row">
                 <div class="person-card-title person-card-title--clamp">
@@ -2294,7 +2420,7 @@ export class FamilyTreePanel extends LitElement {
     const menuOpen = this._rowMenu === p.id;
     return html`<tr>
       <td class="avatar-col">
-        ${renderPersonAvatar(p, { size: "sm", deceasedOverlay: true })}
+        ${renderPersonAvatar(p, { size: "sm", hass: this.hass, deceasedOverlay: true })}
       </td>
       <td>
         <button type="button" class="linkish name-cell" @click=${() => this._openPerson(p.id)}>
@@ -2425,6 +2551,7 @@ export class FamilyTreePanel extends LitElement {
         <div class="person-card-head person-card-head--with-avatar">
           ${renderPersonAvatar(personLike as PersonDto, {
             size: "sm",
+            hass: this.hass,
             deceasedOverlay: compact,
             title,
           })}
@@ -2895,7 +3022,7 @@ export class FamilyTreePanel extends LitElement {
             @click=${() => (this._photoLightbox = null)}
           >
             <img
-              src=${personMediaUrl(this._photoLightbox, "full")}
+              src=${personMediaUrl(this._photoLightbox, "full", this.hass)}
               alt=""
               @click=${(e: Event) => e.stopPropagation()}
             />
@@ -2931,7 +3058,7 @@ export class FamilyTreePanel extends LitElement {
                   class="photo-thumb-btn"
                   @click=${() => (this._photoLightbox = m.id)}
                 >
-                  <img src=${personMediaUrl(m.id, "thumb")} alt="" loading="lazy" />
+                  <img src=${personMediaUrl(m.id, "thumb", this.hass)} alt="" loading="lazy" />
                   ${profileId === m.id
                     ? html`<span class="photo-profile-badge">${this._tt("profile_photo")}</span>`
                     : nothing}
@@ -3277,7 +3404,25 @@ export class FamilyTreePanel extends LitElement {
           ← ${this._tt("nav_people")}
         </button>
         <div class="person-head-main">
-          ${renderPersonAvatar(p, { size: "lg", deceasedOverlay: true })}
+          ${this._canWrite()
+            ? html`<button
+                type="button"
+                class="person-avatar-edit-btn"
+                title=${this._tt("edit_profile_photo")}
+                aria-label=${this._tt("edit_profile_photo")}
+                @click=${() => this._openProfilePhotoEditor()}
+              >
+                ${renderPersonAvatar(p, {
+                  size: "detail",
+                  hass: this.hass,
+                  deceasedOverlay: true,
+                })}
+              </button>`
+            : renderPersonAvatar(p, {
+                size: "detail",
+                hass: this.hass,
+                deceasedOverlay: true,
+              })}
           <h2>
             ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
             ${this._lineageBadge(p.id, personDisplayName(p))}
@@ -3719,6 +3864,7 @@ export class FamilyTreePanel extends LitElement {
     this._siblingsLoading = false;
     this._previewDetail = null;
     this._previewLoading = false;
+    this._resetProfileCropState();
     if (this._dialogMode === "import" && this._importPhase !== "importing") {
       this._importPhase = "";
       this._importFile = null;
@@ -3774,6 +3920,8 @@ export class FamilyTreePanel extends LitElement {
                   ? this._previewDetail
                     ? personDisplayName(this._previewDetail.person)
                     : this._tt("details")
+                  : mode === "profilePhoto"
+                    ? this._tt("edit_profile_photo")
                   : mode === "event"
                   ? this._editingEventId
                     ? this._tt("edit_event")
@@ -4262,6 +4410,46 @@ export class FamilyTreePanel extends LitElement {
       </div>
     </div>`;
 
+    const profilePhotoBody = html`<div class="form-section profile-photo-editor">
+      <label class="file-btn">
+        ${this._tt("profile_photo_choose")}
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          hidden
+          @change=${this._onProfilePhotoFileChange}
+        />
+      </label>
+      <div class="profile-crop-wrap">
+        <canvas
+          id="profile-crop-canvas"
+          class="profile-crop-canvas"
+          width=${PROFILE_CROP_CANVAS_PX}
+          height=${PROFILE_CROP_CANVAS_PX}
+          @pointerdown=${this._onProfileCropPointerDown}
+          @pointermove=${this._onProfileCropPointerMove}
+          @pointerup=${this._onProfileCropPointerUp}
+          @pointercancel=${this._onProfileCropPointerUp}
+        ></canvas>
+        ${!this._profileCropHasImage
+          ? html`<p class="muted profile-crop-hint">${this._tt("profile_photo_choose")}</p>`
+          : nothing}
+      </div>
+      ${this._profileCropHasImage
+        ? html`<label class="profile-zoom-label">
+            ${this._tt("profile_photo_zoom")}
+            <input
+              type="range"
+              min="1"
+              max="3"
+              step="0.02"
+              .value=${String(this._profileCropTransform.scale)}
+              @input=${this._onProfileCropZoom}
+            />
+          </label>`
+        : nothing}
+    </div>`;
+
     const siblingsBody = this._siblingsLoading
       ? html`<p class="muted">${this._tt("loading")}</p>`
       : html`<div class="siblings-grid">
@@ -4394,6 +4582,18 @@ export class FamilyTreePanel extends LitElement {
                     `
                   : nothing}
               `
+          : mode === "profilePhoto"
+            ? html`
+                ${mdButton(this._tt("cancel"), {
+                  variant: "text",
+                  onClick: this._closeDialog,
+                })}
+                ${mdButton(this._tt("save"), {
+                  variant: "filled",
+                  disabled: this._saving || !this._profileCropHasImage,
+                  onClick: () => void this._saveProfilePhoto(),
+                })}
+              `
           : mode === "event"
             ? html`
                 ${mdButton(this._tt("cancel"), {
@@ -4462,6 +4662,8 @@ export class FamilyTreePanel extends LitElement {
                       ? siblingsBody
                       : mode === "preview"
                         ? previewBody
+                        : mode === "profilePhoto"
+                          ? profilePhotoBody
                         : mode === "event"
                         ? eventBody
                         : personBody}
@@ -4701,8 +4903,31 @@ export class FamilyTreePanel extends LitElement {
     .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; margin: 0 0 16px; }
     .kv dt { color: var(--secondary-text-color); }
     .kv dd { margin: 0; }
-    .person-head { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 8px; }
+    .person-head {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 12px 0;
+    }
     .person-head h2 { margin: 0; font-size: 1.3rem; font-weight: 500; }
+    .person-avatar-edit-btn {
+      appearance: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 50%;
+      flex-shrink: 0;
+      line-height: 0;
+    }
+    .person-avatar-edit-btn:hover,
+    .person-avatar-edit-btn:focus-visible {
+      outline: 2px solid var(--primary-color);
+      outline-offset: 2px;
+    }
     .tree-scroll {
       overflow-x: auto;
       overflow-y: hidden;
@@ -5075,8 +5300,9 @@ export class FamilyTreePanel extends LitElement {
     .person-head-main {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 14px;
       flex-wrap: wrap;
+      width: 100%;
     }
     .person-head-main h2 {
       display: flex;
@@ -5126,6 +5352,49 @@ export class FamilyTreePanel extends LitElement {
     }
     .person-avatar--lg {
       font-size: 1.5rem;
+    }
+    .person-avatar--detail {
+      font-size: 1.1rem;
+    }
+    .profile-photo-editor {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .profile-crop-wrap {
+      position: relative;
+      width: min(100%, ${PROFILE_CROP_CANVAS_PX}px);
+      aspect-ratio: 1;
+    }
+    .profile-crop-canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      touch-action: none;
+      cursor: grab;
+      background: var(--secondary-background-color);
+      border-radius: 50%;
+    }
+    .profile-crop-canvas:active {
+      cursor: grabbing;
+    }
+    .profile-crop-hint {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 12px;
+      pointer-events: none;
+    }
+    .profile-zoom-label {
+      width: 100%;
+      max-width: ${PROFILE_CROP_CANVAS_PX}px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }
     .photo-grid {
       display: grid;

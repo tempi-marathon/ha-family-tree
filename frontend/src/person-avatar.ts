@@ -4,12 +4,14 @@ import { html, nothing } from "lit";
 import { personDisplayName } from "./people_view";
 import { personMediaUrl } from "./media";
 import type { PersonDto } from "./api";
+import type { HomeAssistant } from "./types";
 
-export type AvatarSize = "sm" | "md" | "lg";
+export type AvatarSize = "sm" | "md" | "detail" | "lg";
 
 const SIZE_PX: Record<AvatarSize, number> = {
   sm: 32,
   md: 48,
+  detail: 64,
   lg: 96,
 };
 
@@ -38,6 +40,7 @@ function sexClass(sex: string | undefined): string {
 
 export interface PersonAvatarOptions {
   size?: AvatarSize;
+  hass?: HomeAssistant;
   profileMediaId?: string | null;
   sex?: string;
   isLiving?: boolean;
@@ -64,7 +67,8 @@ export function renderPersonAvatar(
   const deceased = opts.deceasedOverlay && !isLiving;
 
   if (profileId) {
-    const src = personMediaUrl(profileId, size === "lg" ? "full" : "thumb");
+    const useFull = size === "lg" || size === "detail";
+    const src = personMediaUrl(profileId, useFull ? "full" : "thumb", opts.hass);
     return html`<span
       class="person-avatar ${sexClass(sex)} person-avatar--${size}${deceased
         ? " person-avatar--deceased"
