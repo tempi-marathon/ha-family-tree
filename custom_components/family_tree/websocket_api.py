@@ -46,6 +46,7 @@ from .models import (
     UnionType,
 )
 from .names import display_name, matches_family_shortcut
+from .validation import normalize_http_source_url
 from .relatives import (
     enrich_event_dict,
     relative_vital_events_for_person,
@@ -624,12 +625,19 @@ async def ws_citations_save(
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
+        title = (msg.get("title") or "").strip()
+        if not title:
+            raise ValueError("Source title is required")
+        url_raw = (msg.get("url") or "").strip()
+        if url_raw and not normalize_http_source_url(url_raw):
+            raise ValueError("Invalid URL")
+        url = normalize_http_source_url(url_raw) if url_raw else ""
+        author = msg.get("author") or ""
+        repository = msg.get("repository") or ""
+
         source_id = msg.get("source_id")
+        created_new = False
         if not source_id:
-            title = (msg.get("title") or "").strip()
-            if not title:
-                raise ValueError("Source title is required")
-            url = (msg.get("url") or "").strip()
             found = coordinator.repo.find_source_by_url(url) if url else None
             if found:
                 source_id = found.id
@@ -642,11 +650,27 @@ async def ws_citations_save(
                         Source(
                             title=title,
                             url=url,
-                            author=msg.get("author") or "",
-                            repository=msg.get("repository") or "",
+                            author=author,
+                            repository=repository,
                             notes=msg.get("source_notes") or "",
                         )
                     ).id
+                    created_new = True
+        if not created_new:
+            existing = coordinator.repo.get_source(source_id)
+            if existing is None:
+                raise LookupError("Source not found")
+            coordinator.repo.update_source(
+                Source(
+                    id=existing.id,
+                    title=title,
+                    url=url,
+                    author=author,
+                    repository=repository,
+                    notes=existing.notes,
+                    created_at=existing.created_at,
+                )
+            )
         citation_id = msg.get("citation_id")
         subject_type = SubjectType(msg["subject_type"])
         detail = msg.get("detail") or ""

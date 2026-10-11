@@ -984,7 +984,8 @@ class Repository:
         self, subject_type: SubjectType, subject_id: str
     ) -> list[dict[str, Any]]:
         rows = self.db.fetchall(
-            "SELECT c.*, s.title AS source_title, s.url AS source_url "
+            "SELECT c.*, s.title AS source_title, s.url AS source_url, "
+            "s.author AS source_author, s.repository AS source_repository "
             "FROM citations c JOIN sources s ON s.id = c.source_id "
             "WHERE c.subject_type=? AND c.subject_id=?",
             (subject_type.value, subject_id),
