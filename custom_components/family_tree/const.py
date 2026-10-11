@@ -46,6 +46,8 @@ MAX_NAME: Final = 200
 MAX_NOTES: Final = 10000
 MAX_URL: Final = 2000
 MAX_SEARCH: Final = 100
+# Biological lineage walks (and parent-cycle checks) never exceed this depth.
+MAX_LINEAGE_GENERATIONS: Final = 64
 
 # Storage paths relative to HA config
 DATA_DIR_NAME: Final = "family_tree"

@@ -4,9 +4,64 @@ from __future__ import annotations
 
 from typing import Any
 
+from .const import MAX_LINEAGE_GENERATIONS
 from .db import Database
 from .models import ParentChildType, Person, Sex
 from .names import display_name
+
+_ANCESTOR_CTE = """
+        WITH RECURSIVE lineage(relative_id, generation, lineage_path) AS (
+            SELECT pc.parent_id, 1, CAST(pc.parent_id AS TEXT)
+            FROM parent_child pc
+            WHERE pc.child_id = ? AND pc.type = ?
+            UNION ALL
+            SELECT pc.parent_id, l.generation + 1,
+                   l.lineage_path || ',' || pc.parent_id
+            FROM lineage l
+            JOIN parent_child pc
+              ON pc.child_id = l.relative_id AND pc.type = ?
+            WHERE l.generation < ?
+              AND instr(',' || l.lineage_path || ',', ',' || pc.parent_id || ',') = 0
+        )
+"""
+
+_DESCENDANT_CTE = """
+        WITH RECURSIVE lineage(relative_id, generation, lineage_path) AS (
+            SELECT pc.child_id, 1, CAST(pc.child_id AS TEXT)
+            FROM parent_child pc
+            WHERE pc.parent_id = ? AND pc.type = ?
+            UNION ALL
+            SELECT pc.child_id, l.generation + 1,
+                   l.lineage_path || ',' || pc.child_id
+            FROM lineage l
+            JOIN parent_child pc
+              ON pc.parent_id = l.relative_id AND pc.type = ?
+            WHERE l.generation < ?
+              AND instr(',' || l.lineage_path || ',', ',' || pc.child_id || ',') = 0
+        )
+"""
+
+
+def would_create_parent_child_cycle(
+    db: Database, parent_id: str, child_id: str
+) -> bool:
+    """True when ``parent_id`` as parent of ``child_id`` would create a cycle."""
+    if parent_id == child_id:
+        return True
+    seen: set[str] = set()
+    stack = [parent_id]
+    while stack:
+        person_id = stack.pop()
+        if person_id == child_id:
+            return True
+        if person_id in seen:
+            continue
+        seen.add(person_id)
+        for row in db.fetchall(
+            "SELECT parent_id FROM parent_child WHERE child_id = ?", (person_id,)
+        ):
+            stack.append(str(row["parent_id"]))
+    return False
 
 
 def ancestors(
@@ -17,17 +72,8 @@ def ancestors(
 ) -> list[dict[str, Any]]:
     """Return biological ancestors with generation (1 = parents)."""
     rows = db.fetchall(
-        """
-        WITH RECURSIVE lineage(relative_id, generation) AS (
-            SELECT pc.parent_id, 1
-            FROM parent_child pc
-            WHERE pc.child_id = ? AND pc.type = ?
-            UNION
-            SELECT pc.parent_id, l.generation + 1
-            FROM lineage l
-            JOIN parent_child pc
-              ON pc.child_id = l.relative_id AND pc.type = ?
-        )
+        _ANCESTOR_CTE
+        + """
         SELECT l.relative_id AS id, MIN(l.generation) AS generation,
                p.given_names, p.call_name, p.surname_prefix, p.surname, p.sex,
                p.is_living
@@ -40,6 +86,7 @@ def ancestors(
             person_id,
             ParentChildType.BIOLOGICAL.value,
             ParentChildType.BIOLOGICAL.value,
+            MAX_LINEAGE_GENERATIONS,
         ),
     )
     result = [_relative_dict(r) for r in rows]
@@ -56,17 +103,8 @@ def descendants(
 ) -> list[dict[str, Any]]:
     """Return biological descendants with generation (1 = children)."""
     rows = db.fetchall(
-        """
-        WITH RECURSIVE lineage(relative_id, generation) AS (
-            SELECT pc.child_id, 1
-            FROM parent_child pc
-            WHERE pc.parent_id = ? AND pc.type = ?
-            UNION
-            SELECT pc.child_id, l.generation + 1
-            FROM lineage l
-            JOIN parent_child pc
-              ON pc.parent_id = l.relative_id AND pc.type = ?
-        )
+        _DESCENDANT_CTE
+        + """
         SELECT l.relative_id AS id, MIN(l.generation) AS generation,
                p.given_names, p.call_name, p.surname_prefix, p.surname, p.sex,
                p.is_living
@@ -79,6 +117,7 @@ def descendants(
             person_id,
             ParentChildType.BIOLOGICAL.value,
             ParentChildType.BIOLOGICAL.value,
+            MAX_LINEAGE_GENERATIONS,
         ),
     )
     result = [_relative_dict(r) for r in rows]

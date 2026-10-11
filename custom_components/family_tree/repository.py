@@ -10,6 +10,7 @@ from typing import Any
 
 from .const import META_FAMILY_SHORTCUTS
 from .db import Database
+from .lineage import would_create_parent_child_cycle
 from .models import (
     Citation,
     Event,
@@ -563,6 +564,12 @@ class Repository:
 
     def add_parent_child(self, link: ParentChild) -> ParentChild:
         def _do() -> ParentChild:
+            if would_create_parent_child_cycle(
+                self.db, link.parent_id, link.child_id
+            ):
+                raise ValueError(
+                    "This parent-child link would create a cycle in the family tree"
+                )
             self.db.execute(
                 "INSERT INTO parent_child (id, parent_id, child_id, type, union_id) "
                 "VALUES (?, ?, ?, ?, ?)",
