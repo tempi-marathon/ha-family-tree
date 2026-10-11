@@ -28,7 +28,7 @@ from .models import (
     UnionType,
     new_id,
 )
-from .names import split_surname
+from .names import normalize_imported_names, split_surname
 from .repository import Repository
 from .validation import normalize_source_url
 
@@ -459,6 +459,8 @@ class GedcomImporter:
             call_name = groups["NICK"][0].value.strip()
         if "_RUFNAME" in groups and groups["_RUFNAME"][0].value.strip() and not call_name:
             call_name = groups["_RUFNAME"][0].value.strip()
+
+        given, call_name = normalize_imported_names(given, call_name)
 
         sex = Sex.UNKNOWN
         if "SEX" in groups:

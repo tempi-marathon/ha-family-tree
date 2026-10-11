@@ -98,6 +98,32 @@ def test_import_quoted_nick_and_level1_givn(tmp_path: Path):
     db.close()
 
 
+def test_import_nick_with_parens(tmp_path: Path):
+    db = Database(tmp_path / "tree.db")
+    db.open()
+    repo = Repository(db)
+    text = """0 HEAD
+1 SOUR Test
+1 GEDC
+2 VERS 5.5.1
+1 CHAR UTF-8
+0 @I9@ INDI
+1 NAME Marinus Theodorus /Molenschot/
+2 GIVN Marinus Theodorus
+2 NICK Marinus (Rien)
+2 SURN Molenschot
+1 SEX M
+0 TRLR
+"""
+    GedcomImporter(repo).import_text(text)
+    people, _ = repo.list_persons(limit=10)
+    assert len(people) == 1
+    p = people[0]
+    assert p.call_name == "Rien"
+    assert p.given_names == "Marinus Theodorus"
+    db.close()
+
+
 def test_import_batch_single_revision(tmp_path: Path):
     db = Database(tmp_path / "tree.db")
     db.open()

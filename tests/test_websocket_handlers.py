@@ -247,3 +247,24 @@ def test_persons_siblings_returns_shared_parents(repo: Repository) -> None:
     assert len(result["siblings"]) == 1
     assert result["siblings"][0]["id"] == child_b.id
     assert result["siblings"][0]["relation"] == "sibling"
+
+
+def test_ha_users_list_requires_admin(repo: Repository) -> None:
+    conn = _FakeConnection("user-1", is_admin=False)
+    _call(ws.ws_ha_users_list, conn, {"type": "family_tree/ha_users/list"})
+    assert conn.errors == [("unauthorized", "Unauthorized")]
+
+
+async def _fake_ha_users() -> list[Any]:
+    return [SimpleNamespace(id="u1", name="Alice", is_active=True)]
+
+
+def test_ha_users_list_admin(repo: Repository) -> None:
+    hass = _FakeHass()
+    hass.auth = SimpleNamespace(async_get_users=_fake_ha_users)
+
+    conn = _FakeConnection("admin", is_admin=True)
+    asyncio.run(
+        ws.ws_ha_users_list(hass, conn, {"id": 1, "type": "family_tree/ha_users/list"})
+    )
+    assert conn.results == [{"users": [{"id": "u1", "name": "Alice", "is_active": True}]}]
