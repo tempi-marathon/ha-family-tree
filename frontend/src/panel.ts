@@ -9,6 +9,7 @@ import {
   type MyLineageDto,
   type PersonDetail,
   type PersonDto,
+  type PersonMediaDto,
   type PlaceDto,
   type StatsDto,
   type TreeUnion,
@@ -25,9 +26,13 @@ import {
   getSiblings,
   getSettings,
   getStats,
+  listPersonMedia,
+  deletePersonMedia,
   listPersons,
   listUserLinks,
+  personMediaUploadUrl,
   purgePerson,
+  setProfileMedia,
   restorePerson,
   listPlaces,
   saveEvent,
@@ -74,6 +79,8 @@ import {
   placeOptionsFromPeople,
 } from "./people_view";
 import { nodeName } from "./tree_view";
+import { renderPersonAvatar } from "./person-avatar";
+import { personMediaUrl } from "./media";
 import type { HomeAssistant } from "./types";
 
 const PANEL_TAG = "family-tree-panel";
@@ -279,6 +286,8 @@ export class FamilyTreePanel extends LitElement {
   @state() private _shortcutsDraft: string[] = [];
   @state() private _shortcutInput = "";
   @state() private _shortcutsSaving = false;
+  @state() private _personMedia: PersonMediaDto[] = [];
+  @state() private _photoLightbox: string | null = null;
 
   private _unsub: (() => void) | null = null;
   private _placeSearchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -516,11 +525,86 @@ export class FamilyTreePanel extends LitElement {
       this._detail = await getPerson(this.hass, id);
       this._view = "person";
       this._personTab = tab;
+      await this._loadPersonMedia();
       this._persistViewState();
       this._scrollMainToTop();
     } catch (err) {
       this._error = formatHassError(err);
     }
+  }
+
+  private async _loadPersonMedia() {
+    if (!this.hass || !this._detail) {
+      this._personMedia = [];
+      return;
+    }
+    try {
+      const data = await listPersonMedia(this.hass, this._detail.person.id);
+      this._personMedia = data.media;
+      this._detail = {
+        ...this._detail,
+        person: {
+          ...this._detail.person,
+          profile_media_id: data.profile_media_id,
+        },
+      };
+    } catch {
+      this._personMedia = [];
+    }
+  }
+
+  private async _uploadPersonPhoto(file: File) {
+    if (!this.hass || !this._detail || !this._canWrite()) return;
+    const personId = this._detail.person.id;
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const resp = await fetch(personMediaUploadUrl(personId), {
+        method: "POST",
+        body: form,
+        credentials: "same-origin",
+        headers: await this._authHeaders(),
+      });
+      if (!resp.ok) {
+        throw new Error(`Upload failed (${resp.status})`);
+      }
+      await this._loadPersonMedia();
+      await this._refreshAll();
+      this._error = "";
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
+  }
+
+  private async _setProfilePhoto(mediaId: string) {
+    if (!this.hass || !this._detail || !this._canWrite()) return;
+    try {
+      await setProfileMedia(this.hass, this._detail.person.id, mediaId);
+      await this._loadPersonMedia();
+      await this._refreshAll();
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
+  }
+
+  private async _deletePersonPhoto(mediaId: string) {
+    if (!this.hass || !this._canWrite()) return;
+    if (!confirm(this._tt("confirm_delete_photo"))) return;
+    try {
+      await deletePersonMedia(this.hass, mediaId);
+      await this._loadPersonMedia();
+      await this._refreshAll();
+      if (this._photoLightbox === mediaId) this._photoLightbox = null;
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
+  }
+
+  private _onPersonPhotoFileChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (file) void this._uploadPersonPhoto(file);
+    input.value = "";
   }
 
   private async _openPersonPreview(id: string) {
@@ -2023,6 +2107,7 @@ export class FamilyTreePanel extends LitElement {
               <table class="people-table">
                 <thead>
                   <tr>
+                    <th class="avatar-col" aria-label=${this._tt("photo")}></th>
                     ${this._sortTh(this._tt("col_name"), "name")}
                     ${this._sortTh(this._tt("col_birth"), "birth")}
                     ${this._sortTh(this._tt("col_death"), "death")}
@@ -2049,13 +2134,18 @@ export class FamilyTreePanel extends LitElement {
     return html`
       <div class="person-card-wrap">
         <button type="button" class="person-card" @click=${() => this._openPerson(p.id)}>
-          <div class="person-card-head">
-            <div class="person-card-title">
-              ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
+          <div class="person-card-head person-card-head--with-avatar">
+            ${renderPersonAvatar(p, { size: "sm", deceasedOverlay: true })}
+            <div class="person-card-head-text">
+              <div class="person-card-title-row">
+                <div class="person-card-title person-card-title--clamp">
+                  ${personDisplayName(p)}
+                </div>
+                ${this._lineageBadge(p.id, personDisplayName(p))}
+              </div>
             </div>
-            ${this._lineageBadge(p.id, personDisplayName(p))}
           </div>
-          <div class="person-card-meta">${this._sexBadge(p.sex)}</div>
+          <div class="person-card-meta">${this._sexIconBadge(p.sex)}</div>
           ${birth ? html`<div class="person-card-meta">${birth}</div>` : nothing}
           ${death ? html`<div class="person-card-meta">${death}</div>` : nothing}
           ${parents ? html`<div class="person-card-meta">${parents}</div>` : nothing}
@@ -2116,6 +2206,9 @@ export class FamilyTreePanel extends LitElement {
     const death = formatDeathCell(p.birth, p.death, p.is_living, lang);
     const menuOpen = this._rowMenu === p.id;
     return html`<tr>
+      <td class="avatar-col">
+        ${renderPersonAvatar(p, { size: "sm", deceasedOverlay: true })}
+      </td>
       <td>
         <button type="button" class="linkish name-cell" @click=${() => this._openPerson(p.id)}>
           ${personDisplayName(p)}
@@ -2204,6 +2297,7 @@ export class FamilyTreePanel extends LitElement {
       footer?: string;
       preview?: boolean;
       hideSiblings?: boolean;
+      compact?: boolean;
     } = {},
   ) {
     const id = String(node.id || "");
@@ -2231,13 +2325,32 @@ export class FamilyTreePanel extends LitElement {
       if (usePreview) void this._openPersonPreview(id);
       else void this._openPerson(id);
     };
+    const compact = opts.compact !== false;
+    const personLike = {
+      ...node,
+      sex,
+      is_living: isLiving,
+      profile_media_id:
+        typeof node.profile_media_id === "string" ? node.profile_media_id : null,
+    };
     return html`
       <button type="button" class="person-card" @click=${onCardClick}>
-        <div class="person-card-head">
-          <div class="person-card-title">
-            ${this._deceasedIcon(isLiving)} ${this._sexIconBadge(sex)} ${title}
+        <div class="person-card-head person-card-head--with-avatar">
+          ${renderPersonAvatar(personLike as PersonDto, {
+            size: "sm",
+            deceasedOverlay: compact,
+            title,
+          })}
+          <div class="person-card-head-text">
+            <div class="person-card-title-row">
+              <div class="person-card-title person-card-title--clamp" title=${title}>
+                ${compact
+                  ? title
+                  : html`${this._deceasedIcon(isLiving)} ${this._sexIconBadge(sex)} ${title}`}
+              </div>
+              ${id ? this._lineageBadge(id, title) : nothing}
+            </div>
           </div>
-          ${id ? this._lineageBadge(id, title) : nothing}
         </div>
         ${formal && formal !== title
           ? html`<div class="person-card-formal">${formal}</div>`
@@ -2684,9 +2797,79 @@ export class FamilyTreePanel extends LitElement {
         ${d.events.length === 0 ? html`<p class="muted">—</p>` : nothing}
       </div>
     `;
+    const photos = this._renderPhotosSection(p);
     return html`
       ${this._renderCollapsibleSection("personal", this._tt("section_personal"), personal)}
+      ${this._renderCollapsibleSection("photos", this._tt("section_photos"), photos)}
       ${this._renderCollapsibleSection("events", this._tt("events"), events)}
+      ${this._photoLightbox
+        ? html`<div
+            class="photo-lightbox"
+            @click=${() => (this._photoLightbox = null)}
+          >
+            <img
+              src=${personMediaUrl(this._photoLightbox, "full")}
+              alt=""
+              @click=${(e: Event) => e.stopPropagation()}
+            />
+          </div>`
+        : nothing}
+    `;
+  }
+
+  private _renderPhotosSection(p: PersonDto) {
+    const items = this._personMedia;
+    const profileId = p.profile_media_id;
+    return html`
+      ${this._canWrite()
+        ? html`<div class="section-head section-head-actions">
+            <label class="file-btn">
+              ${this._tt("add_photo")}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                hidden
+                @change=${this._onPersonPhotoFileChange}
+              />
+            </label>
+          </div>`
+        : nothing}
+      ${items.length === 0
+        ? html`<p class="muted">${this._tt("no_photos")}</p>`
+        : html`<div class="photo-grid">
+            ${items.map(
+              (m) => html`<div class="photo-tile">
+                <button
+                  type="button"
+                  class="photo-thumb-btn"
+                  @click=${() => (this._photoLightbox = m.id)}
+                >
+                  <img src=${personMediaUrl(m.id, "thumb")} alt="" loading="lazy" />
+                  ${profileId === m.id
+                    ? html`<span class="photo-profile-badge">${this._tt("profile_photo")}</span>`
+                    : nothing}
+                </button>
+                ${m.caption ? html`<div class="photo-caption">${m.caption}</div>` : nothing}
+                ${this._canWrite()
+                  ? html`<div class="photo-actions">
+                      ${profileId !== m.id
+                        ? html`<button type="button" class="linkish" @click=${() =>
+                            void this._setProfilePhoto(m.id)}>
+                            ${this._tt("set_profile_photo")}
+                          </button>`
+                        : nothing}
+                      <button
+                        type="button"
+                        class="linkish danger"
+                        @click=${() => void this._deletePersonPhoto(m.id)}
+                      >
+                        ${this._tt("delete")}
+                      </button>
+                    </div>`
+                  : nothing}
+              </div>`,
+            )}
+          </div>`}
     `;
   }
 
@@ -3006,10 +3189,13 @@ export class FamilyTreePanel extends LitElement {
         <button type="button" class="back-link" @click=${() => this._setView("people")}>
           ← ${this._tt("nav_people")}
         </button>
-        <h2>
-          ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
-          ${this._lineageBadge(p.id, personDisplayName(p))}
-        </h2>
+        <div class="person-head-main">
+          ${renderPersonAvatar(p, { size: "lg", deceasedOverlay: true })}
+          <h2>
+            ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
+            ${this._lineageBadge(p.id, personDisplayName(p))}
+          </h2>
+        </div>
       </div>
       <div class="subtabs person-subtabs">
         <div class="subtabs-left">
@@ -4662,6 +4848,156 @@ export class FamilyTreePanel extends LitElement {
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+    }
+    .person-card-head--with-avatar {
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .person-card-head-text {
+      flex: 1;
+      min-width: 0;
+    }
+    .person-card-title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 6px;
+    }
+    .person-card-title--clamp {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      flex: 1;
+      min-width: 0;
+    }
+    .person-head-main {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .person-head-main h2 {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+    }
+    .people-table .avatar-col {
+      width: 40px;
+      padding-right: 4px;
+    }
+    .person-avatar {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      flex-shrink: 0;
+      overflow: hidden;
+      box-sizing: border-box;
+      border: 1px solid var(--divider-color);
+      font-weight: 600;
+      font-size: 0.75rem;
+      line-height: 1;
+    }
+    .person-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .person-avatar--male.person-avatar--initials {
+      background: rgba(33, 150, 243, 0.15);
+      color: var(--primary-text-color, #1a1a1a);
+    }
+    .person-avatar--female.person-avatar--initials {
+      background: rgba(233, 30, 99, 0.12);
+      color: var(--primary-text-color, #1a1a1a);
+    }
+    .person-avatar--unknown.person-avatar--initials {
+      background: var(--secondary-background-color);
+      color: var(--secondary-text-color);
+    }
+    .person-avatar--deceased {
+      opacity: 0.85;
+      box-shadow: inset 0 0 0 2px var(--secondary-text-color);
+    }
+    .person-avatar--lg {
+      font-size: 1.5rem;
+    }
+    .photo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 12px;
+    }
+    .photo-tile {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .photo-thumb-btn {
+      appearance: none;
+      border: 1px solid var(--divider-color);
+      border-radius: var(--ha-border-radius-md, 8px);
+      padding: 0;
+      background: var(--secondary-background-color);
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      aspect-ratio: 1;
+    }
+    .photo-thumb-btn img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .photo-profile-badge {
+      position: absolute;
+      bottom: 4px;
+      left: 4px;
+      font-size: 0.7rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--primary-color);
+      color: var(--text-primary-color, #fff);
+    }
+    .photo-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 0.85em;
+    }
+    .photo-caption {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .photo-lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(0, 0, 0, 0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .photo-lightbox img {
+      max-width: min(100%, 900px);
+      max-height: 90vh;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+    .file-btn {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 16px;
+      border-radius: var(--ha-border-radius-md, 8px);
+      background: var(--primary-color);
+      color: var(--text-primary-color, #fff);
+      font-size: 0.9em;
     }
     .person-card-wrap { display: flex; flex-direction: column; gap: 6px; }
     .card-actions {

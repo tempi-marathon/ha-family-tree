@@ -33,6 +33,19 @@ No SQL injection, command injection, hardcoded secrets, or unsafe deserializatio
 - Service calls with `user_id=None` allowed for automations (`auth.py`)
 - Panel source map served to authenticated users (see `SECURITY.md`)
 
+## Person media (photos)
+
+| Control | Implementation |
+|---------|----------------|
+| Read | Authenticated `GET /api/family_tree/media/{id}`; trashed persons → 404 |
+| Write | Admin-only upload (`POST …/persons/{id}/media`) and WebSocket media mutations |
+| IDOR | Serve by `media_id` from DB only; hex id validation |
+| Upload | Magic-byte allowlist (JPEG/PNG/WebP), size/pixel caps, EXIF stripped on save |
+| GEDCOM fetch | `is_fetchable_http_url()` SSRF guard; local copy only in UI |
+| Response headers | `X-Content-Type-Options: nosniff`, `Cache-Control: private` |
+
+Intentional: any logged-in HA user may view photos (same as tree data).
+
 ## Positive controls
 
 - Parameterized SQL throughout `repository.py`

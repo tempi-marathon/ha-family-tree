@@ -143,6 +143,25 @@ _MIGRATIONS: dict[int, str] = {
 
     INSERT INTO meta (key, value) VALUES ('revision', '0');
     """,
+    2: """
+    CREATE TABLE person_media (
+        id TEXT PRIMARY KEY NOT NULL,
+        person_id TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+        content_type TEXT NOT NULL,
+        original_filename TEXT NOT NULL DEFAULT '',
+        caption TEXT NOT NULL DEFAULT '',
+        byte_size INTEGER NOT NULL,
+        width INTEGER,
+        height INTEGER,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        source_url TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_person_media_person ON person_media(person_id);
+    ALTER TABLE persons ADD COLUMN profile_media_id TEXT
+        REFERENCES person_media(id) ON DELETE SET NULL;
+    """,
 }
 
 

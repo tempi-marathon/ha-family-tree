@@ -6,6 +6,7 @@ import contextlib
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .dates import parse_gedcom_date
@@ -26,6 +27,8 @@ from .models import (
     new_id,
 )
 from .names import split_surname
+from .media_fetch import fetch_http_image
+from .media_service import upload_person_media
 from .repository import Repository
 from .validation import normalize_source_url
 
@@ -255,8 +258,9 @@ def _coord(value: str | None) -> float | None:
 class GedcomImporter:
     """Import a GEDCOM document into a Repository."""
 
-    def __init__(self, repo: Repository) -> None:
+    def __init__(self, repo: Repository, media_root: Path | None = None) -> None:
         self.repo = repo
+        self.media_root = media_root
         self.report = ImportReport()
         self._indi: dict[str, str] = {}  # xref -> person id
         self._fam: dict[str, str] = {}
@@ -477,6 +481,7 @@ class GedcomImporter:
                     sex=sex if sex != Sex.UNKNOWN else person.sex,
                     is_living=is_living,
                     notes=notes or person.notes,
+                    profile_media_id=person.profile_media_id,
                     created_at=person.created_at,
                     updated_at=person.updated_at,
                     deleted_at=person.deleted_at,
@@ -501,6 +506,9 @@ class GedcomImporter:
             self.repo.set_external_ref("person", person_id, _SYSTEM, xref)
 
         self._indi[xref] = person_id
+
+        if self.media_root is not None:
+            self._import_indi_obje(groups, person_id)
 
         for tag, event_type in _EVENT_TAGS.items():
             if tag in ("MARR", "DIV"):
@@ -532,6 +540,32 @@ class GedcomImporter:
                     )
                 )
                 self.report.citations += 1
+
+    def _import_indi_obje(self, groups: dict[str, list[_Line]], person_id: str) -> None:
+        for block in groups.get("OBJE", []):
+            file_ref = (_sub_value(block, "FILE") or block.value or "").strip()
+            if not file_ref:
+                continue
+            lower = file_ref.lower()
+            if lower.startswith(("http://", "https://")):
+                try:
+                    data = fetch_http_image(file_ref)
+                    upload_person_media(
+                        self.repo,
+                        self.media_root,
+                        person_id,
+                        data,
+                        source_url=normalize_source_url(file_ref) or file_ref,
+                    )
+                except ValueError:
+                    self.report.warnings.append(
+                        f"Skipped OBJE URL (could not import): {file_ref[:120]}"
+                    )
+            else:
+                self.report.warnings.append(
+                    f"Skipped relative OBJE file (upload GEDCOM+files not supported): "
+                    f"{file_ref[:120]}"
+                )
 
     def _import_fam(self, record: list[_Line]) -> None:
         xref = record[0].xref or new_id()

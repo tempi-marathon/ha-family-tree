@@ -109,6 +109,7 @@ class Person:
     is_living: bool = True
     notes: str = ""
     id: str = field(default_factory=new_id)
+    profile_media_id: str | None = None
     created_at: str = field(default_factory=_utc_now_iso)
     updated_at: str = field(default_factory=_utc_now_iso)
     deleted_at: str | None = None
@@ -120,6 +121,7 @@ class Person:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Person:
+        profile = raw.get("profile_media_id")
         return cls(
             id=str(raw["id"]),
             given_names=str(raw.get("given_names") or ""),
@@ -129,9 +131,48 @@ class Person:
             sex=Sex(str(raw.get("sex") or Sex.UNKNOWN.value)),
             is_living=bool(raw.get("is_living", True)),
             notes=str(raw.get("notes") or ""),
+            profile_media_id=str(profile) if profile else None,
             created_at=str(raw.get("created_at") or _utc_now_iso()),
             updated_at=str(raw.get("updated_at") or _utc_now_iso()),
             deleted_at=raw.get("deleted_at"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PersonMedia:
+    """A photo attached to a person."""
+
+    person_id: str
+    content_type: str
+    byte_size: int
+    id: str = field(default_factory=new_id)
+    original_filename: str = ""
+    caption: str = ""
+    width: int | None = None
+    height: int | None = None
+    sort_order: int = 0
+    source_url: str = ""
+    created_at: str = field(default_factory=_utc_now_iso)
+    updated_at: str = field(default_factory=_utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> PersonMedia:
+        return cls(
+            id=str(raw["id"]),
+            person_id=str(raw["person_id"]),
+            content_type=str(raw.get("content_type") or "image/jpeg"),
+            original_filename=str(raw.get("original_filename") or ""),
+            caption=str(raw.get("caption") or ""),
+            byte_size=int(raw.get("byte_size") or 0),
+            width=raw.get("width"),
+            height=raw.get("height"),
+            sort_order=int(raw.get("sort_order") or 0),
+            source_url=str(raw.get("source_url") or ""),
+            created_at=str(raw.get("created_at") or _utc_now_iso()),
+            updated_at=str(raw.get("updated_at") or _utc_now_iso()),
         )
 
 

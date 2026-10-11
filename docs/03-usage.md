@@ -20,6 +20,10 @@ Admins can create and edit. Other logged-in users see a read-only panel.
 | `family_tree.link_user` | Link an HA user id to a person |
 | `family_tree.export_gedcom` | Write a GEDCOM file under `/config/family_tree/` |
 
+## Photos
+
+On a person’s **Details** tab, admins can upload photos (JPEG, PNG, WebP). One photo can be set as the **profile** picture; it appears in the people list, tree, and relationship cards. Files are stored under `/config/family_tree/media/` — include that folder in backups alongside `family_tree.db`.
+
 ## Sensors & calendar
 
 - Sensors: total people, living people, days until next birthday

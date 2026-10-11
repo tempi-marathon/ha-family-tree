@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from urllib.parse import urlparse
 
-from .const import MAX_URL
+from .const import ENTITY_ID_HEX_LEN, MAX_CAPTION, MAX_URL
 
 _ISO_COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
+_ENTITY_ID_RE = re.compile(rf"^[0-9a-f]{{{ENTITY_ID_HEX_LEN}}}$")
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https", "mailto"})
+_FETCH_URL_SCHEMES = frozenset({"http", "https"})
 
 
 def normalize_source_url(url: str | None) -> str:
@@ -42,3 +46,70 @@ def normalize_country_codes(raw: object) -> list[str]:
         seen.add(code)
         codes.append(code)
     return codes
+
+
+def normalize_entity_id(value: str | None) -> str | None:
+    """Return a valid hex entity id or None."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not _ENTITY_ID_RE.match(text):
+        return None
+    return text
+
+
+def normalize_caption(caption: str | None) -> str:
+    """Bound gallery caption length."""
+    if caption is None:
+        return ""
+    return str(caption).strip()[:MAX_CAPTION]
+
+
+def _ip_blocked(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return bool(
+        addr.is_loopback
+        or addr.is_link_local
+        or addr.is_private
+        or addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
+    )
+
+
+def is_fetchable_http_url(url: str) -> bool:
+    """Return True when url is http(s) and resolves to a public address (SSRF guard)."""
+    normalized = normalize_source_url(url)
+    if not normalized:
+        return False
+    parsed = urlparse(normalized)
+    if parsed.scheme.lower() not in _FETCH_URL_SCHEMES:
+        return False
+    if parsed.username or parsed.password:
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    if host.lower() in ("localhost", "localhost.localdomain"):
+        return False
+    try:
+        literal = ipaddress.ip_address(host)
+        if _ip_blocked(literal):
+            return False
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False
+    for info in infos:
+        sockaddr = info[4]
+        if not sockaddr:
+            continue
+        ip_str = sockaddr[0]
+        try:
+            addr = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return False
+        if _ip_blocked(addr):
+            return False
+    return True
