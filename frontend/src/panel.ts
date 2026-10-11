@@ -84,7 +84,9 @@ import {
 } from "./people_view";
 import { nodeName } from "./tree_view";
 import { renderPersonAvatar } from "./person-avatar";
-import { apiUrl, personMediaUrl } from "./media";
+import { hassAuthHeaders } from "./auth";
+import "./authenticated-media-img";
+import { apiUrl } from "./media";
 import {
   PROFILE_CROP_CANVAS_PX,
   defaultCropTransform,
@@ -1423,13 +1425,23 @@ export class FamilyTreePanel extends LitElement {
 
   private _haUserMatches(): HaUserDto[] {
     const q = this._linkUserQuery.trim().toLowerCase();
-    if (!q) return [];
-    return this._haUsers
+    const pool = this._haUsers;
+    if (!q) return pool.slice(0, 12);
+    return pool
       .filter((u) => {
         const hay = [u.name, u.id].join(" ").toLowerCase();
         return hay.includes(q);
       })
       .slice(0, 12);
+  }
+
+  private _knownSurnames(): string[] {
+    const seen = new Set<string>();
+    for (const p of this._people) {
+      const s = (p.surname || "").trim();
+      if (s) seen.add(s);
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b));
   }
 
   private _haUserDisplayName(userId: string): string {
@@ -1642,15 +1654,7 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private async _authHeaders(): Promise<Record<string, string>> {
-    const headers: Record<string, string> = {};
-    const access =
-      (this.hass as unknown as { connection?: { options?: { auth?: { accessToken?: string } } } })
-        ?.connection?.options?.auth?.accessToken;
-    const authData = (this.hass as unknown as { auth?: { data?: { access_token?: string } } })
-      .auth?.data?.access_token;
-    const bearer = authData || access;
-    if (bearer) headers.Authorization = `Bearer ${bearer}`;
-    return headers;
+    return hassAuthHeaders(this.hass);
   }
 
   private async _previewGedcom(file: File) {
@@ -1826,7 +1830,7 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _addShortcutFromInput() {
+  private async _addShortcutFromInput() {
     const text = this._shortcutInput.trim();
     if (!text) return;
     if (this._shortcutsDraft.some((s) => s.toLowerCase() === text.toLowerCase())) {
@@ -1835,10 +1839,12 @@ export class FamilyTreePanel extends LitElement {
     }
     this._shortcutsDraft = [...this._shortcutsDraft, text];
     this._shortcutInput = "";
+    await this._saveShortcutsDraft();
   }
 
-  private _removeShortcut(index: number) {
+  private async _removeShortcut(index: number) {
     this._shortcutsDraft = this._shortcutsDraft.filter((_, i) => i !== index);
+    await this._saveShortcutsDraft();
   }
 
   private async _saveShortcutsDraft() {
@@ -3174,11 +3180,13 @@ export class FamilyTreePanel extends LitElement {
             class="photo-lightbox"
             @click=${() => (this._photoLightbox = null)}
           >
-            <img
-              src=${personMediaUrl(this._photoLightbox, "full", this.hass)}
-              alt=""
+            <ft-authenticated-media-img
+              class="photo-lightbox-img"
+              .hass=${this.hass}
+              mediaId=${this._photoLightbox}
+              variant="full"
               @click=${(e: Event) => e.stopPropagation()}
-            />
+            ></ft-authenticated-media-img>
           </div>`
         : nothing}
     `;
@@ -3190,15 +3198,22 @@ export class FamilyTreePanel extends LitElement {
     return html`
       ${this._canWrite()
         ? html`<div class="section-head section-head-actions">
-            <label class="file-btn">
-              ${this._tt("add_photo")}
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                hidden
-                @change=${this._onPersonPhotoFileChange}
-              />
-            </label>
+            <input
+              id="ft-person-add-photo"
+              class="sr-only"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              @change=${this._onPersonPhotoFileChange}
+            />
+            ${mdButton(`+ ${this._tt("add_photo")}`, {
+              variant: "filled",
+              onClick: () => {
+                const input = this.renderRoot.querySelector(
+                  "#ft-person-add-photo",
+                ) as HTMLInputElement | null;
+                input?.click();
+              },
+            })}
           </div>`
         : nothing}
       ${items.length === 0
@@ -3211,7 +3226,11 @@ export class FamilyTreePanel extends LitElement {
                   class="photo-thumb-btn"
                   @click=${() => (this._photoLightbox = m.id)}
                 >
-                  <img src=${personMediaUrl(m.id, "thumb", this.hass)} alt="" loading="lazy" />
+                  <ft-authenticated-media-img
+                    .hass=${this.hass}
+                    mediaId=${m.id}
+                    variant="thumb"
+                  ></ft-authenticated-media-img>
                   ${profileId === m.id
                     ? html`<span class="photo-profile-badge">${this._tt("profile_photo")}</span>`
                     : nothing}
@@ -3570,6 +3589,7 @@ export class FamilyTreePanel extends LitElement {
                   hass: this.hass,
                   deceasedOverlay: true,
                 })}
+                <span class="person-avatar-edit-label">${this._tt("edit")}</span>
               </button>`
             : renderPersonAvatar(p, {
                 size: "detail",
@@ -3753,7 +3773,11 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _renderMeSettingsBody() {
+  private _renderLinkedUsersSettingsBody(
+    write: boolean,
+    linkPersonMatches: PersonDto[],
+    linkUserMatches: HaUserDto[],
+  ) {
     const userName = this.hass?.user?.name || this.hass?.user?.id || "—";
     const personId = this._lineage?.person_id;
     const linkedName = this._lineage?.person_name;
@@ -3761,25 +3785,67 @@ export class FamilyTreePanel extends LitElement {
       ? this._people.find((p) => p.id === personId)
       : undefined;
     const matches = this._mePersonMatches();
-    return html`<div class="form-section settings-me-body">
+
+    const linkCards = this._userLinks.length
+      ? html`<div class="settings-linked-grid">
+          ${this._userLinks.map((l) => {
+            const pid = String(l.person_id || "");
+            const person = this._people.find((p) => p.id === pid);
+            const account = this._haUserDisplayName(String(l.ha_user_id));
+            return html`<div class="person-card-wrap">
+              ${person
+                ? this._renderPersonCard(person as unknown as Record<string, unknown>, {
+                    preview: true,
+                    subtitle: account || undefined,
+                  })
+                : html`<div class="person-card">
+                    <div class="person-card-title">${l.person_name || pid}</div>
+                    ${account ? html`<div class="person-card-meta">${account}</div>` : nothing}
+                  </div>`}
+              ${write
+                ? html`<div class="rel-person-actions">
+                    <button
+                      type="button"
+                      class="linkish danger"
+                      @click=${async () => {
+                        await setUserLink(this.hass, String(l.ha_user_id), null);
+                        await this._loadSettingsExtras();
+                      }}
+                    >
+                      ${this._tt("delete")}
+                    </button>
+                  </div>`
+                : nothing}
+            </div>`;
+          })}
+        </div>`
+      : html`<p class="muted">—</p>`;
+
+    return html`<div class="form-stack settings-me-body">
+      ${linkCards}
+      <h3 class="settings-subhead">${this._tt("this_is_me")}</h3>
       <p class="muted">${userName}</p>
       <p class="lineage-legend muted">
         <span class="lineage-marker" aria-hidden="true">${icon(MDI_ACCOUNT_HEART)}</span>
         ${this._tt("settings_lineage_help")}
       </p>
       ${linkedPerson
-        ? html`<div class="person-card-wrap me-linked-card">
-            ${this._renderPersonCard(linkedPerson as unknown as Record<string, unknown>, {
-              preview: false,
-            })}
-            <button type="button" class="linkish" @click=${() => void this._claimMe(null)}>
-              ${this._tt("unlink_me")}
-            </button>
+        ? html`<div class="person-card-wrap me-linked-card settings-linked-grid">
+            <div class="person-card-wrap">
+              ${this._renderPersonCard(linkedPerson as unknown as Record<string, unknown>, {
+                preview: false,
+              })}
+              <div class="rel-person-actions">
+                <button type="button" class="linkish danger" @click=${() => void this._claimMe(null)}>
+                  ${this._tt("unlink_me")}
+                </button>
+              </div>
+            </div>
           </div>`
         : linkedName
           ? html`<p>
               <strong>${linkedName}</strong>
-              <button type="button" class="linkish" @click=${() => void this._claimMe(null)}>
+              <button type="button" class="linkish danger" @click=${() => void this._claimMe(null)}>
                 ${this._tt("unlink_me")}
               </button>
             </p>`
@@ -3840,6 +3906,108 @@ export class FamilyTreePanel extends LitElement {
               </div>`
             : nothing}`
         : nothing}
+      ${write
+        ? html`<h3 class="settings-subhead">${this._tt("user_links")}</h3>
+            <div class="user-link-form form-stack">
+              <label>
+                ${this._tt("link_ha_user")}
+                <input
+                  type="search"
+                  .value=${this._linkUserQuery}
+                  placeholder=${this._tt("search_placeholder")}
+                  @input=${(e: Event) => {
+                    this._linkUserQuery = (e.target as HTMLInputElement).value;
+                    this._linkSelectedUserId = "";
+                  }}
+                />
+              </label>
+              ${this._linkSelectedUserId
+                ? html`<p class="muted">
+                    ${this._haUserDisplayName(this._linkSelectedUserId)}
+                    <button
+                      type="button"
+                      class="linkish"
+                      @click=${() => {
+                        this._linkSelectedUserId = "";
+                        this._linkUserQuery = "";
+                      }}
+                    >
+                      ×
+                    </button>
+                  </p>`
+                : linkUserMatches.length
+                  ? html`<ul class="plain me-hits">
+                      ${linkUserMatches.map(
+                        (u) => html`<li>
+                          <button
+                            type="button"
+                            class="linkish"
+                            @click=${() => {
+                              this._linkSelectedUserId = u.id;
+                              this._linkUserQuery = u.name || "";
+                            }}
+                          >
+                            <strong>${u.name || this._tt("linked_users")}</strong>
+                          </button>
+                        </li>`,
+                      )}
+                    </ul>`
+                  : this._linkUserQuery.trim() && !linkUserMatches.length
+                    ? html`<p class="muted">${this._tt("no_people")}</p>`
+                    : nothing}
+              <label>
+                ${this._tt("link_person")}
+                <input
+                  type="search"
+                  .value=${this._linkPersonQuery}
+                  placeholder=${this._tt("search_placeholder")}
+                  @input=${(e: Event) => {
+                    this._linkPersonQuery = (e.target as HTMLInputElement).value;
+                    this._linkPersonId = "";
+                  }}
+                />
+              </label>
+              ${this._linkPersonId
+                ? html`<p class="muted">
+                    ${personDisplayName(
+                      this._people.find((p) => p.id === this._linkPersonId) || {
+                        id: this._linkPersonId,
+                        given_names: "",
+                        call_name: "",
+                        surname_prefix: "",
+                        surname: "",
+                        sex: "unknown",
+                        is_living: true,
+                        notes: "",
+                      },
+                    )}
+                    <button
+                      type="button"
+                      class="linkish"
+                      @click=${() => {
+                        this._linkPersonId = "";
+                        this._linkPersonQuery = "";
+                      }}
+                    >
+                      ×
+                    </button>
+                  </p>`
+                : this._renderPersonSearchHits(
+                    linkPersonMatches,
+                    this._linkPersonQuery,
+                    (id) => {
+                      this._linkPersonId = id;
+                      const p = this._people.find((x) => x.id === id);
+                      if (p) this._linkPersonQuery = personDisplayName(p);
+                    },
+                  )}
+              ${mdButton(this._tt("save"), {
+                variant: "filled",
+                disabled: !this._linkSelectedUserId || !this._linkPersonId,
+                onClick: () => void this._saveUserLinkFromForm(),
+              })}
+            </div>`
+        : nothing}
     </div>`;
   }
 
@@ -3848,9 +4016,16 @@ export class FamilyTreePanel extends LitElement {
     const write = this._canWrite();
     const linkPersonMatches = this._peopleSearchMatches(this._linkPersonQuery);
     const linkUserMatches = this._haUserMatches();
-    const gedcomBody = html`<div class="settings-subsections">
-      <div class="form-section">
-        <span class="form-section-title">${this._tt("import_gedcom")}</span>
+    const surnameOptions = this._knownSurnames();
+    const linkedUsersBody = this._renderLinkedUsersSettingsBody(
+      write,
+      linkPersonMatches,
+      linkUserMatches,
+    );
+
+    const gedcomBody = html`<div class="settings-subsections form-stack">
+      <div class="form-stack">
+        <span class="form-stack-title">${this._tt("import_gedcom")}</span>
         ${write
           ? html`
               <label class="check">
@@ -3863,7 +4038,7 @@ export class FamilyTreePanel extends LitElement {
                 ${this._tt("replace_import")}
               </label>
               ${mdButton(this._tt("import_gedcom"), {
-                variant: "outlined",
+                variant: "filled",
                 onClick: () => this._pickGedcomFile("ft-gedcom-settings-file"),
               })}
               <input
@@ -3877,14 +4052,17 @@ export class FamilyTreePanel extends LitElement {
           : html`<p class="muted">${this._tt("read_only")}</p>`}
         ${this._importStatus ? html`<p class="muted">${this._importStatus}</p>` : nothing}
       </div>
-      <div class="form-section">
-        <span class="form-section-title">${this._tt("export_gedcom")}</span>
+      <div class="form-stack">
+        <span class="form-stack-title">${this._tt("export_gedcom")}</span>
         <p class="muted">${this._tt("settings_gedcom_export_hint")}</p>
-        <button type="button" @click=${() => this._exportGedcom()}>${this._tt("export_gedcom")}</button>
+        ${mdButton(this._tt("export_gedcom"), {
+          variant: "filled",
+          onClick: () => this._exportGedcom(),
+        })}
       </div>
     </div>`;
 
-    const shortcutsBody = html`<div class="form-section">
+    const shortcutsBody = html`<div class="form-stack">
       <p class="muted">${this._tt("settings_shortcuts_help")}</p>
       <div class="chip-row settings-shortcut-chips">
         ${this._shortcutsDraft.map(
@@ -3895,7 +4073,7 @@ export class FamilyTreePanel extends LitElement {
                   type="button"
                   class="linkish chip-remove"
                   aria-label=${this._tt("delete")}
-                  @click=${() => this._removeShortcut(i)}
+                  @click=${() => void this._removeShortcut(i)}
                 >
                   ×
                 </button>`
@@ -3907,6 +4085,7 @@ export class FamilyTreePanel extends LitElement {
       ${write
         ? html`<div class="inline-form">
             <input
+              list="ft-surname-suggestions"
               .value=${this._shortcutInput}
               placeholder=${this._tt("settings_shortcuts_placeholder")}
               @input=${(e: Event) =>
@@ -3914,146 +4093,23 @@ export class FamilyTreePanel extends LitElement {
               @keydown=${(e: KeyboardEvent) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  this._addShortcutFromInput();
+                  void this._addShortcutFromInput();
                 }
               }}
             />
-            <button type="button" @click=${() => this._addShortcutFromInput()}>
-              ${this._tt("settings_shortcuts_add")}
-            </button>
-            <button
-              type="button"
-              ?disabled=${this._shortcutsSaving}
-              @click=${() => void this._saveShortcutsDraft()}
-            >
-              ${this._tt("save")}
-            </button>
+            <datalist id="ft-surname-suggestions">
+              ${surnameOptions.map((s) => html`<option value=${s}></option>`)}
+            </datalist>
+            ${mdButton(this._tt("settings_shortcuts_add"), {
+              variant: "filled",
+              disabled: this._shortcutsSaving,
+              onClick: () => void this._addShortcutFromInput(),
+            })}
           </div>`
         : nothing}
     </div>`;
 
-    const linksBody = html`<div class="form-section">
-      <ul class="plain">
-        ${this._userLinks.map(
-          (l) => html`<li>
-            ${this._haUserDisplayName(String(l.ha_user_id))} → ${l.person_name || l.person_id}
-            ${write
-              ? html`<button class="linkish" @click=${async () => {
-                  await setUserLink(this.hass, String(l.ha_user_id), null);
-                  await this._loadSettingsExtras();
-                }}>${this._tt("delete")}</button>`
-              : nothing}
-          </li>`,
-        )}
-        ${!this._userLinks.length ? html`<li class="muted">—</li>` : nothing}
-      </ul>
-      ${write
-        ? html`<div class="user-link-form">
-            <label>
-              ${this._tt("link_ha_user")}
-              <input
-                type="search"
-                .value=${this._linkUserQuery}
-                placeholder=${this._tt("search_placeholder")}
-                @input=${(e: Event) => {
-                  this._linkUserQuery = (e.target as HTMLInputElement).value;
-                  this._linkSelectedUserId = "";
-                }}
-              />
-            </label>
-            ${this._linkSelectedUserId
-              ? html`<p class="muted">
-                  ${this._haUserDisplayName(this._linkSelectedUserId)}
-                  <button
-                    type="button"
-                    class="linkish"
-                    @click=${() => {
-                      this._linkSelectedUserId = "";
-                      this._linkUserQuery = "";
-                    }}
-                  >
-                    ×
-                  </button>
-                </p>`
-              : linkUserMatches.length
-                ? html`<ul class="plain me-hits">
-                    ${linkUserMatches.map(
-                      (u) => html`<li>
-                        <button
-                          type="button"
-                          class="linkish"
-                          @click=${() => {
-                            this._linkSelectedUserId = u.id;
-                            this._linkUserQuery = u.name || u.id;
-                          }}
-                        >
-                          <strong>${u.name || u.id}</strong>
-                          <span class="muted">${u.id}</span>
-                        </button>
-                      </li>`,
-                    )}
-                  </ul>`
-                : this._linkUserQuery.trim()
-                  ? html`<p class="muted">—</p>`
-                  : nothing}
-            <label>
-              ${this._tt("link_person")}
-              <input
-                type="search"
-                .value=${this._linkPersonQuery}
-                placeholder=${this._tt("search_placeholder")}
-                @input=${(e: Event) => {
-                  this._linkPersonQuery = (e.target as HTMLInputElement).value;
-                  this._linkPersonId = "";
-                }}
-              />
-            </label>
-            ${this._linkPersonId
-              ? html`<p class="muted">
-                  ${personDisplayName(
-                    this._people.find((p) => p.id === this._linkPersonId) || {
-                      id: this._linkPersonId,
-                      given_names: "",
-                      call_name: "",
-                      surname_prefix: "",
-                      surname: "",
-                      sex: "unknown",
-                      is_living: true,
-                      notes: "",
-                    },
-                  )}
-                  <button
-                    type="button"
-                    class="linkish"
-                    @click=${() => {
-                      this._linkPersonId = "";
-                      this._linkPersonQuery = "";
-                    }}
-                  >
-                    ×
-                  </button>
-                </p>`
-              : this._renderPersonSearchHits(
-                  linkPersonMatches,
-                  this._linkPersonQuery,
-                  (id) => {
-                    this._linkPersonId = id;
-                    const p = this._people.find((x) => x.id === id);
-                    if (p) this._linkPersonQuery = personDisplayName(p);
-                  },
-                )}
-            <button
-              type="button"
-              ?disabled=${!this._linkSelectedUserId || !this._linkPersonId}
-              @click=${() => void this._saveUserLinkFromForm()}
-            >
-              ${this._tt("save")}
-            </button>
-          </div>`
-        : nothing}
-    </div>`;
-
-    const gazetteerBody = html`<div class="form-section">
+    const gazetteerBody = html`<div class="form-stack">
       <p class="muted">${this._tt("settings_gazetteer_countries_hint")}</p>
       <p class="muted">${countries.map((c) => `${c.code} (${c.place_count})`).join(", ") || "—"}</p>
       <div class="inline-form">
@@ -4071,11 +4127,11 @@ export class FamilyTreePanel extends LitElement {
       </ul>
     </div>`;
 
-    return html`
+    return html`<div class="settings-page">
       ${this._renderCollapsibleSection(
-        "settings-me",
-        this._tt("this_is_me"),
-        this._renderMeSettingsBody(),
+        "settings-linked-users",
+        this._tt("linked_users"),
+        linkedUsersBody,
         true,
       )}
       ${this._renderCollapsibleSection(
@@ -4090,14 +4146,13 @@ export class FamilyTreePanel extends LitElement {
         shortcutsBody,
         true,
       )}
-      ${this._renderCollapsibleSection("settings-links", this._tt("user_links"), linksBody, false)}
       ${this._renderCollapsibleSection(
         "settings-gazetteer",
         this._tt("gazetteer"),
         gazetteerBody,
         false,
       )}
-    `;
+    </div>`;
   }
 
   private _closeDialog = () => {
@@ -4184,7 +4239,7 @@ export class FamilyTreePanel extends LitElement {
                       : this._tt("add_person");
 
     const deceasedOn = this._form.deceased === "true";
-    const personalBody = html`<div class="form-section">
+    const personalBody = html`<div class="form-stack">
       <label
         >${this._fieldLabel(this._tt("given_names"), write)}
         <input
@@ -4269,7 +4324,7 @@ export class FamilyTreePanel extends LitElement {
       </label>
     </div>`;
 
-    const birthBody = html`<div class="form-section">
+    const birthBody = html`<div class="form-stack">
       ${this._renderPersonPlaceField("birth_place", this._tt("birth_place"), write)}
       <label class="vital-date-field"
         >${this._tt("col_birth")}
@@ -4299,7 +4354,7 @@ export class FamilyTreePanel extends LitElement {
       </label>
     </div>`;
 
-    const deceasedBody = html`<div class="form-section">
+    const deceasedBody = html`<div class="form-stack">
       <label class="check-row"
         >${this._tt("deceased")}
         <span class="check-control">
@@ -4385,7 +4440,7 @@ export class FamilyTreePanel extends LitElement {
       (this._eventForm.date_qualifier === "between" ||
         this._eventForm.date_qualifier === "from_to");
     const eventBody = html`
-      <div class="form-section">
+      <div class="form-stack">
         <label
           >${this._tt("events")}
           <select
@@ -4531,7 +4586,7 @@ export class FamilyTreePanel extends LitElement {
       </div>
     `;
 
-    const unionBody = html`<div class="form-section">
+    const unionBody = html`<div class="form-stack">
       <label
         >${this._fieldLabel(this._tt("union_status"))}
         <select
@@ -4598,7 +4653,7 @@ export class FamilyTreePanel extends LitElement {
     </div>`;
 
     const pickMatches = this._pickPersonMatches();
-    const pickBody = html`<div class="form-section">
+    const pickBody = html`<div class="form-stack">
       <label
         >${this._fieldLabel(this._tt("search_to_link"))}
         <input
@@ -4623,7 +4678,7 @@ export class FamilyTreePanel extends LitElement {
       </ul>
     </div>`;
 
-    const citationBody = html`<div class="form-section">
+    const citationBody = html`<div class="form-stack">
       <label
         >${this._tt("source_title")}
         <input
@@ -4683,12 +4738,12 @@ export class FamilyTreePanel extends LitElement {
       </label>
     </div>`;
 
-    const parentsBody = html`<div class="form-section parent-link-form">
+    const parentsBody = html`<div class="form-stack parent-link-form">
       ${this._renderParentLinkSlot("father")}
       ${this._renderParentLinkSlot("mother")}
     </div>`;
 
-    const profilePhotoBody = html`<div class="form-section profile-photo-editor">
+    const profilePhotoBody = html`<div class="form-stack profile-photo-editor">
       <label class="file-btn">
         ${this._tt("profile_photo_choose")}
         <input
@@ -5253,6 +5308,26 @@ export class FamilyTreePanel extends LitElement {
       border-radius: 50%;
       flex-shrink: 0;
       line-height: 0;
+      position: relative;
+    }
+    .person-avatar-edit-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-primary-color, #fff);
+      background: color-mix(in srgb, var(--primary-text-color, #000) 45%, transparent);
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      pointer-events: none;
+    }
+    .person-avatar-edit-btn:hover .person-avatar-edit-label,
+    .person-avatar-edit-btn:focus-visible .person-avatar-edit-label {
+      opacity: 1;
     }
     .person-avatar-edit-btn:hover,
     .person-avatar-edit-btn:focus-visible {
@@ -5607,7 +5682,7 @@ export class FamilyTreePanel extends LitElement {
       gap: 8px;
     }
     .person-card-head--with-avatar {
-      align-items: flex-start;
+      align-items: center;
       gap: 10px;
     }
     .person-card-head-text {
@@ -5647,11 +5722,13 @@ export class FamilyTreePanel extends LitElement {
       padding-right: 4px;
     }
     .person-avatar {
+      position: relative;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       border-radius: 50%;
       flex-shrink: 0;
+      overflow: hidden;
       overflow: hidden;
       box-sizing: border-box;
       border: 1px solid var(--divider-color);
@@ -5677,9 +5754,15 @@ export class FamilyTreePanel extends LitElement {
       background: var(--secondary-background-color);
       color: var(--secondary-text-color);
     }
-    .person-avatar--deceased {
-      opacity: 0.85;
-      box-shadow: inset 0 0 0 2px var(--secondary-text-color);
+    .person-avatar__deceased-mark {
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      z-index: 1;
+      color: var(--secondary-text-color);
+      filter: drop-shadow(0 0 1px var(--card-background-color, #fff));
+      pointer-events: none;
+      line-height: 0;
     }
     .person-avatar--lg {
       font-size: 1.5rem;
@@ -5737,6 +5820,12 @@ export class FamilyTreePanel extends LitElement {
       flex-direction: column;
       gap: 4px;
     }
+    .photo-thumb-btn ft-authenticated-media-img,
+    .photo-thumb-btn img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+    }
     .photo-thumb-btn {
       appearance: none;
       border: 1px solid var(--divider-color);
@@ -5784,11 +5873,13 @@ export class FamilyTreePanel extends LitElement {
       justify-content: center;
       padding: 24px;
     }
-    .photo-lightbox img {
+    .photo-lightbox img,
+    .photo-lightbox-img {
       max-width: min(100%, 900px);
       max-height: 90vh;
       object-fit: contain;
       border-radius: 8px;
+      display: block;
     }
     .file-btn {
       cursor: pointer;
@@ -5965,6 +6056,9 @@ export class FamilyTreePanel extends LitElement {
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
+    .dialog-body .collapse-body {
+      background: transparent;
+    }
     .dialog.dialog-narrow {
       width: 100%;
       height: auto;
@@ -5981,14 +6075,29 @@ export class FamilyTreePanel extends LitElement {
       padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
       padding-left: max(12px, env(safe-area-inset-left, 0px));
     }
+    .form-stack,
     .form-section {
       display: flex;
       flex-direction: column;
       gap: 12px;
-      padding: 12px;
-      border: 1px solid var(--divider-color);
-      border-radius: var(--ha-border-radius-md, 8px);
-      background: var(--secondary-background-color, rgba(0, 0, 0, 0.02));
+    }
+    .settings-subhead {
+      margin: 16px 0 4px;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .settings-linked-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .settings-linked-grid > .person-card-wrap {
+      width: min(100%, 280px);
+      flex: 0 1 280px;
+    }
+    .settings-page .collapse-body {
+      background: transparent;
     }
     .form-section-title {
       display: block;

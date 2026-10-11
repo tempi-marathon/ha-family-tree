@@ -1,8 +1,8 @@
 /** Circular person avatar (photo or initials). */
 
 import { html, nothing } from "lit";
+import "./authenticated-media-img";
 import { personDisplayName } from "./people_view";
-import { personMediaUrl } from "./media";
 import type { PersonDto } from "./api";
 import type { HomeAssistant } from "./types";
 
@@ -14,6 +14,28 @@ const SIZE_PX: Record<AvatarSize, number> = {
   detail: 64,
   lg: 96,
 };
+
+const DECEASED_ICON_PX: Record<AvatarSize, number> = {
+  sm: 10,
+  md: 11,
+  detail: 12,
+  lg: 14,
+};
+
+const MDI_BOOKMARK_OUTLINE =
+  "M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5A2,2 0 0,0 17,3Z";
+
+function deceasedMarkSvg(sizePx: number) {
+  return html`<svg
+    class="person-avatar__deceased-mark"
+    viewBox="0 0 24 24"
+    width=${sizePx}
+    height=${sizePx}
+    aria-hidden="true"
+  >
+    <path fill="currentColor" d=${MDI_BOOKMARK_OUTLINE} />
+  </svg>`;
+}
 
 function initialsForPerson(person: {
   given_names?: string;
@@ -64,29 +86,35 @@ export function renderPersonAvatar(
   const title =
     opts.title ??
     personDisplayName(person as PersonDto);
-  const deceased = opts.deceasedOverlay && !isLiving;
+  const deceasedMark = opts.deceasedOverlay && !isLiving;
+  const markPx = DECEASED_ICON_PX[size];
+  const useFull = size === "lg" || size === "detail";
 
   if (profileId) {
-    const useFull = size === "lg" || size === "detail";
-    const src = personMediaUrl(profileId, useFull ? "full" : "thumb", opts.hass);
     return html`<span
-      class="person-avatar ${sexClass(sex)} person-avatar--${size}${deceased
-        ? " person-avatar--deceased"
-        : ""}"
+      class="person-avatar person-avatar--photo ${sexClass(sex)} person-avatar--${size}"
       style="width:${px}px;height:${px}px"
       title=${title}
     >
-      <img src=${src} alt="" loading="lazy" width=${px} height=${px} />
+      <ft-authenticated-media-img
+        .hass=${opts.hass}
+        mediaId=${profileId}
+        variant=${useFull ? "full" : "thumb"}
+        width=${px}
+        height=${px}
+      ></ft-authenticated-media-img>
+      ${deceasedMark ? deceasedMarkSvg(markPx) : nothing}
     </span>`;
   }
 
   const letters = initialsForPerson(person as PersonDto);
   return html`<span
-    class="person-avatar person-avatar--initials ${sexClass(sex)} person-avatar--${size}${deceased
-      ? " person-avatar--deceased"
-      : ""}"
+    class="person-avatar person-avatar--initials ${sexClass(sex)} person-avatar--${size}"
     style="width:${px}px;height:${px}px"
     title=${title}
     aria-hidden="true"
-  >${letters}</span>`;
+  >
+    ${letters}
+    ${deceasedMark ? deceasedMarkSvg(markPx) : nothing}
+  </span>`;
 }
