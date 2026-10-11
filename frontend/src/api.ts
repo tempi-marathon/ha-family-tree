@@ -152,7 +152,12 @@ export interface TreeUnion {
 }
 
 export interface TreePayload {
-  person: PersonDto & { name?: string; sibling_count?: number };
+  person: PersonDto & {
+    name?: string;
+    sibling_count?: number;
+    children_count?: number;
+    has_parent?: boolean;
+  };
   parents: Array<Record<string, unknown>>;
   grandparents: Record<string, Array<Record<string, unknown>>>;
   partners: TreeUnion[];

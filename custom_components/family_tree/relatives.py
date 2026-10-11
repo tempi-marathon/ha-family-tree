@@ -64,6 +64,8 @@ def _person_summary(repo: Repository, person: Person) -> dict[str, Any]:
         "is_living": person.is_living,
         "profile_media_id": person.profile_media_id,
         "sibling_count": _sibling_count(repo, person.id),
+        "children_count": len(repo.list_children(person.id)),
+        "has_parent": bool(repo.list_parents(person.id)),
         **_vital_fields(repo, person.id),
     }
 
