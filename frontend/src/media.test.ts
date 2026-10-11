@@ -1,15 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { apiUrl, personMediaUrl } from "./media";
+import { apiUrl, personMediaApiPath, personMediaUrl } from "./media";
 import type { HomeAssistant } from "./types";
+
+describe("personMediaApiPath", () => {
+  it("builds thumb path for valid id", () => {
+    const id = "a".repeat(32);
+    expect(personMediaApiPath(id, "thumb")).toBe(`/api/family_tree/media/${id}?variant=thumb`);
+  });
+
+  it("rejects invalid ids", () => {
+    expect(personMediaApiPath("not-valid", "full")).toBe("");
+  });
+});
 
 describe("personMediaUrl", () => {
   it("builds thumb URL for valid id", () => {
     const id = "a".repeat(32);
     expect(personMediaUrl(id, "thumb")).toBe(`/api/family_tree/media/${id}?variant=thumb`);
-  });
-
-  it("rejects invalid ids", () => {
-    expect(personMediaUrl("not-valid", "full")).toBe("");
   });
 
   it("uses hassUrl when provided", () => {

@@ -714,6 +714,30 @@ async def ws_citations_delete(
 
 
 @websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/ha_users/list", **_OPTIONAL_ENTRY}
+)
+@websocket_api.async_response
+async def ws_ha_users_list(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
+
+    users = [
+        {
+            "id": user.id,
+            "name": user.name or "",
+            "is_active": user.is_active,
+        }
+        for user in await hass.auth.async_get_users()
+    ]
+    connection.send_result(msg["id"], {"users": users})
+
+
+@websocket_api.websocket_command(
     {vol.Required("type"): f"{DOMAIN}/user_links/list", **_OPTIONAL_ENTRY}
 )
 @websocket_api.async_response
@@ -1622,6 +1646,7 @@ def async_register_websocket(hass: HomeAssistant) -> None:
         ws_citations_delete,
         ws_events_save,
         ws_events_delete,
+        ws_ha_users_list,
         ws_user_links_list,
         ws_user_links_set,
         ws_user_links_claim,
