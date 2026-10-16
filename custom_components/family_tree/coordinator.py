@@ -496,10 +496,7 @@ def _on_this_day(
         pool = today_items
     else:
         tomorrow_items = [c for c in candidates if c["days_until"] == 1]
-        if tomorrow_items:
-            pool = tomorrow_items
-        else:
-            pool = candidates
+        pool = tomorrow_items or candidates
 
     kind_order = {"birth": 0, "marriage": 1, "death": 2}
     pool.sort(
