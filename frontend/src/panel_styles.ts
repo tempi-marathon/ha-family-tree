@@ -82,6 +82,108 @@ export const panelStyles = css`
     .banner { background: var(--secondary-background-color); }
     .error { background: color-mix(in srgb, var(--error-color) 18%, transparent); color: var(--error-color); }
     .muted { color: var(--secondary-text-color); font-size: 0.9em; }
+    .loading-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      min-height: 12rem;
+    }
+    .loading-bar {
+      height: 3px;
+      width: 100%;
+      overflow: hidden;
+      border-radius: 2px;
+      background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+      margin-bottom: 20px;
+    }
+    .loading-bar-fill {
+      height: 100%;
+      width: 35%;
+      border-radius: 2px;
+      background: var(--primary-color);
+      animation: loading-bar-indeterminate 1.15s ease-in-out infinite;
+    }
+    @keyframes loading-bar-indeterminate {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(320%); }
+    }
+    .skel {
+      background: color-mix(
+        in srgb,
+        var(--secondary-text-color, #888) 14%,
+        var(--secondary-background-color, var(--card-background-color, #eee))
+      );
+      border-radius: var(--ha-border-radius-md, 8px);
+      animation: skel-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes skel-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .skel-line { height: 0.75rem; }
+    .skel-line--lg { width: 3.5rem; height: 1.35rem; margin-bottom: 8px; }
+    .skel-line--md { width: 55%; max-width: 10rem; }
+    .skel-line--sm { width: 4.5rem; height: 0.65rem; margin-top: 8px; }
+    .skel-line--full { width: 100%; margin-top: 10px; }
+    .skel-stat {
+      border-left-color: color-mix(in srgb, var(--primary-color) 35%, transparent);
+    }
+    .skel-chart {
+      height: 160px;
+      width: 100%;
+      margin-top: 12px;
+      border-radius: var(--ha-card-border-radius, 12px);
+    }
+    .skel-toolbar-search {
+      flex: 1;
+      min-width: 160px;
+      height: 40px;
+      border-radius: var(--ha-border-radius-lg, 12px);
+    }
+    .skel-toolbar-btn {
+      width: 6.5rem;
+      height: 40px;
+      border-radius: var(--ha-border-radius-pill, 9999px);
+      margin-left: auto;
+    }
+    .skel-people {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .skel-person-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--divider-color);
+    }
+    .skel-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .skel-person-text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .skel-person-text .skel-line--sm { margin-top: 6px; }
+    .skel-settings {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .skel-settings-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      min-height: 5.5rem;
+    }
+    .skel-settings-card .skel-line--md { margin-bottom: 4px; }
     .stats-row {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));

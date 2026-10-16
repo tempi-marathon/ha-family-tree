@@ -82,6 +82,108 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
     .banner { background: var(--secondary-background-color); }
     .error { background: color-mix(in srgb, var(--error-color) 18%, transparent); color: var(--error-color); }
     .muted { color: var(--secondary-text-color); font-size: 0.9em; }
+    .loading-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      min-height: 12rem;
+    }
+    .loading-bar {
+      height: 3px;
+      width: 100%;
+      overflow: hidden;
+      border-radius: 2px;
+      background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+      margin-bottom: 20px;
+    }
+    .loading-bar-fill {
+      height: 100%;
+      width: 35%;
+      border-radius: 2px;
+      background: var(--primary-color);
+      animation: loading-bar-indeterminate 1.15s ease-in-out infinite;
+    }
+    @keyframes loading-bar-indeterminate {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(320%); }
+    }
+    .skel {
+      background: color-mix(
+        in srgb,
+        var(--secondary-text-color, #888) 14%,
+        var(--secondary-background-color, var(--card-background-color, #eee))
+      );
+      border-radius: var(--ha-border-radius-md, 8px);
+      animation: skel-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes skel-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .skel-line { height: 0.75rem; }
+    .skel-line--lg { width: 3.5rem; height: 1.35rem; margin-bottom: 8px; }
+    .skel-line--md { width: 55%; max-width: 10rem; }
+    .skel-line--sm { width: 4.5rem; height: 0.65rem; margin-top: 8px; }
+    .skel-line--full { width: 100%; margin-top: 10px; }
+    .skel-stat {
+      border-left-color: color-mix(in srgb, var(--primary-color) 35%, transparent);
+    }
+    .skel-chart {
+      height: 160px;
+      width: 100%;
+      margin-top: 12px;
+      border-radius: var(--ha-card-border-radius, 12px);
+    }
+    .skel-toolbar-search {
+      flex: 1;
+      min-width: 160px;
+      height: 40px;
+      border-radius: var(--ha-border-radius-lg, 12px);
+    }
+    .skel-toolbar-btn {
+      width: 6.5rem;
+      height: 40px;
+      border-radius: var(--ha-border-radius-pill, 9999px);
+      margin-left: auto;
+    }
+    .skel-people {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .skel-person-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--divider-color);
+    }
+    .skel-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .skel-person-text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .skel-person-text .skel-line--sm { margin-top: 6px; }
+    .skel-settings {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .skel-settings-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      min-height: 5.5rem;
+    }
+    .skel-settings-card .skel-line--md { margin-bottom: 4px; }
     .stats-row {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2719,11 +2821,55 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
         ${this._error?W`<p class="error" role="alert">${this._error}</p>`:G}
 
         <main class="main">
-          ${this._loading?W`<p class="muted">${this._tt(`loading`)}</p>`:this._view===`dashboard`?this._renderDashboard():this._view===`person`&&this._detail?this._renderPerson():this._view===`settings`?this._renderSettings():this._renderPeopleList()}
+          ${this._loading?this._renderLoading():this._view===`dashboard`?this._renderDashboard():this._view===`person`&&this._detail?this._renderPerson():this._view===`settings`?this._renderSettings():this._renderPeopleList()}
         </main>
       </div>
       ${this._dialogOpen?this._renderDialog():G}
       ${this._rowMenu?this._renderFixedRowMenu():G}
+    `}_renderLoading(){let e=this._view===`settings`?this._renderSettingsSkeleton():this._view===`dashboard`?this._renderDashboardSkeleton():this._renderPeopleSkeleton();return W`
+      <div class="loading-panel" role="status" aria-busy="true">
+        <span class="sr-only">${this._tt(`loading`)}</span>
+        <div class="loading-bar" aria-hidden="true">
+          <div class="loading-bar-fill"></div>
+        </div>
+        <div class="loading-skel" aria-hidden="true">${e}</div>
+      </div>
+    `}_renderDashboardSkeleton(){return W`
+      <section class="stats-row">
+        ${[0,1,2].map(()=>W`<div class="stat skel-stat">
+            <div class="skel skel-line skel-line--lg"></div>
+            <div class="skel skel-line skel-line--sm"></div>
+          </div>`)}
+      </section>
+      <section class="charts">
+        ${[0,1].map(()=>W`<div class="chart-card">
+            <div class="skel skel-line skel-line--md"></div>
+            <div class="skel skel-chart"></div>
+          </div>`)}
+      </section>
+    `}_renderPeopleSkeleton(){return W`
+      <div class="toolbar">
+        <div class="skel skel-toolbar-search"></div>
+        <div class="skel skel-toolbar-btn"></div>
+      </div>
+      <div class="skel-people">
+        ${[0,1,2,3,4,5,6].map(()=>W`<div class="skel-person-row">
+            <div class="skel skel-avatar"></div>
+            <div class="skel-person-text">
+              <div class="skel skel-line skel-line--md"></div>
+              <div class="skel skel-line skel-line--sm"></div>
+            </div>
+          </div>`)}
+      </div>
+    `}_renderSettingsSkeleton(){return W`
+      <div class="skel-settings">
+        ${[0,1,2].map(()=>W`<div class="dashboard-panel skel-settings-card">
+            <div class="skel skel-line skel-line--md"></div>
+            <div class="skel skel-line skel-line--full"></div>
+            <div class="skel skel-line skel-line--full"></div>
+            <div class="skel skel-line skel-line--sm"></div>
+          </div>`)}
+      </div>
     `}_familyPresenceSpan(e){let t=e.year_from;if(t==null||Number.isNaN(Number(t)))return``;let n=e.has_living?this._tt(`family_span_now`):e.year_to!=null&&!Number.isNaN(Number(e.year_to))?String(e.year_to):``;return n?`${t} – ${n}`:String(t)}_renderDashboard(){let e=this._stats,t=this._settings?.upcoming_birthdays||[],n=this._settings?.on_this_day||[],r=this._familySummaries.length>0?this._familySummaries:(this._settings?.family_shortcuts||[]).map(e=>({shortcut:e,total:0})),i=(e?.total_persons??0)===0,a=!!e?.ages.labels.length,o=!!e?.centuries.labels.length,s=!!e?.places_of_birth.labels.length,c=a||o||s;return W`
       ${i?this._renderEmptyCta():W`
       <section class="stats-row">
