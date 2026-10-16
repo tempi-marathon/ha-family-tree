@@ -145,6 +145,7 @@ def _ensure_homeassistant_stubs() -> None:
     cv = modules["homeassistant.helpers.config_validation"]
     cv.string = str
     cv.boolean = bool
+    cv.config_entry_only_config_schema = lambda domain: {domain: object()}
 
     selector = modules["homeassistant.helpers.selector"]
 

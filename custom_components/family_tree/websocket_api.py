@@ -64,6 +64,9 @@ _LOGGER = logging.getLogger(__name__)
 _OPTIONAL_ENTRY = {vol.Optional(ATTR_CONFIG_ENTRY_ID): str}
 
 
+_HANDLERS: list = []
+
+
 class DuplicateEventError(Exception):
     """A once-per-person event type already exists for the subject."""
 
@@ -75,6 +78,37 @@ def _coordinator(hass: HomeAssistant, msg: dict[str, Any]) -> FamilyTreeCoordina
 def _require_admin(connection: websocket_api.ActiveConnection) -> None:
     if not connection.user or not connection.user.is_admin:
         raise Unauthorized()
+
+
+def ws_command(command: str, schema: dict | None = None, *, admin: bool = False):
+    """Register a websocket command with optional admin gate."""
+    full = {
+        vol.Required("type"): f"{DOMAIN}/{command}",
+        **(schema or {}),
+        **_OPTIONAL_ENTRY,
+    }
+
+    def decorator(handler):
+        @websocket_api.websocket_command(full)
+        @websocket_api.async_response
+        async def wrapped(
+            hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+        ) -> None:
+            if admin:
+                try:
+                    _require_admin(connection)
+                except Unauthorized:
+                    connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+                    return
+            await handler(hass, connection, msg)
+
+        wrapped.__name__ = handler.__name__
+        wrapped.__qualname__ = handler.__qualname__
+        wrapped.__doc__ = handler.__doc__
+        _HANDLERS.append(wrapped)
+        return wrapped
+
+    return decorator
 
 
 def _bounded_string(max_length: int, *, allow_empty: bool = True):
@@ -97,8 +131,7 @@ def _cap(limit: int | None, default: int, hard: int) -> int:
 # --- Reads -----------------------------------------------------------------
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/revision", **_OPTIONAL_ENTRY})
-@websocket_api.async_response
+@ws_command("revision")
 async def ws_revision(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -107,8 +140,7 @@ async def ws_revision(
     connection.send_result(msg["id"], {"revision": revision})
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/subscribe", **_OPTIONAL_ENTRY})
-@websocket_api.async_response
+@ws_command("subscribe")
 async def ws_subscribe(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -144,19 +176,17 @@ async def ws_subscribe(
     connection.subscriptions[subscription_id] = _unsubscribe
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "persons/list",
     {
-        vol.Required("type"): f"{DOMAIN}/persons/list",
         vol.Optional("search", default=""): _bounded_string(MAX_SEARCH),
         vol.Optional("sex"): vol.In([s.value for s in Sex]),
         vol.Optional("living"): bool,
         vol.Optional("trashed", default=False): bool,
         vol.Optional("limit", default=MAX_PERSONS): vol.All(int, vol.Range(min=1, max=MAX_PERSONS)),
         vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
-        **_OPTIONAL_ENTRY,
-    }
+    },
 )
-@websocket_api.async_response
 async def ws_persons_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -198,14 +228,7 @@ async def ws_persons_list(
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/persons/get",
-        vol.Required("person_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("persons/get", {vol.Required("person_id"): str})
 async def ws_persons_get(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -250,14 +273,7 @@ async def ws_persons_get(
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/persons/siblings",
-        vol.Required("person_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("persons/siblings", {vol.Required("person_id"): str})
 async def ws_persons_siblings(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -281,14 +297,7 @@ async def ws_persons_siblings(
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/tree",
-        vol.Required("person_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("tree", {vol.Required("person_id"): str})
 async def ws_tree(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -304,19 +313,17 @@ async def ws_tree(
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "lineage",
     {
-        vol.Required("type"): f"{DOMAIN}/lineage",
         vol.Required("person_id"): str,
         vol.Optional("direction", default="ancestors"): vol.In(
             ["ancestors", "descendants", "both"]
         ),
         vol.Optional("max_generations"): vol.All(int, vol.Range(min=1, max=50)),
         vol.Optional("compare_person_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
+    },
 )
-@websocket_api.async_response
 async def ws_lineage(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -363,10 +370,7 @@ def _my_lineage(repo: Any, ha_user_id: str | None) -> dict[str, Any]:
     }
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/lineage/mine", **_OPTIONAL_ENTRY}
-)
-@websocket_api.async_response
+@ws_command("lineage/mine")
 async def ws_lineage_mine(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -377,8 +381,7 @@ async def ws_lineage_mine(
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/stats", **_OPTIONAL_ENTRY})
-@websocket_api.async_response
+@ws_command("stats")
 async def ws_stats(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -390,8 +393,7 @@ async def ws_stats(
     connection.send_result(msg["id"], stats)
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/families", **_OPTIONAL_ENTRY})
-@websocket_api.async_response
+@ws_command("families")
 async def ws_families(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -467,14 +469,7 @@ async def ws_families(
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/unions/get",
-        vol.Required("union_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("unions/get", {vol.Required("union_id"): str})
 async def ws_unions_get(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -508,15 +503,13 @@ async def ws_unions_get(
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "places/list",
     {
-        vol.Required("type"): f"{DOMAIN}/places/list",
         vol.Optional("search", default=""): _bounded_string(MAX_SEARCH),
         vol.Optional("limit", default=50): vol.All(int, vol.Range(min=1, max=200)),
-        **_OPTIONAL_ENTRY,
-    }
+    },
 )
-@websocket_api.async_response
 async def ws_places_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -530,15 +523,13 @@ async def ws_places_list(
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "sources/list",
     {
-        vol.Required("type"): f"{DOMAIN}/sources/list",
         vol.Optional("search", default=""): _bounded_string(MAX_SEARCH),
         vol.Optional("limit", default=50): vol.All(int, vol.Range(min=1, max=200)),
-        **_OPTIONAL_ENTRY,
-    }
+    },
 )
-@websocket_api.async_response
 async def ws_sources_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -552,27 +543,21 @@ async def ws_sources_list(
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "sources/save",
     {
-        vol.Required("type"): f"{DOMAIN}/sources/save",
         vol.Required("title"): _bounded_string(MAX_NAME),
         vol.Optional("source_id"): str,
         vol.Optional("url", default=""): str,
         vol.Optional("author", default=""): str,
         vol.Optional("repository", default=""): str,
         vol.Optional("notes", default=""): _bounded_string(MAX_NOTES),
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_sources_save(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
@@ -610,22 +595,10 @@ async def ws_sources_save(
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/sources/delete",
-        vol.Required("source_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("sources/delete", {vol.Required("source_id"): str}, admin=True)
 async def ws_sources_delete(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     ok = await hass.async_add_executor_job(coordinator.repo.soft_delete_source, msg["source_id"])
     if not ok:
@@ -634,9 +607,9 @@ async def ws_sources_delete(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "citations/save",
     {
-        vol.Required("type"): f"{DOMAIN}/citations/save",
         vol.Required("subject_type"): vol.In([SubjectType.PERSON.value]),
         vol.Required("subject_id"): str,
         vol.Optional("citation_id"): str,
@@ -647,18 +620,12 @@ async def ws_sources_delete(
         vol.Optional("author", default=""): str,
         vol.Optional("repository", default=""): str,
         vol.Optional("source_notes", default=""): _bounded_string(MAX_NOTES),
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_citations_save(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
@@ -748,22 +715,10 @@ async def ws_citations_save(
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/citations/delete",
-        vol.Required("citation_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("citations/delete", {vol.Required("citation_id"): str}, admin=True)
 async def ws_citations_delete(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     ok = await hass.async_add_executor_job(coordinator.repo.delete_citation, msg["citation_id"])
     if not ok:
@@ -772,18 +727,10 @@ async def ws_citations_delete(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/ha_users/list", **_OPTIONAL_ENTRY}
-)
-@websocket_api.async_response
+@ws_command("ha_users/list", admin=True)
 async def ws_ha_users_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
 
     users = [
         {
@@ -796,18 +743,10 @@ async def ws_ha_users_list(
     connection.send_result(msg["id"], {"users": users})
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/user_links/list", **_OPTIONAL_ENTRY}
-)
-@websocket_api.async_response
+@ws_command("user_links/list", admin=True)
 async def ws_user_links_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
@@ -825,16 +764,14 @@ async def ws_user_links_list(
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "gazetteer/search",
     {
-        vol.Required("type"): f"{DOMAIN}/gazetteer/search",
         vol.Required("query"): _bounded_string(MAX_SEARCH, allow_empty=False),
         vol.Optional("country"): str,
         vol.Optional("limit", default=20): vol.All(int, vol.Range(min=1, max=50)),
-        **_OPTIONAL_ENTRY,
-    }
+    },
 )
-@websocket_api.async_response
 async def ws_gazetteer_search(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -851,10 +788,7 @@ async def ws_gazetteer_search(
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/gazetteer/status", **_OPTIONAL_ENTRY}
-)
-@websocket_api.async_response
+@ws_command("gazetteer/status")
 async def ws_gazetteer_status(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -864,8 +798,7 @@ async def ws_gazetteer_status(
     connection.send_result(msg["id"], status)
 
 
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/settings", **_OPTIONAL_ENTRY})
-@websocket_api.async_response
+@ws_command("settings")
 async def ws_settings(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -888,22 +821,10 @@ async def ws_settings(
     )
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/settings/save",
-        vol.Required("family_shortcuts"): list,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("settings/save", {vol.Required("family_shortcuts"): list}, admin=True)
 async def ws_settings_save(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     shortcuts = normalize_family_shortcuts(msg.get("family_shortcuts"))
 
@@ -917,9 +838,9 @@ async def ws_settings_save(
 # --- Mutations -------------------------------------------------------------
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "persons/save",
     {
-        vol.Required("type"): f"{DOMAIN}/persons/save",
         # Never use key "id" here — it collides with the websocket message id (int).
         vol.Optional("person_id"): str,
         vol.Required("given_names"): _bounded_string(MAX_NAME, allow_empty=False),
@@ -929,18 +850,12 @@ async def ws_settings_save(
         vol.Optional("sex", default=Sex.UNKNOWN.value): vol.In([s.value for s in Sex]),
         vol.Optional("is_living", default=True): bool,
         vol.Optional("notes", default=""): _bounded_string(MAX_NOTES),
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_persons_save(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
 
     coordinator = _coordinator(hass, msg)
 
@@ -991,22 +906,10 @@ async def ws_persons_save(
     connection.send_result(msg["id"], {"person": result})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/persons/delete",
-        vol.Required("person_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("persons/delete", {vol.Required("person_id"): str}, admin=True)
 async def ws_persons_delete(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     ok = await hass.async_add_executor_job(coordinator.repo.soft_delete_person, msg["person_id"])
     if not ok:
@@ -1015,22 +918,10 @@ async def ws_persons_delete(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/persons/restore",
-        vol.Required("person_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("persons/restore", {vol.Required("person_id"): str}, admin=True)
 async def ws_persons_restore(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     ok = await hass.async_add_executor_job(coordinator.repo.restore_person, msg["person_id"])
     if not ok:
@@ -1039,22 +930,10 @@ async def ws_persons_restore(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/persons/purge",
-        vol.Required("person_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("persons/purge", {vol.Required("person_id"): str}, admin=True)
 async def ws_persons_purge(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     person_id = msg["person_id"]
     root = media_dir(hass)
@@ -1072,14 +951,7 @@ async def ws_persons_purge(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/persons/media/list",
-        vol.Required("person_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("persons/media/list", {vol.Required("person_id"): str})
 async def ws_persons_media_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -1106,9 +978,9 @@ async def ws_persons_media_list(
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "persons/media/set_profile",
     {
-        vol.Required("type"): f"{DOMAIN}/persons/media/set_profile",
         vol.Required("person_id"): str,
         vol.Required("media_id"): str,
         vol.Optional("source_media_id"): vol.Any(str, None),
@@ -1123,18 +995,12 @@ async def ws_persons_media_list(
             None,
         ),
         vol.Optional("crop_json"): vol.Any(str, None),
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_persons_media_set_profile(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     crop = msg.get("crop")
     crop_json: str | None = None
@@ -1175,24 +1041,18 @@ async def ws_persons_media_set_profile(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "persons/media/update",
     {
-        vol.Required("type"): f"{DOMAIN}/persons/media/update",
         vol.Required("media_id"): str,
         vol.Optional("caption"): _bounded_string(MAX_CAPTION),
         vol.Optional("sort_order"): int,
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_persons_media_update(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     updated = await hass.async_add_executor_job(
         lambda: coordinator.repo.update_person_media(
@@ -1207,22 +1067,10 @@ async def ws_persons_media_update(
     connection.send_result(msg["id"], {"media": updated.to_dict()})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/persons/media/delete",
-        vol.Required("media_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("persons/media/delete", {vol.Required("media_id"): str}, admin=True)
 async def ws_persons_media_delete(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     root = media_dir(hass)
 
@@ -1236,9 +1084,9 @@ async def ws_persons_media_delete(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "unions/save",
     {
-        vol.Required("type"): f"{DOMAIN}/unions/save",
         vol.Optional("union_id"): str,
         vol.Optional("union_type", default=UnionType.UNKNOWN.value): vol.In(
             [t.value for t in UnionType]
@@ -1249,18 +1097,12 @@ async def ws_persons_media_delete(
         vol.Optional("known_children_count"): vol.Any(None, int),
         vol.Optional("notes", default=""): _bounded_string(MAX_NOTES),
         vol.Required("partner_ids"): vol.All([str], vol.Length(min=1, max=10)),
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_unions_save(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     partners = [(pid, idx) for idx, pid in enumerate(msg["partner_ids"])]
 
@@ -1298,22 +1140,10 @@ async def ws_unions_save(
     connection.send_result(msg["id"], {"union": result})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/unions/delete",
-        vol.Required("union_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("unions/delete", {vol.Required("union_id"): str}, admin=True)
 async def ws_unions_delete(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     ok = await hass.async_add_executor_job(coordinator.repo.soft_delete_union, msg["union_id"])
     if not ok:
@@ -1322,27 +1152,21 @@ async def ws_unions_delete(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "parent_child/add",
     {
-        vol.Required("type"): f"{DOMAIN}/parent_child/add",
         vol.Required("parent_id"): str,
         vol.Required("child_id"): str,
         vol.Optional("link_type", default=ParentChildType.BIOLOGICAL.value): vol.In(
             [t.value for t in ParentChildType]
         ),
         vol.Optional("union_id"): vol.Any(None, str),
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_parent_child_add(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     link = ParentChild(
         parent_id=msg["parent_id"],
@@ -1366,22 +1190,10 @@ async def ws_parent_child_add(
     connection.send_result(msg["id"], {"link": result})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/parent_child/remove",
-        vol.Required("link_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("parent_child/remove", {vol.Required("link_id"): str}, admin=True)
 async def ws_parent_child_remove(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     ok = await hass.async_add_executor_job(coordinator.repo.remove_parent_child, msg["link_id"])
     if not ok:
@@ -1390,9 +1202,9 @@ async def ws_parent_child_remove(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "places/save",
     {
-        vol.Required("type"): f"{DOMAIN}/places/save",
         vol.Optional("place_id"): str,
         vol.Required("name"): _bounded_string(MAX_NAME, allow_empty=False),
         vol.Optional("admin1", default=""): _bounded_string(MAX_NAME),
@@ -1401,18 +1213,12 @@ async def ws_parent_child_remove(
         vol.Optional("latitude"): vol.Any(None, float, int),
         vol.Optional("longitude"): vol.Any(None, float, int),
         vol.Optional("geonames_id"): vol.Any(None, int),
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_places_save(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
@@ -1456,9 +1262,9 @@ async def ws_places_save(
     connection.send_result(msg["id"], {"place": result})
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "events/save",
     {
-        vol.Required("type"): f"{DOMAIN}/events/save",
         vol.Optional("event_id"): str,
         vol.Required("subject_type"): vol.In([s.value for s in SubjectType]),
         vol.Required("subject_id"): str,
@@ -1467,18 +1273,12 @@ async def ws_places_save(
         vol.Optional("place", default=""): _bounded_string(MAX_NAME),
         vol.Optional("date_text", default=""): _bounded_string(100),
         vol.Optional("description", default=""): _bounded_string(MAX_NOTES),
-        **_OPTIONAL_ENTRY,
-    }
+    },
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_events_save(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     date_text = msg.get("date_text") or ""
     parsed = parse_gedcom_date(date_text)
@@ -1541,22 +1341,10 @@ async def ws_events_save(
     connection.send_result(msg["id"], {"event": result})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/events/delete",
-        vol.Required("event_id"): str,
-        **_OPTIONAL_ENTRY,
-    }
-)
-@websocket_api.async_response
+@ws_command("events/delete", {vol.Required("event_id"): str}, admin=True)
 async def ws_events_delete(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     ok = await hass.async_add_executor_job(coordinator.repo.delete_event, msg["event_id"])
     if not ok:
@@ -1565,23 +1353,14 @@ async def ws_events_delete(
     connection.send_result(msg["id"], {"ok": True})
 
 
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/user_links/set",
-        vol.Required("ha_user_id"): str,
-        vol.Optional("person_id"): vol.Any(None, str),
-        **_OPTIONAL_ENTRY,
-    }
+@ws_command(
+    "user_links/set",
+    {vol.Required("ha_user_id"): str, vol.Optional("person_id"): vol.Any(None, str)},
+    admin=True,
 )
-@websocket_api.async_response
 async def ws_user_links_set(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    try:
-        _require_admin(connection)
-    except Unauthorized:
-        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
-        return
     coordinator = _coordinator(hass, msg)
     person_id = msg.get("person_id")
 
@@ -1661,9 +1440,9 @@ def _claim_user_link(
     return {"person_id": person.id, "person_name": display_name(person)}
 
 
-@websocket_api.websocket_command(
+@ws_command(
+    "user_links/claim",
     {
-        vol.Required("type"): f"{DOMAIN}/user_links/claim",
         vol.Optional("person_id"): vol.Any(None, str),
         vol.Optional("create"): {
             vol.Required("given_names"): _bounded_string(MAX_NAME, allow_empty=False),
@@ -1672,10 +1451,8 @@ def _claim_user_link(
             vol.Optional("sex", default=Sex.UNKNOWN.value): vol.In([s.value for s in Sex]),
             vol.Optional("birth_date_text", default=""): _bounded_string(100),
         },
-        **_OPTIONAL_ENTRY,
-    }
+    },
 )
-@websocket_api.async_response
 async def ws_user_links_claim(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
@@ -1705,47 +1482,6 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     key = f"{DOMAIN}_ws_registered"
     if hass.data.get(key):
         return
-    for handler in (
-        ws_revision,
-        ws_subscribe,
-        ws_persons_list,
-        ws_persons_get,
-        ws_persons_siblings,
-        ws_persons_save,
-        ws_persons_delete,
-        ws_persons_restore,
-        ws_persons_purge,
-        ws_persons_media_list,
-        ws_persons_media_set_profile,
-        ws_persons_media_update,
-        ws_persons_media_delete,
-        ws_tree,
-        ws_lineage,
-        ws_lineage_mine,
-        ws_stats,
-        ws_families,
-        ws_unions_get,
-        ws_unions_save,
-        ws_unions_delete,
-        ws_parent_child_add,
-        ws_parent_child_remove,
-        ws_places_list,
-        ws_places_save,
-        ws_sources_list,
-        ws_sources_save,
-        ws_sources_delete,
-        ws_citations_save,
-        ws_citations_delete,
-        ws_events_save,
-        ws_events_delete,
-        ws_ha_users_list,
-        ws_user_links_list,
-        ws_user_links_set,
-        ws_user_links_claim,
-        ws_gazetteer_search,
-        ws_gazetteer_status,
-        ws_settings,
-        ws_settings_save,
-    ):
+    for handler in _HANDLERS:
         websocket_api.async_register_command(hass, handler)
     hass.data[key] = True
