@@ -10,7 +10,7 @@
 |----------|----------------------------|--------|
 | Critical | 0 | — |
 | High | 2 | Fixed (citation URL XSS; GEDCOM image SSRF via redirects) |
-| Medium | 5 | Fixed (MAX_URL, error disclosure, Pillow requirements, trash/`user_links` authz) |
+| Medium | 5 | Fixed (MAX_URL, error disclosure, trash/`user_links` authz); Pillow noted as HA core dep |
 | Low | 3 | Fixed (country codes, dev npm advisory, import size streaming) |
 
 No SQL injection, command injection, hardcoded secrets, or unsafe deserialization were found.
@@ -23,7 +23,7 @@ No SQL injection, command injection, hardcoded secrets, or unsafe deserializatio
 | High | `media_fetch.py` | `urlopen` followed redirects; SSRF check ran only on the initial URL | Manual redirect follow with hop limit; re-validate each `Location`; peer IP check after connect |
 | Medium | `const.py` `MAX_URL` | Constant never enforced | Enforced in `validation.normalize_source_url()` |
 | Medium | `http.py`, `websocket_api.py` | `str(err)` from caught exceptions returned to clients | Generic client messages; details logged server-side |
-| Medium | `manifest.json` | Pillow used at runtime but not declared for HACS | `"requirements": ["Pillow>=10.0"]` |
+| Medium | `manifest.json` | Pillow used at runtime but not declared for HACS | N/A — hassfest forbids listing HA core deps; Pillow ships with Home Assistant; kept in `requirements-dev.txt` for tests |
 | Medium | `websocket_api.py` | `user_links/list` and trash/deleted person reads open to any user | Admin-gated; UI hides trash/links for non-admins |
 | Low | `config_flow.py`, `gazetteer.py` | Gazetteer country codes not validated as ISO alpha-2 | `normalize_country_codes()` |
 | Low | `http.py` import | Multipart/body read fully before size gate | Streamed read with `MAX_IMPORT_BYTES` cap; early `Content-Length` reject |
@@ -55,7 +55,7 @@ Intentional: any logged-in HA user may view photos of non-trashed persons (same 
 - Admin gate on WebSocket mutations, GEDCOM import, trash reads, and `user_links/list`
 - Input length bounds via voluptuous and `MAX_*` constants
 - GEDCOM import size cap (`MAX_IMPORT_BYTES`) enforced while streaming
-- Pillow declared in `manifest.json` for HACS installs
+- Pillow provided by Home Assistant core (not listed in custom-integration requirements)
 - CI verifies committed `dist/` matches `npm run build`
 
 ## Reporting vulnerabilities
