@@ -217,26 +217,19 @@ def _assign_children_to_unions(
     co_parents: dict[str, set[str]] = {}
     for child in children:
         if not child.get("union_id"):
-            co_parents[child["id"]] = {
-                link.parent_id for link in repo.list_parents(child["id"])
-            }
+            co_parents[child["id"]] = {link.parent_id for link in repo.list_parents(child["id"])}
     for union in unions:
         partner_ids = {p["id"] for p in union["partners"]}
         union["children"] = [
             child
             for child in children
             if child.get("union_id") == union["union_id"]
-            or (
-                not child.get("union_id")
-                and partner_ids & co_parents.get(child["id"], set())
-            )
+            or (not child.get("union_id") and partner_ids & co_parents.get(child["id"], set()))
         ]
 
 
 def living_persons(db: Database) -> list[Person]:
-    rows = db.fetchall(
-        "SELECT * FROM persons WHERE deleted_at IS NULL AND is_living = 1"
-    )
+    rows = db.fetchall("SELECT * FROM persons WHERE deleted_at IS NULL AND is_living = 1")
     return [Person.from_dict(dict(r)) for r in rows]
 
 
@@ -251,9 +244,7 @@ def enrich_event_dict(repo: Repository, event_dict: dict[str, Any]) -> dict[str,
     return {**event_dict, "place_name": place_name}
 
 
-def relative_vital_events_for_person(
-    repo: Repository, person_id: str
-) -> list[dict[str, Any]]:
+def relative_vital_events_for_person(repo: Repository, person_id: str) -> list[dict[str, Any]]:
     """Read-only birth/death events for this person's children and partners."""
     out: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()

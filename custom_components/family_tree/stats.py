@@ -11,9 +11,7 @@ from .db import Database
 from .models import EventType, Person, SubjectType
 
 
-def _birth_death_for(
-    db: Database, person_id: str
-) -> tuple[Any, Any]:
+def _birth_death_for(db: Database, person_id: str) -> tuple[Any, Any]:
     birth = db.fetchone(
         "SELECT * FROM events WHERE subject_type=? AND subject_id=? AND type=? "
         "AND deleted_at IS NULL LIMIT 1",
@@ -98,10 +96,7 @@ def compute_stats(db: Database, *, today: date | None = None) -> dict[str, Any]:
         "deceased": deceased,
         "ages": {
             "labels": sorted(ages.keys(), key=lambda k: int(k.split("-")[0])),
-            "values": [
-                ages[k]
-                for k in sorted(ages.keys(), key=lambda k: int(k.split("-")[0]))
-            ],
+            "values": [ages[k] for k in sorted(ages.keys(), key=lambda k: int(k.split("-")[0]))],
         },
         "centuries": {
             "labels": sorted(centuries.keys()),

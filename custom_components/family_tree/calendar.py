@@ -35,9 +35,7 @@ class FamilyTreeCalendar(CoordinatorEntity[FamilyTreeCoordinator], CalendarEntit
     _attr_translation_key = "family_events"
     _attr_icon = "mdi:calendar-heart"
 
-    def __init__(
-        self, coordinator: FamilyTreeCoordinator, entry: ConfigEntry
-    ) -> None:
+    def __init__(self, coordinator: FamilyTreeCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_calendar"
@@ -79,9 +77,7 @@ class FamilyTreeCalendar(CoordinatorEntity[FamilyTreeCoordinator], CalendarEntit
                         start=start,
                         end=start + timedelta(days=1),
                         summary=f"Anniversary: {names}",
-                        description=(
-                            f"{item.get('years')} years" if item.get("years") else None
-                        ),
+                        description=(f"{item.get('years')} years" if item.get("years") else None),
                         uid=f"anniversary-{item['union_id']}-{item['next_date']}",
                     ),
                 )
@@ -136,8 +132,7 @@ class FamilyTreeCalendar(CoordinatorEntity[FamilyTreeCoordinator], CalendarEntit
                 if union is None or union.status != UnionStatus.ONGOING:
                     continue
                 partners = [
-                    repo.get_person(p.person_id)
-                    for p in repo.list_union_partners(union.id)
+                    repo.get_person(p.person_id) for p in repo.list_union_partners(union.id)
                 ]
                 if not partners or any(p is None or not p.is_living for p in partners):
                     continue

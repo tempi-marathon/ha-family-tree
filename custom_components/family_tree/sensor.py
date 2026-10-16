@@ -42,9 +42,7 @@ class FamilyTreeSensorBase(CoordinatorEntity[FamilyTreeCoordinator], SensorEntit
     _attr_has_entity_name = True
     _unrecorded_attributes = _UNRECORDED
 
-    def __init__(
-        self, coordinator: FamilyTreeCoordinator, entry: ConfigEntry, key: str
-    ) -> None:
+    def __init__(self, coordinator: FamilyTreeCoordinator, entry: ConfigEntry, key: str) -> None:
         super().__init__(coordinator)
         self._object_id = key
         self._attr_unique_id = f"{entry.entry_id}_{key}"

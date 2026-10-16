@@ -42,9 +42,7 @@ _DESCENDANT_CTE = """
 """
 
 
-def would_create_parent_child_cycle(
-    db: Database, parent_id: str, child_id: str
-) -> bool:
+def would_create_parent_child_cycle(db: Database, parent_id: str, child_id: str) -> bool:
     """True when ``parent_id`` as parent of ``child_id`` would create a cycle."""
     if parent_id == child_id:
         return True
@@ -132,9 +130,7 @@ def lineage_map(db: Database, person_id: str) -> dict[str, dict[str, Any]]:
     for relative in ancestors(db, person_id):
         out[relative["id"]] = {"type": "ancestor", "generation": relative["generation"]}
     for relative in descendants(db, person_id):
-        out.setdefault(
-            relative["id"], {"type": "descendant", "generation": relative["generation"]}
-        )
+        out.setdefault(relative["id"], {"type": "descendant", "generation": relative["generation"]})
     return out
 
 

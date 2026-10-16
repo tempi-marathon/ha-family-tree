@@ -50,12 +50,17 @@ def upload_person_media(
     )
     try:
         write_media_files(media_root, person_id, media_id, processed)
-        return repo.add_person_media(media, set_profile_if_empty=set_profile_if_empty)
+        saved = repo.add_person_media(media, set_profile_if_empty=set_profile_if_empty)
     except Exception:
-        delete_media_files(
-            media_root, person_id, media_id, processed.content_type
-        )
+        delete_media_files(media_root, person_id, media_id, processed.content_type)
         raise
+    _LOGGER.info(
+        "Stored person media (person_id=%s media_id=%s bytes=%s)",
+        person_id,
+        saved.id,
+        saved.byte_size,
+    )
+    return saved
 
 
 def remove_media(
@@ -67,9 +72,7 @@ def remove_media(
     removed = repo.delete_person_media(media_id)
     if removed is None:
         return False
-    delete_media_files(
-        media_root, removed.person_id, removed.id, removed.content_type
-    )
+    delete_media_files(media_root, removed.person_id, removed.id, removed.content_type)
     return True
 
 

@@ -470,7 +470,11 @@ export class FamilyTreePanel extends LitElement {
   private async _refreshAll() {
     if (!this.hass) return;
     try {
-      const trashed = this._view === "trash";
+      const canWrite = this._canWrite();
+      if (this._view === "trash" && !canWrite) {
+        this._view = "people";
+      }
+      const trashed = this._view === "trash" && canWrite;
       const [list, stats, settings, lineage, userLinks, families] = await Promise.all([
         listPersons(this.hass, {
           trashed,
@@ -480,7 +484,9 @@ export class FamilyTreePanel extends LitElement {
         getStats(this.hass),
         getSettings(this.hass),
         getMyLineage(this.hass).catch(() => null),
-        listUserLinks(this.hass).catch(() => ({ links: [] as Array<Record<string, unknown>> })),
+        canWrite
+          ? listUserLinks(this.hass).catch(() => ({ links: [] as Array<Record<string, unknown>> }))
+          : Promise.resolve({ links: [] as Array<Record<string, unknown>> }),
         getFamilies(this.hass).catch(() => ({ families: [] as FamilySummaryDto[] })),
       ]);
       this._people = list.persons;
@@ -581,6 +587,9 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _setView(view: PanelView) {
+    if (view === "trash" && !this._canWrite()) {
+      view = "people";
+    }
     this._view = view;
     this._detail = null;
     this._persistViewState();
@@ -2078,10 +2087,10 @@ export class FamilyTreePanel extends LitElement {
     try {
       this._settings = await getSettings(this.hass);
       this._syncShortcutsDraft();
-      this._userLinks = (await listUserLinks(this.hass)).links;
       this._gazetteer = await gazetteerStatus(this.hass);
       this._lineage = await getMyLineage(this.hass).catch(() => this._lineage);
       if (this._canWrite()) {
+        this._userLinks = (await listUserLinks(this.hass)).links;
         try {
           this._haUsers = await listHaUsers(this.hass);
           this._haUsersLoadError = "";
@@ -2090,6 +2099,7 @@ export class FamilyTreePanel extends LitElement {
           this._haUsersLoadError = formatHassError(err);
         }
       } else {
+        this._userLinks = [];
         this._haUsers = [];
         this._haUsersLoadError = "";
       }
@@ -2302,9 +2312,11 @@ export class FamilyTreePanel extends LitElement {
             <button class=${this._view === "people" || this._view === "person" ? "active" : ""} @click=${() => this._setView("people")}>
               ${this._tt("nav_people")}
             </button>
-            <button class=${this._view === "trash" ? "active" : ""} @click=${() => this._setView("trash")}>
-              ${icon(MDI_DELETE)} ${this._tt("nav_trash")}
-            </button>
+            ${this._canWrite()
+              ? html`<button class=${this._view === "trash" ? "active" : ""} @click=${() => this._setView("trash")}>
+                  ${icon(MDI_DELETE)} ${this._tt("nav_trash")}
+                </button>`
+              : nothing}
             <button class=${this._view === "settings" ? "active" : ""} @click=${() => { this._setView("settings"); void this._loadSettingsExtras(); }}>
               ${icon(MDI_COG)} ${this._tt("nav_settings")}
             </button>

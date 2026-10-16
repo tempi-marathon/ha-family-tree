@@ -69,9 +69,7 @@ class DuplicateEventError(Exception):
 
 
 def _coordinator(hass: HomeAssistant, msg: dict[str, Any]) -> FamilyTreeCoordinator:
-    return get_coordinator(
-        hass, config_entry_id=msg.get(ATTR_CONFIG_ENTRY_ID) or None
-    )
+    return get_coordinator(hass, config_entry_id=msg.get(ATTR_CONFIG_ENTRY_ID) or None)
 
 
 def _require_admin(connection: websocket_api.ActiveConnection) -> None:
@@ -99,9 +97,7 @@ def _cap(limit: int | None, default: int, hard: int) -> int:
 # --- Reads -----------------------------------------------------------------
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/revision", **_OPTIONAL_ENTRY}
-)
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/revision", **_OPTIONAL_ENTRY})
 @websocket_api.async_response
 async def ws_revision(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
@@ -111,9 +107,7 @@ async def ws_revision(
     connection.send_result(msg["id"], {"revision": revision})
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/subscribe", **_OPTIONAL_ENTRY}
-)
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/subscribe", **_OPTIONAL_ENTRY})
 @websocket_api.async_response
 async def ws_subscribe(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
@@ -157,9 +151,7 @@ async def ws_subscribe(
         vol.Optional("sex"): vol.In([s.value for s in Sex]),
         vol.Optional("living"): bool,
         vol.Optional("trashed", default=False): bool,
-        vol.Optional("limit", default=MAX_PERSONS): vol.All(
-            int, vol.Range(min=1, max=MAX_PERSONS)
-        ),
+        vol.Optional("limit", default=MAX_PERSONS): vol.All(int, vol.Range(min=1, max=MAX_PERSONS)),
         vol.Optional("offset", default=0): vol.All(int, vol.Range(min=0)),
         **_OPTIONAL_ENTRY,
     }
@@ -168,6 +160,12 @@ async def ws_subscribe(
 async def ws_persons_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
+    if bool(msg.get("trashed")):
+        try:
+            _require_admin(connection)
+        except Unauthorized:
+            connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+            return
     coordinator = _coordinator(hass, msg)
     limit = _cap(msg.get("limit"), MAX_PERSONS, MAX_PERSONS)
 
@@ -189,9 +187,7 @@ async def ws_persons_list(
                     **p.to_dict(),
                     "display_name": display_name(p),
                     "life_events": life_by_id.get(p.id, []),
-                    **family_by_id.get(
-                        p.id, {"father": None, "mother": None, "children_count": 0}
-                    ),
+                    **family_by_id.get(p.id, {"father": None, "mother": None, "children_count": 0}),
                     **vital_summary(life_by_id.get(p.id, [])),
                 }
                 for p in persons
@@ -214,11 +210,10 @@ async def ws_persons_get(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
     coordinator = _coordinator(hass, msg)
+    include_deleted = bool(connection.user and connection.user.is_admin)
 
     def _run() -> dict[str, Any] | None:
-        person = coordinator.repo.get_person(
-            msg["person_id"], include_deleted=True
-        )
+        person = coordinator.repo.get_person(msg["person_id"], include_deleted=include_deleted)
         if person is None:
             return None
         events = []
@@ -345,9 +340,7 @@ async def ws_lineage(
             )
         compare = msg.get("compare_person_id")
         if compare:
-            payload["relation"] = lineage_relation(
-                coordinator.repo.db, msg["person_id"], compare
-            )
+            payload["relation"] = lineage_relation(coordinator.repo.db, msg["person_id"], compare)
         return payload
 
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
@@ -384,9 +377,7 @@ async def ws_lineage_mine(
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/stats", **_OPTIONAL_ENTRY}
-)
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/stats", **_OPTIONAL_ENTRY})
 @websocket_api.async_response
 async def ws_stats(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
@@ -399,9 +390,7 @@ async def ws_stats(
     connection.send_result(msg["id"], stats)
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/families", **_OPTIONAL_ENTRY}
-)
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/families", **_OPTIONAL_ENTRY})
 @websocket_api.async_response
 async def ws_families(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
@@ -438,9 +427,7 @@ async def ws_families(
                     y = year_from_sort_date(ev.get("sort_date"))
                     if y is None:
                         parsed = parse_gedcom_date(str(ev.get("date_text") or ""))
-                        y = year_from_sort_date(
-                            parsed.sort_date if parsed else None
-                        )
+                        y = year_from_sort_date(parsed.sort_date if parsed else None)
                     if y is None:
                         continue
                     if et == "birth" and birth_y is None:
@@ -464,9 +451,7 @@ async def ws_families(
                 year_to = last_death
             else:
                 year_to = last_birth
-            matched_dicts = [
-                {**p.to_dict(), "display_name": display_name(p)} for p in matched
-            ]
+            matched_dicts = [{**p.to_dict(), "display_name": display_name(p)} for p in matched]
             groups.append(
                 {
                     "shortcut": shortcut,
@@ -539,9 +524,7 @@ async def ws_places_list(
     limit = _cap(msg.get("limit"), 50, min(200, MAX_PLACES))
 
     def _run() -> dict[str, Any]:
-        places = coordinator.repo.list_places(
-            search=msg.get("search") or "", limit=limit
-        )
+        places = coordinator.repo.list_places(search=msg.get("search") or "", limit=limit)
         return {"places": [p.to_dict() for p in places]}
 
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
@@ -563,9 +546,7 @@ async def ws_sources_list(
     limit = _cap(msg.get("limit"), 50, min(200, MAX_SOURCES))
 
     def _run() -> dict[str, Any]:
-        sources = coordinator.repo.list_sources(
-            search=msg.get("search") or "", limit=limit
-        )
+        sources = coordinator.repo.list_sources(search=msg.get("search") or "", limit=limit)
         return {"sources": [s.to_dict() for s in sources]}
 
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
@@ -646,9 +627,7 @@ async def ws_sources_delete(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
-    ok = await hass.async_add_executor_job(
-        coordinator.repo.soft_delete_source, msg["source_id"]
-    )
+    ok = await hass.async_add_executor_job(coordinator.repo.soft_delete_source, msg["source_id"])
     if not ok:
         connection.send_error(msg["id"], "not_found", "Source not found")
         return
@@ -786,9 +765,7 @@ async def ws_citations_delete(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
-    ok = await hass.async_add_executor_job(
-        coordinator.repo.delete_citation, msg["citation_id"]
-    )
+    ok = await hass.async_add_executor_job(coordinator.repo.delete_citation, msg["citation_id"])
     if not ok:
         connection.send_error(msg["id"], "not_found", "Citation not found")
         return
@@ -826,6 +803,11 @@ async def ws_ha_users_list(
 async def ws_user_links_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
+    try:
+        _require_admin(connection)
+    except Unauthorized:
+        connection.send_error(msg["id"], "unauthorized", "Unauthorized")
+        return
     coordinator = _coordinator(hass, msg)
 
     def _run() -> dict[str, Any]:
@@ -882,9 +864,7 @@ async def ws_gazetteer_status(
     connection.send_result(msg["id"], status)
 
 
-@websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/settings", **_OPTIONAL_ENTRY}
-)
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/settings", **_OPTIONAL_ENTRY})
 @websocket_api.async_response
 async def ws_settings(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
@@ -899,15 +879,11 @@ async def ws_settings(
             CONF_GAZETTEER_COUNTRIES: coordinator.gazetteer_countries,
             CONF_FAMILY_SHORTCUTS: coordinator.family_shortcuts,
             "can_write": bool(connection.user and connection.user.is_admin),
-            "upcoming_birthdays": (
-                coordinator.data.upcoming_birthdays if coordinator.data else []
-            ),
+            "upcoming_birthdays": (coordinator.data.upcoming_birthdays if coordinator.data else []),
             "upcoming_anniversaries": (
                 coordinator.data.upcoming_anniversaries if coordinator.data else []
             ),
-            "on_this_day": (
-                coordinator.data.on_this_day if coordinator.data else []
-            ),
+            "on_this_day": (coordinator.data.on_this_day if coordinator.data else []),
         },
     )
 
@@ -950,9 +926,7 @@ async def ws_settings_save(
         vol.Optional("call_name", default=""): _bounded_string(MAX_NAME),
         vol.Optional("surname_prefix", default=""): _bounded_string(MAX_NAME),
         vol.Optional("surname", default=""): _bounded_string(MAX_NAME),
-        vol.Optional("sex", default=Sex.UNKNOWN.value): vol.In(
-            [s.value for s in Sex]
-        ),
+        vol.Optional("sex", default=Sex.UNKNOWN.value): vol.In([s.value for s in Sex]),
         vol.Optional("is_living", default=True): bool,
         vol.Optional("notes", default=""): _bounded_string(MAX_NOTES),
         **_OPTIONAL_ENTRY,
@@ -1034,9 +1008,7 @@ async def ws_persons_delete(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
-    ok = await hass.async_add_executor_job(
-        coordinator.repo.soft_delete_person, msg["person_id"]
-    )
+    ok = await hass.async_add_executor_job(coordinator.repo.soft_delete_person, msg["person_id"])
     if not ok:
         connection.send_error(msg["id"], "not_found", "Person not found")
         return
@@ -1060,9 +1032,7 @@ async def ws_persons_restore(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
-    ok = await hass.async_add_executor_job(
-        coordinator.repo.restore_person, msg["person_id"]
-    )
+    ok = await hass.async_add_executor_job(coordinator.repo.restore_person, msg["person_id"])
     if not ok:
         connection.send_error(msg["id"], "not_found", "Person not found")
         return
@@ -1175,9 +1145,7 @@ async def ws_persons_media_set_profile(
         if scale < 1 or scale > 3:
             connection.send_error(msg["id"], "invalid_crop", "Invalid crop scale")
             return
-        crop_json = json.dumps(
-            {"scale": scale, "offsetX": offset_x, "offsetY": offset_y}
-        )
+        crop_json = json.dumps({"scale": scale, "offsetX": offset_x, "offsetY": offset_y})
     elif isinstance(msg.get("crop_json"), str) and msg["crop_json"].strip():
         try:
             parsed = json.loads(msg["crop_json"])
@@ -1188,9 +1156,7 @@ async def ws_persons_media_set_profile(
             offset_y = float(parsed.get("offsetY", 0))
             if scale < 1 or scale > 3:
                 raise ValueError("Invalid crop scale")
-            crop_json = json.dumps(
-                {"scale": scale, "offsetX": offset_x, "offsetY": offset_y}
-            )
+            crop_json = json.dumps({"scale": scale, "offsetX": offset_x, "offsetY": offset_y})
         except (TypeError, ValueError, json.JSONDecodeError):
             connection.send_error(msg["id"], "invalid_crop", "Invalid crop")
             return
@@ -1349,9 +1315,7 @@ async def ws_unions_delete(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
-    ok = await hass.async_add_executor_job(
-        coordinator.repo.soft_delete_union, msg["union_id"]
-    )
+    ok = await hass.async_add_executor_job(coordinator.repo.soft_delete_union, msg["union_id"])
     if not ok:
         connection.send_error(msg["id"], "not_found", "Union not found")
         return
@@ -1419,9 +1383,7 @@ async def ws_parent_child_remove(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
-    ok = await hass.async_add_executor_job(
-        coordinator.repo.remove_parent_child, msg["link_id"]
-    )
+    ok = await hass.async_add_executor_job(coordinator.repo.remove_parent_child, msg["link_id"])
     if not ok:
         connection.send_error(msg["id"], "not_found", "Link not found")
         return
@@ -1533,18 +1495,12 @@ async def ws_events_save(
                 exclude_id=msg.get("event_id"),
             )
         ):
-            raise DuplicateEventError(
-                f"This person already has a {event_type.value} event"
-            )
+            raise DuplicateEventError(f"This person already has a {event_type.value} event")
         place_id = msg.get("place_id")
         place_name = (msg.get("place") or "").strip()
         if not place_id and place_name:
             found = coordinator.repo.find_place(place_name)
-            place_id = (
-                found.id
-                if found
-                else coordinator.repo.add_place(Place(name=place_name)).id
-            )
+            place_id = found.id if found else coordinator.repo.add_place(Place(name=place_name)).id
         event_id = msg.get("event_id")
         if event_id:
             event = Event(
@@ -1602,9 +1558,7 @@ async def ws_events_delete(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
-    ok = await hass.async_add_executor_job(
-        coordinator.repo.delete_event, msg["event_id"]
-    )
+    ok = await hass.async_add_executor_job(coordinator.repo.delete_event, msg["event_id"])
     if not ok:
         connection.send_error(msg["id"], "not_found", "Event not found")
         return
@@ -1715,9 +1669,7 @@ def _claim_user_link(
             vol.Required("given_names"): _bounded_string(MAX_NAME, allow_empty=False),
             vol.Optional("surname_prefix", default=""): _bounded_string(MAX_NAME),
             vol.Optional("surname", default=""): _bounded_string(MAX_NAME),
-            vol.Optional("sex", default=Sex.UNKNOWN.value): vol.In(
-                [s.value for s in Sex]
-            ),
+            vol.Optional("sex", default=Sex.UNKNOWN.value): vol.In([s.value for s in Sex]),
             vol.Optional("birth_date_text", default=""): _bounded_string(100),
         },
         **_OPTIONAL_ENTRY,

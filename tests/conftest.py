@@ -15,18 +15,14 @@ sys.path.insert(0, str(ROOT))
 
 def _ensure_homeassistant_stubs() -> None:
     """Install lightweight stubs so modules import without HA installed."""
-    if "homeassistant" in sys.modules and hasattr(
-        sys.modules["homeassistant"], "__file__"
-    ):
+    if "homeassistant" in sys.modules and hasattr(sys.modules["homeassistant"], "__file__"):
         return
 
     modules: dict[str, Any] = {
         "homeassistant": types.ModuleType("homeassistant"),
         "homeassistant.core": types.ModuleType("homeassistant.core"),
         "homeassistant.helpers": types.ModuleType("homeassistant.helpers"),
-        "homeassistant.helpers.storage": types.ModuleType(
-            "homeassistant.helpers.storage"
-        ),
+        "homeassistant.helpers.storage": types.ModuleType("homeassistant.helpers.storage"),
         "homeassistant.helpers.event": types.ModuleType("homeassistant.helpers.event"),
         "homeassistant.helpers.update_coordinator": types.ModuleType(
             "homeassistant.helpers.update_coordinator"
@@ -40,39 +36,25 @@ def _ensure_homeassistant_stubs() -> None:
         "homeassistant.helpers.config_validation": types.ModuleType(
             "homeassistant.helpers.config_validation"
         ),
-        "homeassistant.helpers.selector": types.ModuleType(
-            "homeassistant.helpers.selector"
-        ),
+        "homeassistant.helpers.selector": types.ModuleType("homeassistant.helpers.selector"),
         "homeassistant.helpers.entity_platform": types.ModuleType(
             "homeassistant.helpers.entity_platform"
         ),
         "homeassistant.exceptions": types.ModuleType("homeassistant.exceptions"),
-        "homeassistant.config_entries": types.ModuleType(
-            "homeassistant.config_entries"
-        ),
+        "homeassistant.config_entries": types.ModuleType("homeassistant.config_entries"),
         "homeassistant.const": types.ModuleType("homeassistant.const"),
         "homeassistant.components": types.ModuleType("homeassistant.components"),
         "homeassistant.components.websocket_api": types.ModuleType(
             "homeassistant.components.websocket_api"
         ),
-        "homeassistant.components.http": types.ModuleType(
-            "homeassistant.components.http"
-        ),
-        "homeassistant.components.frontend": types.ModuleType(
-            "homeassistant.components.frontend"
-        ),
+        "homeassistant.components.http": types.ModuleType("homeassistant.components.http"),
+        "homeassistant.components.frontend": types.ModuleType("homeassistant.components.frontend"),
         "homeassistant.components.panel_custom": types.ModuleType(
             "homeassistant.components.panel_custom"
         ),
-        "homeassistant.components.logbook": types.ModuleType(
-            "homeassistant.components.logbook"
-        ),
-        "homeassistant.components.sensor": types.ModuleType(
-            "homeassistant.components.sensor"
-        ),
-        "homeassistant.components.calendar": types.ModuleType(
-            "homeassistant.components.calendar"
-        ),
+        "homeassistant.components.logbook": types.ModuleType("homeassistant.components.logbook"),
+        "homeassistant.components.sensor": types.ModuleType("homeassistant.components.sensor"),
+        "homeassistant.components.calendar": types.ModuleType("homeassistant.components.calendar"),
     }
 
     modules["homeassistant.helpers.aiohttp_client"].async_get_clientsession = MagicMock()
@@ -99,7 +81,7 @@ def _ensure_homeassistant_stubs() -> None:
     )
 
     ws = modules["homeassistant.components.websocket_api"]
-    ws.websocket_command = lambda schema: (lambda f: f)
+    ws.websocket_command = lambda schema: lambda f: f
     ws.async_response = lambda f: f
     ws.async_register_command = MagicMock()
     ws.event_message = lambda sid, data: {"id": sid, "event": data}
@@ -127,9 +109,9 @@ def _ensure_homeassistant_stubs() -> None:
         def async_add_listener(self, _listener: Any) -> Any:
             return MagicMock()
 
-    modules["homeassistant.helpers.update_coordinator"].DataUpdateCoordinator = (
-        DataUpdateCoordinator
-    )
+    modules[
+        "homeassistant.helpers.update_coordinator"
+    ].DataUpdateCoordinator = DataUpdateCoordinator
     modules["homeassistant.helpers.update_coordinator"].CoordinatorEntity = type(
         "CoordinatorEntity",
         (),
@@ -145,9 +127,7 @@ def _ensure_homeassistant_stubs() -> None:
     modules["homeassistant.core"].callback = lambda f: f
     modules["homeassistant.core"].CALLBACK_TYPE = object
     modules["homeassistant.core"].ServiceCall = MagicMock
-    modules["homeassistant.core"].SupportsResponse = MagicMock(
-        OPTIONAL="optional", ONLY="only"
-    )
+    modules["homeassistant.core"].SupportsResponse = MagicMock(OPTIONAL="optional", ONLY="only")
 
     class Context:
         def __init__(

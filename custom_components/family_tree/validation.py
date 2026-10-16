@@ -76,7 +76,8 @@ def normalize_caption(caption: str | None) -> str:
     return str(caption).strip()[:MAX_CAPTION]
 
 
-def _ip_blocked(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+def is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True when addr must not be contacted (SSRF deny-list)."""
     return bool(
         addr.is_loopback
         or addr.is_link_local
@@ -85,6 +86,14 @@ def _ip_blocked(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or addr.is_reserved
         or addr.is_unspecified
     )
+
+
+def is_blocked_ip_str(ip_str: str) -> bool:
+    """Return True when an IP string is on the SSRF deny-list."""
+    try:
+        return is_blocked_ip(ipaddress.ip_address(ip_str))
+    except ValueError:
+        return True
 
 
 def is_fetchable_http_url(url: str) -> bool:
@@ -104,7 +113,7 @@ def is_fetchable_http_url(url: str) -> bool:
         return False
     try:
         literal = ipaddress.ip_address(host)
-        if _ip_blocked(literal):
+        if is_blocked_ip(literal):
             return False
     except ValueError:
         pass
@@ -121,6 +130,6 @@ def is_fetchable_http_url(url: str) -> bool:
             addr = ipaddress.ip_address(ip_str)
         except ValueError:
             return False
-        if _ip_blocked(addr):
+        if is_blocked_ip(addr):
             return False
     return True

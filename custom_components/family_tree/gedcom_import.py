@@ -398,8 +398,8 @@ class GedcomImporter:
         parsed = parse_gedcom_date(date_text)
         if date_text and not parsed.sort_date and not parsed.date_from:
             self.report.unparseable_dates.append(date_text)
-        description = block.value if event_type == EventType.OCCUPATION else (
-            _sub_value(block, "NOTE") or ""
+        description = (
+            block.value if event_type == EventType.OCCUPATION else (_sub_value(block, "NOTE") or "")
         )
         # DEAT Y with no date
         if event_type == EventType.DEATH and block.value.upper() == "Y" and not date_text:
@@ -518,9 +518,7 @@ class GedcomImporter:
             if tag not in groups:
                 continue
             for block in groups[tag]:
-                self._event_from_block(
-                    block, event_type, SubjectType.PERSON, person_id
-                )
+                self._event_from_block(block, event_type, SubjectType.PERSON, person_id)
 
         # Inline source citations
         if "SOUR" in groups:
@@ -619,9 +617,7 @@ class GedcomImporter:
                 status=status,
                 known_children_count=known_children,
             )
-            self.repo.add_union(
-                union, partners=[(pid, i) for i, pid in enumerate(partner_ids)]
-            )
+            self.repo.add_union(union, partners=[(pid, i) for i, pid in enumerate(partner_ids)])
             union_id = union.id
             self.report.unions += 1
             self.repo.set_external_ref("union", union_id, _SYSTEM, xref)
@@ -632,9 +628,7 @@ class GedcomImporter:
             if tag not in groups:
                 continue
             for block in groups[tag]:
-                self._event_from_block(
-                    block, event_type, SubjectType.UNION, union_id
-                )
+                self._event_from_block(block, event_type, SubjectType.UNION, union_id)
 
         # Children
         chil_blocks = groups.get("CHIL", [])
@@ -649,9 +643,7 @@ class GedcomImporter:
             for parent_id in partner_ids:
                 # Avoid duplicate unique constraint
                 existing = [
-                    link
-                    for link in self.repo.list_parents(child_id)
-                    if link.parent_id == parent_id
+                    link for link in self.repo.list_parents(child_id) if link.parent_id == parent_id
                 ]
                 if existing:
                     continue

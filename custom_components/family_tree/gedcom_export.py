@@ -60,9 +60,7 @@ def export_gedcom(db: Database) -> str:
     ]
 
     # Sources
-    sources = db.fetchall(
-        "SELECT * FROM sources WHERE deleted_at IS NULL ORDER BY title"
-    )
+    sources = db.fetchall("SELECT * FROM sources WHERE deleted_at IS NULL ORDER BY title")
     source_xref: dict[str, str] = {}
     for i, row in enumerate(sources, start=1):
         xref = _xref("S", i)
@@ -80,34 +78,27 @@ def export_gedcom(db: Database) -> str:
             lines.append(f"1 NOTE {row['notes']}")
 
     persons = db.fetchall(
-        "SELECT * FROM persons WHERE deleted_at IS NULL "
-        "ORDER BY surname, given_names"
+        "SELECT * FROM persons WHERE deleted_at IS NULL ORDER BY surname, given_names"
     )
     person_xref: dict[str, str] = {}
     for i, row in enumerate(persons, start=1):
         person_xref[row["id"]] = _xref("I", i)
 
     # Preload fam membership for FAMS/FAMC
-    unions = db.fetchall(
-        "SELECT * FROM unions WHERE deleted_at IS NULL ORDER BY created_at"
-    )
+    unions = db.fetchall("SELECT * FROM unions WHERE deleted_at IS NULL ORDER BY created_at")
     union_xref: dict[str, str] = {}
     for i, row in enumerate(unions, start=1):
         union_xref[row["id"]] = _xref("F", i)
 
     partners_by_union: dict[str, list[tuple[str, int]]] = {}
-    for row in db.fetchall(
-        "SELECT * FROM union_partners ORDER BY union_id, position"
-    ):
+    for row in db.fetchall("SELECT * FROM union_partners ORDER BY union_id, position"):
         partners_by_union.setdefault(row["union_id"], []).append(
             (row["person_id"], row["position"])
         )
 
     children_by_union: dict[str, list[tuple[str, str]]] = {}
     for row in db.fetchall("SELECT * FROM parent_child WHERE union_id IS NOT NULL"):
-        children_by_union.setdefault(row["union_id"], []).append(
-            (row["child_id"], row["type"])
-        )
+        children_by_union.setdefault(row["union_id"], []).append((row["child_id"], row["type"]))
 
     # Also collect parent_child without union for FAMC
     famc_for_child: dict[str, str] = {}
@@ -120,10 +111,7 @@ def export_gedcom(db: Database) -> str:
         for person_id, _ in partners:
             fams_for_person.setdefault(person_id, []).append(union_id)
 
-    places = {
-        r["id"]: r
-        for r in db.fetchall("SELECT * FROM places WHERE deleted_at IS NULL")
-    }
+    places = {r["id"]: r for r in db.fetchall("SELECT * FROM places WHERE deleted_at IS NULL")}
 
     def emit_event(subject_type: str, subject_id: str) -> None:
         events = db.fetchall(

@@ -29,9 +29,7 @@ class _FakeHass:
 
 class _FakeConnection:
     def __init__(self, user_id: str | None, *, is_admin: bool = False) -> None:
-        self.user = (
-            SimpleNamespace(id=user_id, is_admin=is_admin) if user_id else None
-        )
+        self.user = SimpleNamespace(id=user_id, is_admin=is_admin) if user_id else None
         self.results: list[Any] = []
         self.errors: list[tuple[str, str]] = []
 
@@ -47,9 +45,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Repository:
     db = Database(tmp_path / "tree.db")
     db.open()
     repository = Repository(db)
-    monkeypatch.setattr(
-        ws, "_coordinator", lambda _hass, _msg: SimpleNamespace(repo=repository)
-    )
+    monkeypatch.setattr(ws, "_coordinator", lambda _hass, _msg: SimpleNamespace(repo=repository))
     yield repository
     db.close()
 
@@ -255,6 +251,62 @@ def test_ha_users_list_requires_admin(repo: Repository) -> None:
     assert conn.errors == [("unauthorized", "Unauthorized")]
 
 
+def test_user_links_list_requires_admin(repo: Repository) -> None:
+    person = repo.add_person(Person(given_names="Ada"))
+    repo.set_user_link("user-1", person.id)
+    conn = _FakeConnection("user-1", is_admin=False)
+    _call(ws.ws_user_links_list, conn, {"type": "family_tree/user_links/list"})
+    assert conn.errors == [("unauthorized", "Unauthorized")]
+    assert not conn.results
+
+    admin = _FakeConnection("admin", is_admin=True)
+    _call(ws.ws_user_links_list, admin, {"type": "family_tree/user_links/list"})
+    assert not admin.errors
+    assert len(admin.results[-1]["links"]) == 1
+
+
+def test_persons_list_trashed_requires_admin(repo: Repository) -> None:
+    person = repo.add_person(Person(given_names="Ada"))
+    repo.soft_delete_person(person.id)
+    conn = _FakeConnection("user-1", is_admin=False)
+    _call(
+        ws.ws_persons_list,
+        conn,
+        {"type": "family_tree/persons/list", "trashed": True},
+    )
+    assert conn.errors == [("unauthorized", "Unauthorized")]
+
+    admin = _FakeConnection("admin", is_admin=True)
+    _call(
+        ws.ws_persons_list,
+        admin,
+        {"type": "family_tree/persons/list", "trashed": True},
+    )
+    assert not admin.errors
+    assert admin.results[-1]["total"] == 1
+
+
+def test_persons_get_hides_deleted_from_non_admin(repo: Repository) -> None:
+    person = repo.add_person(Person(given_names="Ada"))
+    repo.soft_delete_person(person.id)
+    conn = _FakeConnection("user-1", is_admin=False)
+    _call(
+        ws.ws_persons_get,
+        conn,
+        {"type": "family_tree/persons/get", "person_id": person.id},
+    )
+    assert conn.errors and conn.errors[0][0] == "not_found"
+
+    admin = _FakeConnection("admin", is_admin=True)
+    _call(
+        ws.ws_persons_get,
+        admin,
+        {"type": "family_tree/persons/get", "person_id": person.id},
+    )
+    assert not admin.errors
+    assert admin.results[-1]["person"]["id"] == person.id
+
+
 async def _fake_ha_users() -> list[Any]:
     return [SimpleNamespace(id="u1", name="Alice", is_active=True)]
 
@@ -264,7 +316,5 @@ def test_ha_users_list_admin(repo: Repository) -> None:
     hass.auth = SimpleNamespace(async_get_users=_fake_ha_users)
 
     conn = _FakeConnection("admin", is_admin=True)
-    asyncio.run(
-        ws.ws_ha_users_list(hass, conn, {"id": 1, "type": "family_tree/ha_users/list"})
-    )
+    asyncio.run(ws.ws_ha_users_list(hass, conn, {"id": 1, "type": "family_tree/ha_users/list"}))
     assert conn.results == [{"users": [{"id": "u1", "name": "Alice", "is_active": True}]}]
