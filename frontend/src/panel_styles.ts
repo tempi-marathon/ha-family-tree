@@ -712,7 +712,13 @@ export const panelStyles = css`
       flex: 1; min-width: 140px;
       display: flex; flex-direction: column; gap: 4px;
     }
-    .date-mode-toggle { font-size: 0.85em; white-space: nowrap; flex-shrink: 0; align-self: center; }
+    .date-mode-toggle {
+      font-size: 0.85em;
+      white-space: nowrap;
+      flex-shrink: 0;
+      align-self: center;
+      padding-top: 1.5rem;
+    }
     .event-form input, .event-form select { width: auto; min-width: 120px; flex: 1; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
     .empty-state {

@@ -267,17 +267,18 @@ export function renderDialog(host: FamilyTreePanel) {
           ? html`<label
               >${this._tt("date_qualifier")}
               <select
-                .value=${this._eventForm.date_qualifier || "exact"}
                 @change=${(e: Event) =>
                   (this._eventForm = {
                     ...this._eventForm,
                     date_qualifier: (e.target as HTMLSelectElement).value,
                   })}
               >
-                ${FORM_QUALIFIERS.map(
-                  (q) =>
-                    html`<option value=${q}>${this._tt(QUALIFIER_KEYS[q])}</option>`,
-                )}
+                ${FORM_QUALIFIERS.map((q) => {
+                  const current = this._eventForm.date_qualifier || "exact";
+                  return html`<option value=${q} ?selected=${q === current}
+                    >${this._tt(QUALIFIER_KEYS[q])}</option
+                  >`;
+                })}
               </select>
             </label>
             <label

@@ -712,7 +712,13 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       flex: 1; min-width: 140px;
       display: flex; flex-direction: column; gap: 4px;
     }
-    .date-mode-toggle { font-size: 0.85em; white-space: nowrap; flex-shrink: 0; align-self: center; }
+    .date-mode-toggle {
+      font-size: 0.85em;
+      white-space: nowrap;
+      flex-shrink: 0;
+      align-self: center;
+      padding-top: 1.5rem;
+    }
     .event-form input, .event-form select { width: auto; min-width: 120px; flex: 1; }
     .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
     .empty-state {
@@ -1796,10 +1802,11 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
         ${l?W`<label
               >${this._tt(`date_qualifier`)}
               <select
-                .value=${this._eventForm.date_qualifier||`exact`}
                 @change=${e=>this._eventForm={...this._eventForm,date_qualifier:e.target.value}}
               >
-                ${ad.map(e=>W`<option value=${e}>${this._tt(ef[e])}</option>`)}
+                ${ad.map(e=>W`<option value=${e} ?selected=${e===(this._eventForm.date_qualifier||`exact`)}
+                    >${this._tt(ef[e])}</option
+                  >`)}
               </select>
             </label>
             <label
@@ -2579,11 +2586,12 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
       ${r?W`<label
             >${this._tt(`date_qualifier`)}
             <select
-              .value=${this._form[`${e}_date_qualifier`]||`exact`}
               ?disabled=${!n}
               @change=${t=>this._form={...this._form,[`${e}_date_qualifier`]:t.target.value}}
             >
-              ${ad.map(e=>W`<option value=${e}>${this._tt(ef[e])}</option>`)}
+              ${ad.map(t=>W`<option value=${t} ?selected=${t===(this._form[`${e}_date_qualifier`]||`exact`)}
+                  >${this._tt(ef[t])}</option
+                >`)}
             </select>
           </label>
           <label
