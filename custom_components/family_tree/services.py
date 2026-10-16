@@ -56,9 +56,7 @@ ADD_PERSON_SCHEMA = vol.Schema(
         vol.Optional(ATTR_CALL_NAME, default=""): _bounded_string(MAX_NAME),
         vol.Optional(ATTR_SURNAME_PREFIX, default=""): _bounded_string(MAX_NAME),
         vol.Optional(ATTR_SURNAME, default=""): _bounded_string(MAX_NAME),
-        vol.Optional(ATTR_SEX, default=Sex.UNKNOWN.value): vol.In(
-            [s.value for s in Sex]
-        ),
+        vol.Optional(ATTR_SEX, default=Sex.UNKNOWN.value): vol.In([s.value for s in Sex]),
         vol.Optional(ATTR_IS_LIVING, default=True): cv.boolean,
         vol.Optional(ATTR_NOTES, default=""): _bounded_string(MAX_NOTES),
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
@@ -89,15 +87,11 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     async def async_add_person(call: ServiceCall) -> dict[str, Any]:
         await async_require_admin_or_automation(hass, call.context.user_id)
-        coordinator = get_coordinator(
-            hass, config_entry_id=entry_id_from_call_data(call.data)
-        )
+        coordinator = get_coordinator(hass, config_entry_id=entry_id_from_call_data(call.data))
 
         def _run() -> dict[str, Any]:
             if coordinator.repo.count_persons() >= MAX_PERSONS:
-                raise ServiceValidationError(
-                    f"Maximum of {MAX_PERSONS} persons reached"
-                )
+                raise ServiceValidationError(f"Maximum of {MAX_PERSONS} persons reached")
             person = Person(
                 given_names=call.data.get(ATTR_GIVEN_NAMES) or "",
                 call_name=call.data.get(ATTR_CALL_NAME) or "",
@@ -114,16 +108,12 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     async def async_link_user(call: ServiceCall) -> dict[str, Any]:
         await async_require_admin_or_automation(hass, call.context.user_id)
-        coordinator = get_coordinator(
-            hass, config_entry_id=entry_id_from_call_data(call.data)
-        )
+        coordinator = get_coordinator(hass, config_entry_id=entry_id_from_call_data(call.data))
 
         def _run() -> dict[str, Any]:
             person = coordinator.repo.get_person(call.data[ATTR_PERSON_ID])
             if person is None:
-                raise ServiceValidationError(
-                    f"Unknown person_id: {call.data[ATTR_PERSON_ID]}"
-                )
+                raise ServiceValidationError(f"Unknown person_id: {call.data[ATTR_PERSON_ID]}")
             link = coordinator.repo.set_user_link(
                 call.data[ATTR_HA_USER_ID], call.data[ATTR_PERSON_ID]
             )
@@ -133,9 +123,7 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     async def async_export(call: ServiceCall) -> dict[str, Any]:
         await async_require_admin_or_automation(hass, call.context.user_id)
-        coordinator = get_coordinator(
-            hass, config_entry_id=entry_id_from_call_data(call.data)
-        )
+        coordinator = get_coordinator(hass, config_entry_id=entry_id_from_call_data(call.data))
         text = await hass.async_add_executor_job(export_gedcom, coordinator.repo.db)
         return {"gedcom": text}
 

@@ -209,8 +209,7 @@ class Database:
         current = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
         if current > SCHEMA_VERSION:
             raise RuntimeError(
-                f"Database schema version {current} is newer than "
-                f"supported {SCHEMA_VERSION}"
+                f"Database schema version {current} is newer than supported {SCHEMA_VERSION}"
             )
         for version in range(current + 1, SCHEMA_VERSION + 1):
             sql = _MIGRATIONS.get(version)
@@ -232,22 +231,16 @@ class Database:
             conn.execute("ROLLBACK")
             raise
 
-    def execute(
-        self, sql: str, params: tuple[Any, ...] | list[Any] = ()
-    ) -> sqlite3.Cursor:
+    def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> sqlite3.Cursor:
         return self.conn.execute(sql, params)
 
     def executemany(self, sql: str, seq: list[tuple[Any, ...]]) -> sqlite3.Cursor:
         return self.conn.executemany(sql, seq)
 
-    def fetchone(
-        self, sql: str, params: tuple[Any, ...] | list[Any] = ()
-    ) -> sqlite3.Row | None:
+    def fetchone(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> sqlite3.Row | None:
         return self.conn.execute(sql, params).fetchone()
 
-    def fetchall(
-        self, sql: str, params: tuple[Any, ...] | list[Any] = ()
-    ) -> list[sqlite3.Row]:
+    def fetchall(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list[sqlite3.Row]:
         return list(self.conn.execute(sql, params).fetchall())
 
     def get_revision(self) -> int:

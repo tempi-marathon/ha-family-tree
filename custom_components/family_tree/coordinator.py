@@ -175,9 +175,13 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
             revision = self.repo.get_revision()
             return stats, birthdays, anniversaries, on_this_day, revision
 
-        stats, birthdays, anniversaries, on_this_day, revision = (
-            await self.hass.async_add_executor_job(_compute)
-        )
+        (
+            stats,
+            birthdays,
+            anniversaries,
+            on_this_day,
+            revision,
+        ) = await self.hass.async_add_executor_job(_compute)
         await self._async_fire_transition_events(birthdays, anniversaries, today)
         return FamilyTreeData(
             stats=stats,
@@ -188,9 +192,7 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
         )
 
     def _load_event_state(self) -> dict[str, str]:
-        row = self.repo.db.fetchone(
-            "SELECT value FROM meta WHERE key = ?", (_META_EVENT_STATE,)
-        )
+        row = self.repo.db.fetchone("SELECT value FROM meta WHERE key = ?", (_META_EVENT_STATE,))
         if not row:
             return {}
         try:
@@ -201,9 +203,7 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
 
     def _save_event_state(self, state: dict[str, str]) -> None:
         payload = json.dumps(state)
-        existing = self.repo.db.fetchone(
-            "SELECT key FROM meta WHERE key = ?", (_META_EVENT_STATE,)
-        )
+        existing = self.repo.db.fetchone("SELECT key FROM meta WHERE key = ?", (_META_EVENT_STATE,))
         if existing:
             self.repo.db.execute(
                 "UPDATE meta SET value = ? WHERE key = ?",

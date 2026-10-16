@@ -21,6 +21,43 @@ from .validation import normalize_entity_id
 _LOGGER = logging.getLogger(__name__)
 
 _HTTP_KEY = f"{DOMAIN}_http_registered"
+_READ_CHUNK = 64 * 1024
+
+
+async def _read_stream_with_limit(stream: web.StreamReader, max_bytes: int) -> bytes | None:
+    """Read a stream up to max_bytes; return None if the limit is exceeded."""
+    chunks: list[bytes] = []
+    total = 0
+    while not stream.at_eof():
+        chunk = await stream.read(_READ_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _read_with_limit(part: object, max_bytes: int) -> bytes | None:
+    """Read a multipart part up to max_bytes; return None if the limit is exceeded."""
+    read_chunk = getattr(part, "read_chunk", None)
+    if read_chunk is None:
+        data = await part.read(decode=False)  # type: ignore[attr-defined]
+        if len(data) > max_bytes:
+            return None
+        return data
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await read_chunk(size=_READ_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 class FamilyTreeImportGedcomView(HomeAssistantView):
@@ -47,6 +84,13 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
         preview = request.query.get("preview", "0") in ("1", "true", "yes")
         content_type = (request.content_type or "").lower()
 
+        content_length = request.content_length
+        if content_length is not None and content_length > MAX_IMPORT_BYTES:
+            return self.json_message(
+                f"Body exceeds {MAX_IMPORT_BYTES} bytes",
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+            )
+
         try:
             if "multipart/" in content_type:
                 reader = await request.multipart()
@@ -55,8 +99,8 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
                     part = await reader.next()
                     if part is None:
                         break
-                    data = await part.read(decode=False)
-                    if len(data) > MAX_IMPORT_BYTES:
+                    data = await _read_with_limit(part, MAX_IMPORT_BYTES)
+                    if data is None:
                         return self.json_message(
                             f"File exceeds {MAX_IMPORT_BYTES} bytes",
                             HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
@@ -65,8 +109,8 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
                 if text is None:
                     return self.json_message("No file uploaded", HTTPStatus.BAD_REQUEST)
             else:
-                body = await request.read()
-                if len(body) > MAX_IMPORT_BYTES:
+                body = await _read_stream_with_limit(request.content, MAX_IMPORT_BYTES)
+                if body is None:
                     return self.json_message(
                         f"Body exceeds {MAX_IMPORT_BYTES} bytes",
                         HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
@@ -86,6 +130,7 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("GEDCOM preview failed")
                 return self.json_message("GEDCOM preview failed", HTTPStatus.BAD_REQUEST)
+            _LOGGER.info("GEDCOM preview ok (bytes=%s)", len(text.encode("utf-8")))
             return self.json({"ok": True, "preview": True, "report": report})
 
         def _import() -> dict:
@@ -99,6 +144,11 @@ class FamilyTreeImportGedcomView(HomeAssistantView):
             _LOGGER.exception("GEDCOM import failed")
             return self.json_message("GEDCOM import failed", HTTPStatus.BAD_REQUEST)
 
+        _LOGGER.info(
+            "GEDCOM import ok (replace=%s revision=%s)",
+            replace,
+            coordinator.repo.get_revision(),
+        )
         return self.json({"ok": True, "report": report})
 
 
@@ -119,6 +169,11 @@ class FamilyTreeExportGedcomView(HomeAssistantView):
             return self.json_message("Family Tree is not available", HTTPStatus.BAD_REQUEST)
 
         text = await hass.async_add_executor_job(export_gedcom, coordinator.repo.db)
+        _LOGGER.info(
+            "GEDCOM export ok (bytes=%s revision=%s)",
+            len(text.encode("utf-8")),
+            coordinator.repo.get_revision(),
+        )
         return web.Response(
             body=text.encode("utf-8"),
             content_type="text/plain",
@@ -272,9 +327,7 @@ class FamilyTreePersonMediaUploadView(HomeAssistantView):
                 offset_y = float(parsed.get("offsetY", 0))
                 if scale < 1 or scale > 3:
                     return self.json_message("Invalid crop scale", HTTPStatus.BAD_REQUEST)
-                crop_json = json.dumps(
-                    {"scale": scale, "offsetX": offset_x, "offsetY": offset_y}
-                )
+                crop_json = json.dumps({"scale": scale, "offsetX": offset_x, "offsetY": offset_y})
             except (TypeError, ValueError, json.JSONDecodeError):
                 return self.json_message("Invalid crop", HTTPStatus.BAD_REQUEST)
 
@@ -308,6 +361,13 @@ class FamilyTreePersonMediaUploadView(HomeAssistantView):
             _LOGGER.exception("Media upload failed for person %s", person_id)
             return self.json_message("Upload failed", HTTPStatus.BAD_REQUEST)
 
+        media_id = (result.get("media") or {}).get("id")
+        _LOGGER.info(
+            "Media upload ok (person_id=%s media_id=%s revision=%s)",
+            person_id,
+            media_id,
+            coordinator.repo.get_revision(),
+        )
         return self.json({"ok": True, **result})
 
 

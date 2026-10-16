@@ -98,7 +98,7 @@ def parse_gedcom_date(raw: str | None) -> ParsedDate:
         parts = re.split(r"\s+AND\s+", rest, maxsplit=1, flags=re.IGNORECASE)
         d1, s1 = _parse_single(parts[0])
         d2, s2 = _parse_single(parts[1]) if len(parts) > 1 else (None, None)
-        sort = (s1 or s2)
+        sort = s1 or s2
         return ParsedDate(
             text,
             DateQualifier.BETWEEN,

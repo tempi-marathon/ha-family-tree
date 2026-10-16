@@ -56,9 +56,7 @@ def test_upload_does_not_auto_set_profile(media_repo: tuple[Repository, Path]) -
     repo, root = media_repo
     person = Person(given_names="Test", surname="User")
     repo.add_person(person)
-    media = upload_person_media(
-        repo, root, person.id, _tiny_jpeg(), original_filename="x.jpg"
-    )
+    media = upload_person_media(repo, root, person.id, _tiny_jpeg(), original_filename="x.jpg")
     assert media.id
     loaded = repo.get_person(person.id)
     assert loaded is not None
@@ -70,9 +68,7 @@ def test_upload_set_profile_explicit(media_repo: tuple[Repository, Path]) -> Non
     repo, root = media_repo
     person = Person(given_names="Test", surname="User")
     repo.add_person(person)
-    media = upload_person_media(
-        repo, root, person.id, _tiny_jpeg(), original_filename="x.jpg"
-    )
+    media = upload_person_media(repo, root, person.id, _tiny_jpeg(), original_filename="x.jpg")
     assert repo.set_profile_media(person.id, media.id)
     loaded = repo.get_person(person.id)
     assert loaded is not None

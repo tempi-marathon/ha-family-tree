@@ -79,9 +79,7 @@ def get_coordinator(
     if config_entry_id:
         coordinator = data.get(config_entry_id)
         if coordinator is None:
-            raise ServiceValidationError(
-                f"Unknown Family Tree config entry: {config_entry_id}"
-            )
+            raise ServiceValidationError(f"Unknown Family Tree config entry: {config_entry_id}")
         return coordinator
 
     if len(data) == 1:

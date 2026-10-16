@@ -33,9 +33,7 @@ def _repo(tmp_path: Path) -> Repository:
 
 def test_person_crud_and_trash(tmp_path: Path):
     repo = _repo(tmp_path)
-    person = repo.add_person(
-        Person(given_names="Ada", surname="Lovelace", sex=Sex.FEMALE)
-    )
+    person = repo.add_person(Person(given_names="Ada", surname="Lovelace", sex=Sex.FEMALE))
     assert repo.get_person(person.id) is not None
     assert repo.count_persons() == 1
 
@@ -101,12 +99,8 @@ def test_life_events_for_persons(tmp_path: Path):
     repo = _repo(tmp_path)
     a = repo.add_person(Person(given_names="Alex", surname="One"))
     b = repo.add_person(Person(given_names="Blake", surname="Two"))
-    place = repo.add_place(
-        Place(name="Amsterdam", country="Netherlands", country_code="NL")
-    )
-    marr_place = repo.add_place(
-        Place(name="Utrecht", country="Netherlands", country_code="NL")
-    )
+    place = repo.add_place(Place(name="Amsterdam", country="Netherlands", country_code="NL"))
+    marr_place = repo.add_place(Place(name="Utrecht", country="Netherlands", country_code="NL"))
     repo.add_event(
         Event(
             subject_type=SubjectType.PERSON,
@@ -211,8 +205,13 @@ def test_family_summaries_unknown_sex_parents_fill_slots(tmp_path: Path):
 
 def test_vital_summary_falls_back_to_baptism_and_burial():
     events = [
-        {"type": "baptism", "date_text": "ABT 1784", "date_qualifier": "about",
-         "sort_date": "1784-01-01", "place_name": "Tilburg"},
+        {
+            "type": "baptism",
+            "date_text": "ABT 1784",
+            "date_qualifier": "about",
+            "sort_date": "1784-01-01",
+            "place_name": "Tilburg",
+        },
         {"type": "burial", "date_text": "1863", "sort_date": "1863-01-01"},
         {"type": "marriage", "date_text": "1810", "sort_date": "1810-01-01"},
     ]

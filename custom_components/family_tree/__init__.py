@@ -33,9 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if CONF_NAME not in entry.data:
         name = str(entry.title or DEFAULT_PROFILE_NAME).strip() or DEFAULT_PROFILE_NAME
-        hass.config_entries.async_update_entry(
-            entry, data={**dict(entry.data), CONF_NAME: name}
-        )
+        hass.config_entries.async_update_entry(entry, data={**dict(entry.data), CONF_NAME: name})
 
     path = db_path(hass)
     database = Database(path)
@@ -56,9 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_register_http(hass)
     await async_setup_panel(hass)
 
-    await hass.config_entries.async_forward_entry_setups(
-        entry, [Platform(p) for p in PLATFORMS]
-    )
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform(p) for p in PLATFORMS])
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True

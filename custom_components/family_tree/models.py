@@ -271,9 +271,7 @@ class ParentChild:
             id=str(raw.get("id") or new_id()),
             parent_id=str(raw["parent_id"]),
             child_id=str(raw["child_id"]),
-            type=ParentChildType(
-                str(raw.get("type") or ParentChildType.BIOLOGICAL.value)
-            ),
+            type=ParentChildType(str(raw.get("type") or ParentChildType.BIOLOGICAL.value)),
             union_id=raw.get("union_id"),
         )
 

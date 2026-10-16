@@ -38,9 +38,7 @@ _PREFIX_RE = re.compile(
 )
 
 _NICK_PAREN_RE = re.compile(r"^(?P<first>.+?)\s*\((?P<nick>[^)]+)\)\s*$")
-_QUOTED_NICK_RE = re.compile(
-    r'["\u201c\u201d]([^"\u201c\u201d]+)["\u201c\u201d]|\'([^\']+)\''
-)
+_QUOTED_NICK_RE = re.compile(r'["\u201c\u201d]([^"\u201c\u201d]+)["\u201c\u201d]|\'([^\']+)\'')
 
 
 def split_surname(family_name: str) -> tuple[str, str]:

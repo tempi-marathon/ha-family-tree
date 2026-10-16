@@ -188,9 +188,7 @@ def delete_media_files(
     """Remove full and thumb files if present."""
     for thumb in (False, True):
         try:
-            path = media_file_path(
-                media_root, person_id, media_id, content_type, thumb=thumb
-            )
+            path = media_file_path(media_root, person_id, media_id, content_type, thumb=thumb)
             if path.is_file():
                 path.unlink()
         except ValueError:
@@ -224,9 +222,7 @@ def read_media_file(
 ) -> bytes | None:
     """Read bytes for a stored media variant."""
     try:
-        path = media_file_path(
-            media_root, person_id, media_id, content_type, thumb=thumb
-        )
+        path = media_file_path(media_root, person_id, media_id, content_type, thumb=thumb)
         path = assert_under_media_root(media_root, path)
     except ValueError:
         return None

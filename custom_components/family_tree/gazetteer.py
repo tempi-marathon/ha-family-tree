@@ -122,9 +122,7 @@ class Gazetteer:
         if not codes:
             return
         missing = await self.hass.async_add_executor_job(self._missing_countries, codes)
-        if not missing and not await self.hass.async_add_executor_job(
-            self._needs_admin1
-        ):
+        if not missing and not await self.hass.async_add_executor_job(self._needs_admin1):
             return
         session = async_get_clientsession(self.hass)
         if await self.hass.async_add_executor_job(self._needs_admin1):
@@ -142,8 +140,7 @@ class Gazetteer:
 
     def _missing_countries(self, codes: list[str]) -> list[str]:
         installed = {
-            str(r["code"])
-            for r in self.conn.execute("SELECT code FROM countries").fetchall()
+            str(r["code"]) for r in self.conn.execute("SELECT code FROM countries").fetchall()
         }
         return [c for c in codes if c not in installed]
 
@@ -167,8 +164,7 @@ class Gazetteer:
                     continue
                 country = code.split(".", 1)[0]
                 self.conn.execute(
-                    "INSERT OR REPLACE INTO admin1 (code, country_code, name) "
-                    "VALUES (?, ?, ?)",
+                    "INSERT OR REPLACE INTO admin1 (code, country_code, name) VALUES (?, ?, ?)",
                     (code, country, name),
                 )
             self.conn.execute("COMMIT")
@@ -180,9 +176,7 @@ class Gazetteer:
         if not admin1_code:
             return ""
         key = f"{country}.{admin1_code}"
-        row = self.conn.execute(
-            "SELECT name FROM admin1 WHERE code = ?", (key,)
-        ).fetchone()
+        row = self.conn.execute("SELECT name FROM admin1 WHERE code = ?", (key,)).fetchone()
         return str(row["name"]) if row else ""
 
     def _import_country_zip(self, country_code: str, data: bytes) -> None:
@@ -194,9 +188,7 @@ class Gazetteer:
             names = [n for n in zf.namelist() if n.upper().endswith(".TXT")]
             if not names:
                 raise ValueError(f"No .txt found in GeoNames zip for {country_code}")
-            preferred = next(
-                (n for n in names if n.upper().startswith(country_code)), names[0]
-            )
+            preferred = next((n for n in names if n.upper().startswith(country_code)), names[0])
             with zf.open(preferred) as handle:
                 for raw in handle:
                     line = raw.decode("utf-8", errors="replace").rstrip("\n")
@@ -243,12 +235,8 @@ class Gazetteer:
 
         self.conn.execute("BEGIN")
         try:
-            self.conn.execute(
-                "DELETE FROM places WHERE country_code = ?", (country_code,)
-            )
-            self.conn.execute(
-                "DELETE FROM places_fts WHERE country_code = ?", (country_code,)
-            )
+            self.conn.execute("DELETE FROM places WHERE country_code = ?", (country_code,))
+            self.conn.execute("DELETE FROM places_fts WHERE country_code = ?", (country_code,))
             self.conn.executemany(
                 "INSERT OR REPLACE INTO places "
                 "(geonames_id, name, asciiname, country_code, admin1_code, "
@@ -277,9 +265,7 @@ class Gazetteer:
         except Exception:
             self.conn.execute("ROLLBACK")
             raise
-        _LOGGER.info(
-            "Installed gazetteer for %s (%s places)", country_code, len(places)
-        )
+        _LOGGER.info("Installed gazetteer for %s (%s places)", country_code, len(places))
 
     def search(
         self, query: str, *, country: str | None = None, limit: int = 20

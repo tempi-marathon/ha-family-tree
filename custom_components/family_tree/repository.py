@@ -176,9 +176,7 @@ class Repository:
             clauses.append("is_living = ?")
             params.append(1 if living else 0)
         where = " AND ".join(clauses)
-        total = self.db.fetchone(
-            f"SELECT COUNT(*) AS c FROM persons WHERE {where}", params
-        )
+        total = self.db.fetchone(f"SELECT COUNT(*) AS c FROM persons WHERE {where}", params)
         rows = self.db.fetchall(
             f"SELECT * FROM persons WHERE {where} "
             "ORDER BY surname COLLATE NOCASE, given_names COLLATE NOCASE "
@@ -187,9 +185,7 @@ class Repository:
         )
         return [_row_person(r) for r in rows], int(total["c"] if total else 0)
 
-    def life_events_for_persons(
-        self, person_ids: list[str]
-    ) -> dict[str, list[dict[str, Any]]]:
+    def life_events_for_persons(self, person_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         """Batch birth/death/marriage summaries for list filtering.
 
         Marriage events are stored on unions and mapped via union_partners.
@@ -229,9 +225,7 @@ class Repository:
                     "date_text": row["date_text"] or "",
                     "date_qualifier": row["date_qualifier"] or "exact",
                     "place_id": row["place_id"],
-                    "place_name": _place_name(
-                        row["place_name"], row["admin1"], row["country"]
-                    ),
+                    "place_name": _place_name(row["place_name"], row["admin1"], row["country"]),
                 }
             )
 
@@ -258,23 +252,18 @@ class Repository:
                     "date_text": row["date_text"] or "",
                     "date_qualifier": row["date_qualifier"] or "exact",
                     "place_id": row["place_id"],
-                    "place_name": _place_name(
-                        row["place_name"], row["admin1"], row["country"]
-                    ),
+                    "place_name": _place_name(row["place_name"], row["admin1"], row["country"]),
                 }
             )
 
         return out
 
-    def family_summaries_for_persons(
-        self, person_ids: list[str]
-    ) -> dict[str, dict[str, Any]]:
+    def family_summaries_for_persons(self, person_ids: list[str]) -> dict[str, dict[str, Any]]:
         """Batch father/mother and children count for the people overview."""
         if not person_ids:
             return {}
         out: dict[str, dict[str, Any]] = {
-            pid: {"father": None, "mother": None, "children_count": 0}
-            for pid in person_ids
+            pid: {"father": None, "mother": None, "children_count": 0} for pid in person_ids
         }
         placeholders = ",".join("?" * len(person_ids))
 
@@ -342,13 +331,9 @@ class Repository:
 
     def count_persons(self, *, trashed: bool = False) -> int:
         if trashed:
-            row = self.db.fetchone(
-                "SELECT COUNT(*) AS c FROM persons WHERE deleted_at IS NOT NULL"
-            )
+            row = self.db.fetchone("SELECT COUNT(*) AS c FROM persons WHERE deleted_at IS NOT NULL")
         else:
-            row = self.db.fetchone(
-                "SELECT COUNT(*) AS c FROM persons WHERE deleted_at IS NULL"
-            )
+            row = self.db.fetchone("SELECT COUNT(*) AS c FROM persons WHERE deleted_at IS NULL")
         return int(row["c"] if row else 0)
 
     def add_person(self, person: Person) -> Person:
@@ -417,8 +402,7 @@ class Repository:
     def soft_delete_person(self, person_id: str) -> bool:
         def _do() -> bool:
             cur = self.db.execute(
-                "UPDATE persons SET deleted_at=?, updated_at=? "
-                "WHERE id=? AND deleted_at IS NULL",
+                "UPDATE persons SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL",
                 (_now(), _now(), person_id),
             )
             return cur.rowcount > 0
@@ -476,9 +460,7 @@ class Repository:
         )
         return [UnionPartner.from_dict(dict(r)) for r in rows]
 
-    def add_union(
-        self, union: Union, partners: list[tuple[str, int]]
-    ) -> Union:
+    def add_union(self, union: Union, partners: list[tuple[str, int]]) -> Union:
         def _do() -> Union:
             self.db.execute(
                 "INSERT INTO unions (id, type, status, known_children_count, notes, "
@@ -534,9 +516,7 @@ class Repository:
                 ),
             )
             if partners is not None:
-                self.db.execute(
-                    "DELETE FROM union_partners WHERE union_id=?", (union.id,)
-                )
+                self.db.execute("DELETE FROM union_partners WHERE union_id=?", (union.id,))
                 for person_id, position in partners:
                     self.db.execute(
                         "INSERT INTO union_partners (id, union_id, person_id, position) "
@@ -550,8 +530,7 @@ class Repository:
     def soft_delete_union(self, union_id: str) -> bool:
         def _do() -> bool:
             cur = self.db.execute(
-                "UPDATE unions SET deleted_at=?, updated_at=? "
-                "WHERE id=? AND deleted_at IS NULL",
+                "UPDATE unions SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL",
                 (_now(), _now(), union_id),
             )
             return cur.rowcount > 0
@@ -572,12 +551,8 @@ class Repository:
 
     def add_parent_child(self, link: ParentChild) -> ParentChild:
         def _do() -> ParentChild:
-            if would_create_parent_child_cycle(
-                self.db, link.parent_id, link.child_id
-            ):
-                raise ValueError(
-                    "This parent-child link would create a cycle in the family tree"
-                )
+            if would_create_parent_child_cycle(self.db, link.parent_id, link.child_id):
+                raise ValueError("This parent-child link would create a cycle in the family tree")
             self.db.execute(
                 "INSERT INTO parent_child (id, parent_id, child_id, type, union_id) "
                 "VALUES (?, ?, ?, ?, ?)",
@@ -595,15 +570,11 @@ class Repository:
         return self._mutate(_do)
 
     def list_parents(self, child_id: str) -> list[ParentChild]:
-        rows = self.db.fetchall(
-            "SELECT * FROM parent_child WHERE child_id=?", (child_id,)
-        )
+        rows = self.db.fetchall("SELECT * FROM parent_child WHERE child_id=?", (child_id,))
         return [ParentChild.from_dict(dict(r)) for r in rows]
 
     def list_children(self, parent_id: str) -> list[ParentChild]:
-        rows = self.db.fetchall(
-            "SELECT * FROM parent_child WHERE parent_id=?", (parent_id,)
-        )
+        rows = self.db.fetchall("SELECT * FROM parent_child WHERE parent_id=?", (parent_id,))
         return [ParentChild.from_dict(dict(r)) for r in rows]
 
     # --- Places ------------------------------------------------------------
@@ -619,8 +590,7 @@ class Repository:
             )
         else:
             rows = self.db.fetchall(
-                "SELECT * FROM places WHERE deleted_at IS NULL "
-                "ORDER BY name LIMIT ?",
+                "SELECT * FROM places WHERE deleted_at IS NULL ORDER BY name LIMIT ?",
                 (limit,),
             )
         return [_row_place(r) for r in rows]
@@ -650,8 +620,7 @@ class Repository:
             if row:
                 return _row_place(row)
         row = self.db.fetchone(
-            "SELECT * FROM places WHERE deleted_at IS NULL AND name=? "
-            "AND admin1=? AND country=?",
+            "SELECT * FROM places WHERE deleted_at IS NULL AND name=? AND admin1=? AND country=?",
             (name, admin1, country),
         )
         return _row_place(row) if row else None
@@ -718,9 +687,7 @@ class Repository:
 
     # --- Events ------------------------------------------------------------
 
-    def list_events(
-        self, subject_type: SubjectType, subject_id: str
-    ) -> list[Event]:
+    def list_events(self, subject_type: SubjectType, subject_id: str) -> list[Event]:
         rows = self.db.fetchall(
             "SELECT * FROM events WHERE subject_type=? AND subject_id=? "
             "AND deleted_at IS NULL "
@@ -837,8 +804,7 @@ class Repository:
             )
         else:
             rows = self.db.fetchall(
-                "SELECT * FROM sources WHERE deleted_at IS NULL "
-                "ORDER BY title LIMIT ?",
+                "SELECT * FROM sources WHERE deleted_at IS NULL ORDER BY title LIMIT ?",
                 (limit,),
             )
         return [_row_source(r) for r in rows]
@@ -908,9 +874,7 @@ class Repository:
         return self._mutate(_do)
 
     def get_citation(self, citation_id: str) -> Citation | None:
-        row = self.db.fetchone(
-            "SELECT * FROM citations WHERE id=?", (citation_id,)
-        )
+        row = self.db.fetchone("SELECT * FROM citations WHERE id=?", (citation_id,))
         if not row:
             return None
         return Citation.from_dict(dict(row))
@@ -975,17 +939,14 @@ class Repository:
     def soft_delete_source(self, source_id: str) -> bool:
         def _do() -> bool:
             cur = self.db.execute(
-                "UPDATE sources SET deleted_at=?, updated_at=? "
-                "WHERE id=? AND deleted_at IS NULL",
+                "UPDATE sources SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at IS NULL",
                 (_now(), _now(), source_id),
             )
             return cur.rowcount > 0
 
         return self._mutate(_do)
 
-    def list_citations(
-        self, subject_type: SubjectType, subject_id: str
-    ) -> list[dict[str, Any]]:
+    def list_citations(self, subject_type: SubjectType, subject_id: str) -> list[dict[str, Any]]:
         rows = self.db.fetchall(
             "SELECT c.*, s.title AS source_title, s.url AS source_url, "
             "s.author AS source_author, s.repository AS source_repository "
@@ -1002,8 +963,7 @@ class Repository:
     ) -> ExternalRef:
         def _do() -> ExternalRef:
             existing = self.db.fetchone(
-                "SELECT * FROM external_refs WHERE system=? AND external_id=? "
-                "AND entity_type=?",
+                "SELECT * FROM external_refs WHERE system=? AND external_id=? AND entity_type=?",
                 (system, external_id, entity_type),
             )
             if existing:
@@ -1033,9 +993,7 @@ class Repository:
 
         return self._mutate(_do)
 
-    def get_by_external_ref(
-        self, system: str, external_id: str, entity_type: str
-    ) -> str | None:
+    def get_by_external_ref(self, system: str, external_id: str, entity_type: str) -> str | None:
         row = self.db.fetchone(
             "SELECT entity_id FROM external_refs WHERE system=? AND external_id=? "
             "AND entity_type=?",
@@ -1043,9 +1001,7 @@ class Repository:
         )
         return str(row["entity_id"]) if row else None
 
-    def list_external_refs(
-        self, entity_type: str, entity_id: str
-    ) -> list[ExternalRef]:
+    def list_external_refs(self, entity_type: str, entity_id: str) -> list[ExternalRef]:
         rows = self.db.fetchall(
             "SELECT * FROM external_refs WHERE entity_type=? AND entity_id=?",
             (entity_type, entity_id),
@@ -1071,9 +1027,7 @@ class Repository:
                     "UPDATE user_links SET person_id=? WHERE ha_user_id=?",
                     (person_id, ha_user_id),
                 )
-                return UserLink(
-                    id=existing["id"], ha_user_id=ha_user_id, person_id=person_id
-                )
+                return UserLink(id=existing["id"], ha_user_id=ha_user_id, person_id=person_id)
             link = UserLink(ha_user_id=ha_user_id, person_id=person_id)
             self.db.execute(
                 "INSERT INTO user_links (id, ha_user_id, person_id) VALUES (?, ?, ?)",
@@ -1085,38 +1039,27 @@ class Repository:
 
     def clear_user_link(self, ha_user_id: str) -> bool:
         def _do() -> bool:
-            cur = self.db.execute(
-                "DELETE FROM user_links WHERE ha_user_id=?", (ha_user_id,)
-            )
+            cur = self.db.execute("DELETE FROM user_links WHERE ha_user_id=?", (ha_user_id,))
             return cur.rowcount > 0
 
         return self._mutate(_do)
 
     def user_link_for_person(self, person_id: str) -> UserLink | None:
-        row = self.db.fetchone(
-            "SELECT * FROM user_links WHERE person_id=? LIMIT 1", (person_id,)
-        )
+        row = self.db.fetchone("SELECT * FROM user_links WHERE person_id=? LIMIT 1", (person_id,))
         if not row:
             return None
-        return UserLink(
-            id=row["id"], ha_user_id=row["ha_user_id"], person_id=row["person_id"]
-        )
+        return UserLink(id=row["id"], ha_user_id=row["ha_user_id"], person_id=row["person_id"])
 
     def get_user_link(self, ha_user_id: str) -> UserLink | None:
-        row = self.db.fetchone(
-            "SELECT * FROM user_links WHERE ha_user_id=?", (ha_user_id,)
-        )
+        row = self.db.fetchone("SELECT * FROM user_links WHERE ha_user_id=?", (ha_user_id,))
         if not row:
             return None
-        return UserLink(
-            id=row["id"], ha_user_id=row["ha_user_id"], person_id=row["person_id"]
-        )
+        return UserLink(id=row["id"], ha_user_id=row["ha_user_id"], person_id=row["person_id"])
 
     def list_user_links(self) -> list[UserLink]:
         rows = self.db.fetchall("SELECT * FROM user_links")
         return [
-            UserLink(id=r["id"], ha_user_id=r["ha_user_id"], person_id=r["person_id"])
-            for r in rows
+            UserLink(id=r["id"], ha_user_id=r["ha_user_id"], person_id=r["person_id"]) for r in rows
         ]
 
     def clear_all(self) -> None:
@@ -1187,9 +1130,7 @@ class Repository:
         )
         return [_row_media(r) for r in rows]
 
-    def profile_media_ids_for_persons(
-        self, person_ids: list[str]
-    ) -> dict[str, str | None]:
+    def profile_media_ids_for_persons(self, person_ids: list[str]) -> dict[str, str | None]:
         if not person_ids:
             return {}
         ids = [normalize_entity_id(pid) for pid in person_ids]
@@ -1207,18 +1148,14 @@ class Repository:
         }
 
     def total_media_bytes(self) -> int:
-        row = self.db.fetchone(
-            "SELECT COALESCE(SUM(byte_size), 0) AS t FROM person_media"
-        )
+        row = self.db.fetchone("SELECT COALESCE(SUM(byte_size), 0) AS t FROM person_media")
         return int(row["t"] if row else 0)
 
     def count_person_media(self, person_id: str) -> int:
         pid = normalize_entity_id(person_id)
         if not pid:
             return 0
-        row = self.db.fetchone(
-            "SELECT COUNT(*) AS c FROM person_media WHERE person_id = ?", (pid,)
-        )
+        row = self.db.fetchone("SELECT COUNT(*) AS c FROM person_media WHERE person_id = ?", (pid,))
         return int(row["c"] if row else 0)
 
     def add_person_media(
@@ -1283,14 +1220,11 @@ class Repository:
             return None
 
         def _do() -> PersonMedia:
-            new_caption = (
-                normalize_caption(caption) if caption is not None else existing.caption
-            )
+            new_caption = normalize_caption(caption) if caption is not None else existing.caption
             new_order = sort_order if sort_order is not None else existing.sort_order
             updated_at = _now()
             self.db.execute(
-                "UPDATE person_media SET caption = ?, sort_order = ?, updated_at = ? "
-                "WHERE id = ?",
+                "UPDATE person_media SET caption = ?, sort_order = ?, updated_at = ? WHERE id = ?",
                 (new_caption, new_order, updated_at, mid),
             )
             return PersonMedia(
@@ -1383,9 +1317,7 @@ class Repository:
         """Return stored shortcuts, or None if not migrated yet."""
         if not self.meta_has(META_FAMILY_SHORTCUTS):
             return None
-        row = self.db.fetchone(
-            "SELECT value FROM meta WHERE key = ?", (META_FAMILY_SHORTCUTS,)
-        )
+        row = self.db.fetchone("SELECT value FROM meta WHERE key = ?", (META_FAMILY_SHORTCUTS,))
         if not row:
             return []
         try:

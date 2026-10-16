@@ -30,9 +30,7 @@ def test_optional_entity_id_must_not_collide_with_ws_message_id() -> None:
         },
         extra=vol.ALLOW_EXTRA,
     )
-    assert good(
-        {"type": "family_tree/persons/save", "id": 54, "surname": "Molenschot"}
-    )["id"] == 54
+    assert good({"type": "family_tree/persons/save", "id": 54, "surname": "Molenschot"})["id"] == 54
     assert (
         good(
             {

@@ -35,9 +35,7 @@ def _normalize_countries(raw: Any) -> list[str]:
 
 
 def _country_selector(current: list[str]) -> SelectSelector:
-    options = list(
-        dict.fromkeys([*SUGGESTED_GAZETTEER_COUNTRIES, *[c.upper() for c in current]])
-    )
+    options = list(dict.fromkeys([*SUGGESTED_GAZETTEER_COUNTRIES, *[c.upper() for c in current]]))
     return SelectSelector(
         SelectSelectorConfig(
             options=options,
@@ -58,9 +56,7 @@ class FamilyTreeConfigFlow(ConfigFlow, domain=DOMAIN):
         self._name = DEFAULT_PROFILE_NAME
         self._countries: list[str] = list(DEFAULT_GAZETTEER_COUNTRIES)
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Step 1: profile / tree name."""
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
@@ -87,9 +83,7 @@ class FamilyTreeConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Step 2: which GeoNames countries to download for offline place search."""
         if user_input is not None:
-            self._countries = _normalize_countries(
-                user_input.get(CONF_GAZETTEER_COUNTRIES)
-            )
+            self._countries = _normalize_countries(user_input.get(CONF_GAZETTEER_COUNTRIES))
             return self.async_create_entry(
                 title=self._name,
                 data={CONF_NAME: self._name},
@@ -117,14 +111,10 @@ class FamilyTreeConfigFlow(ConfigFlow, domain=DOMAIN):
 class FamilyTreeOptionsFlow(OptionsFlow):
     """Options for gazetteer countries."""
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Edit gazetteer countries."""
         options = dict(self.config_entry.options)
-        countries = list(
-            options.get(CONF_GAZETTEER_COUNTRIES) or DEFAULT_GAZETTEER_COUNTRIES
-        )
+        countries = list(options.get(CONF_GAZETTEER_COUNTRIES) or DEFAULT_GAZETTEER_COUNTRIES)
 
         if user_input is not None:
             return self.async_create_entry(
@@ -138,9 +128,9 @@ class FamilyTreeOptionsFlow(OptionsFlow):
 
         schema = vol.Schema(
             {
-                vol.Optional(
-                    CONF_GAZETTEER_COUNTRIES, default=countries
-                ): _country_selector(countries),
+                vol.Optional(CONF_GAZETTEER_COUNTRIES, default=countries): _country_selector(
+                    countries
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
