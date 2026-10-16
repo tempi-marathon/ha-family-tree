@@ -437,6 +437,11 @@ async def ws_families(
                     et = ev.get("type")
                     y = year_from_sort_date(ev.get("sort_date"))
                     if y is None:
+                        parsed = parse_gedcom_date(str(ev.get("date_text") or ""))
+                        y = year_from_sort_date(
+                            parsed.sort_date if parsed else None
+                        )
+                    if y is None:
                         continue
                     if et == "birth" and birth_y is None:
                         birth_y = y
@@ -900,6 +905,9 @@ async def ws_settings(
             "upcoming_anniversaries": (
                 coordinator.data.upcoming_anniversaries if coordinator.data else []
             ),
+            "on_this_day": (
+                coordinator.data.on_this_day if coordinator.data else []
+            ),
         },
     )
 
@@ -1134,7 +1142,17 @@ async def ws_persons_media_list(
         vol.Required("person_id"): str,
         vol.Required("media_id"): str,
         vol.Optional("source_media_id"): vol.Any(str, None),
-        vol.Optional("crop"): vol.Any(dict, None),
+        vol.Optional("crop"): vol.Any(
+            vol.Schema(
+                {
+                    vol.Required("scale"): vol.Coerce(float),
+                    vol.Required("offsetX"): vol.Coerce(float),
+                    vol.Required("offsetY"): vol.Coerce(float),
+                }
+            ),
+            None,
+        ),
+        vol.Optional("crop_json"): vol.Any(str, None),
         **_OPTIONAL_ENTRY,
     }
 )
@@ -1151,19 +1169,31 @@ async def ws_persons_media_set_profile(
     crop = msg.get("crop")
     crop_json: str | None = None
     if isinstance(crop, dict):
-        try:
-            scale = float(crop.get("scale", 1))
-            offset_x = float(crop.get("offsetX", 0))
-            offset_y = float(crop.get("offsetY", 0))
-        except (TypeError, ValueError):
-            connection.send_error(msg["id"], "invalid_crop", "Invalid crop")
-            return
+        scale = float(crop["scale"])
+        offset_x = float(crop["offsetX"])
+        offset_y = float(crop["offsetY"])
         if scale < 1 or scale > 3:
             connection.send_error(msg["id"], "invalid_crop", "Invalid crop scale")
             return
         crop_json = json.dumps(
             {"scale": scale, "offsetX": offset_x, "offsetY": offset_y}
         )
+    elif isinstance(msg.get("crop_json"), str) and msg["crop_json"].strip():
+        try:
+            parsed = json.loads(msg["crop_json"])
+            if not isinstance(parsed, dict):
+                raise ValueError("crop_json must be object")
+            scale = float(parsed.get("scale", 1))
+            offset_x = float(parsed.get("offsetX", 0))
+            offset_y = float(parsed.get("offsetY", 0))
+            if scale < 1 or scale > 3:
+                raise ValueError("Invalid crop scale")
+            crop_json = json.dumps(
+                {"scale": scale, "offsetX": offset_x, "offsetY": offset_y}
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            connection.send_error(msg["id"], "invalid_crop", "Invalid crop")
+            return
     source_media_id = msg.get("source_media_id")
     ok = await hass.async_add_executor_job(
         lambda: coordinator.repo.set_profile_media(

@@ -37,7 +37,6 @@ import {
   listUserLinks,
   personMediaUploadUrl,
   purgePerson,
-  setProfileMedia,
   restorePerson,
   listPlaces,
   saveCitation,
@@ -59,7 +58,6 @@ import {
   formatEventDate,
   formatLifespan,
   gedcomToForm,
-  parseGedcomDate,
 } from "./date_format";
 import {
   daysUntilLabel,
@@ -709,13 +707,14 @@ export class FamilyTreePanel extends LitElement {
   private async _uploadMediaBlob(
     blob: Blob,
     filename: string,
+    query?: Record<string, string>,
   ): Promise<{ id: string }> {
     if (!this.hass || !this._detail) throw new Error("Not ready");
     const form = new FormData();
     form.append("file", blob, filename);
     const url = apiUrl(
       this.hass,
-      personMediaUploadUrl(this._detail.person.id, this.hass),
+      personMediaUploadUrl(this._detail.person.id, this.hass, query),
     );
     const resp = await fetch(url, {
       method: "POST",
@@ -788,10 +787,10 @@ export class FamilyTreePanel extends LitElement {
         this._profileCropImage,
         this._profileCropTransform,
       );
-      const profileUpload = await this._uploadMediaBlob(cropped, "profile.jpg");
-      await setProfileMedia(this.hass, this._detail.person.id, profileUpload.id, {
-        sourceMediaId,
-        crop: this._profileCropTransform,
+      await this._uploadMediaBlob(cropped, "profile.jpg", {
+        set_profile: "1",
+        source_media_id: sourceMediaId,
+        crop_json: JSON.stringify(this._profileCropTransform),
       });
       await this._loadPersonMedia();
       await this._refreshAll();
@@ -889,11 +888,17 @@ export class FamilyTreePanel extends LitElement {
     return {
       profession: "",
       birth_place: "",
+      birth_date_mode: "simple",
       birth_date_iso: "",
-      birth_date_text: "",
+      birth_date_qualifier: "exact",
+      birth_date_first: "",
+      birth_date_second: "",
       death_place: "",
+      death_date_mode: "simple",
       death_date_iso: "",
-      death_date_text: "",
+      death_date_qualifier: "exact",
+      death_date_first: "",
+      death_date_second: "",
       birth_event_id: "",
       death_event_id: "",
       occupation_event_id: "",
@@ -924,20 +929,32 @@ export class FamilyTreePanel extends LitElement {
     };
   }
 
+  private _vitalDateFieldsFromText(
+    prefix: "birth" | "death",
+    dateText: string,
+  ): Record<string, string> {
+    const form = gedcomToForm(dateText || "");
+    const dateIso = gedcomToIsoDate(form.first) || "";
+    const simple = form.qualifier === "exact" && dateIso !== "";
+    return {
+      [`${prefix}_date_mode`]: simple ? "simple" : dateText.trim() ? "advanced" : "simple",
+      [`${prefix}_date_iso`]: simple ? dateIso : "",
+      [`${prefix}_date_qualifier`]: form.qualifier,
+      [`${prefix}_date_first`]: simple ? "" : form.first,
+      [`${prefix}_date_second`]: simple ? "" : form.second,
+    };
+  }
+
   private _vitalFieldsFromPerson(person: PersonDto, events: EventDto[]): Record<string, string> {
     const ids = this._vitalEventIds(events);
     const birthText = person.birth?.date_text || "";
-    const birthIso = gedcomToIsoDate(birthText) || "";
     const deathText = person.death?.date_text || "";
-    const deathIso = gedcomToIsoDate(deathText) || "";
     return {
       profession: this._professionFromEvents(events),
       birth_place: person.birth?.place_name || "",
-      birth_date_iso: birthIso,
-      birth_date_text: birthIso ? "" : birthText,
+      ...this._vitalDateFieldsFromText("birth", birthText),
       death_place: person.death?.place_name || "",
-      death_date_iso: deathIso,
-      death_date_text: deathIso ? "" : deathText,
+      ...this._vitalDateFieldsFromText("death", deathText),
       birth_event_id: ids.birth || "",
       death_event_id: ids.death || "",
       occupation_event_id: ids.occupation || "",
@@ -1242,19 +1259,144 @@ export class FamilyTreePanel extends LitElement {
     }, 250);
   }
 
-  private _vitalDateText(iso: string, unformatted: string): { text: string; error: boolean } {
-    const raw = (unformatted || "").trim();
-    if (raw) {
-      const parsed = parseGedcomDate(raw);
-      if (!parsed.first && !parsed.second && !/\d/.test(raw)) {
-        return { text: "", error: true };
-      }
-      return { text: raw, error: false };
+  private _vitalDateTextFromForm(
+    prefix: "birth" | "death",
+  ): { text: string; error: boolean } {
+    const mode = this._form[`${prefix}_date_mode`] || "simple";
+    if (mode === "simple") {
+      const isoTrim = (this._form[`${prefix}_date_iso`] || "").trim();
+      if (!isoTrim) return { text: "", error: false };
+      const gedcom = isoToGedcomDate(isoTrim);
+      return gedcom ? { text: gedcom, error: false } : { text: "", error: true };
     }
-    const isoTrim = (iso || "").trim();
-    if (!isoTrim) return { text: "", error: false };
-    const gedcom = isoToGedcomDate(isoTrim);
-    return gedcom ? { text: gedcom, error: false } : { text: "", error: true };
+    const qualifier = (this._form[`${prefix}_date_qualifier`] ||
+      "exact") as DateQualifier;
+    const built = buildGedcomDate(
+      qualifier,
+      this._form[`${prefix}_date_first`] || "",
+      this._form[`${prefix}_date_second`] || "",
+    );
+    if (built.error) return { text: "", error: true };
+    return { text: built.value, error: false };
+  }
+
+  private _togglePersonVitalDateMode(prefix: "birth" | "death") {
+    const mode = this._form[`${prefix}_date_mode`] || "simple";
+    if (mode === "simple") {
+      const dateFirst = this._form[`${prefix}_date_iso`]
+        ? isoToGedcomDate(this._form[`${prefix}_date_iso`])
+        : this._form[`${prefix}_date_first`] || "";
+      this._form = {
+        ...this._form,
+        [`${prefix}_date_mode`]: "advanced",
+        [`${prefix}_date_qualifier`]: "exact",
+        [`${prefix}_date_first`]: dateFirst,
+        [`${prefix}_date_iso`]: "",
+      };
+      return;
+    }
+    const dateIso = gedcomToIsoDate(this._form[`${prefix}_date_first`] || "") || "";
+    this._form = {
+      ...this._form,
+      [`${prefix}_date_mode`]: "simple",
+      [`${prefix}_date_iso`]: dateIso,
+      [`${prefix}_date_qualifier`]: "exact",
+      [`${prefix}_date_first`]: "",
+      [`${prefix}_date_second`]: "",
+    };
+  }
+
+  private _renderPersonVitalDateField(
+    prefix: "birth" | "death",
+    label: string,
+    write: boolean,
+  ) {
+    const advanced = (this._form[`${prefix}_date_mode`] || "simple") === "advanced";
+    const needsSecond =
+      advanced &&
+      (this._form[`${prefix}_date_qualifier`] === "between" ||
+        this._form[`${prefix}_date_qualifier`] === "from_to");
+    return html`<div class="event-date-field">
+      ${advanced
+        ? html`<label
+            >${this._tt("date_qualifier")}
+            <select
+              .value=${this._form[`${prefix}_date_qualifier`] || "exact"}
+              ?disabled=${!write}
+              @change=${(e: Event) =>
+                (this._form = {
+                  ...this._form,
+                  [`${prefix}_date_qualifier`]: (e.target as HTMLSelectElement).value,
+                })}
+            >
+              ${FORM_QUALIFIERS.map(
+                (q) =>
+                  html`<option value=${q}>${this._tt(QUALIFIER_KEYS[q])}</option>`,
+              )}
+            </select>
+          </label>
+          <label
+            >${label}
+            <input
+              .value=${this._form[`${prefix}_date_first`] || ""}
+              placeholder=${this._tt("date_gedcom_hint")}
+              ?disabled=${!write}
+              @input=${(e: Event) =>
+                (this._form = {
+                  ...this._form,
+                  [`${prefix}_date_first`]: (e.target as HTMLInputElement).value,
+                })}
+            />
+          </label>
+          ${needsSecond
+            ? html`<label
+                >${this._tt("date_second")}
+                <input
+                  .value=${this._form[`${prefix}_date_second`] || ""}
+                  placeholder=${this._tt("date_gedcom_hint")}
+                  ?disabled=${!write}
+                  @input=${(e: Event) =>
+                    (this._form = {
+                      ...this._form,
+                      [`${prefix}_date_second`]: (e.target as HTMLInputElement).value,
+                    })}
+                />
+              </label>`
+            : nothing}
+          ${write
+            ? html`<button
+                type="button"
+                class="linkish date-mode-toggle"
+                @click=${() => this._togglePersonVitalDateMode(prefix)}
+              >
+                ${this._tt("date_simple")}
+              </button>`
+            : nothing}`
+        : html`<div class="date-input-row">
+            <div class="date-label-grow">
+              <span class="field-label">${label}</span>
+              <input
+                type="date"
+                .value=${this._form[`${prefix}_date_iso`] || ""}
+                ?disabled=${!write}
+                @input=${(e: Event) =>
+                  (this._form = {
+                    ...this._form,
+                    [`${prefix}_date_iso`]: (e.target as HTMLInputElement).value,
+                  })}
+              />
+            </div>
+            ${write
+              ? html`<button
+                  type="button"
+                  class="linkish date-mode-toggle"
+                  @click=${() => this._togglePersonVitalDateMode(prefix)}
+                >
+                  ${this._tt("date_advanced")}
+                </button>`
+              : nothing}
+          </div>`}
+    </div>`;
   }
 
   private async _resolvePlaceId(placeName: string): Promise<string | null> {
@@ -1283,14 +1425,14 @@ export class FamilyTreePanel extends LitElement {
         Boolean(
           (this._form.birth_place || "").trim() ||
             (this._form.birth_date_iso || "").trim() ||
-            (this._form.birth_date_text || "").trim(),
+            (this._form.birth_date_first || "").trim(),
         )) ||
       (this._form.deceased === "true" &&
         !fromForm.death &&
         Boolean(
           (this._form.death_place || "").trim() ||
             (this._form.death_date_iso || "").trim() ||
-            (this._form.death_date_text || "").trim(),
+            (this._form.death_date_first || "").trim(),
         )) ||
       (!fromForm.occupation && Boolean((this._form.profession || "").trim()));
     if (!needFetch || !this.hass) return fromForm;
@@ -1305,18 +1447,19 @@ export class FamilyTreePanel extends LitElement {
 
   private async _savePersonVitalEvent(
     personId: string,
-    eventType: string,
+    eventType: "birth" | "death",
     opts: {
-      dateIso: string;
-      dateText: string;
       place: string;
       eventId?: string;
     },
   ): Promise<boolean> {
     if (!this.hass) return false;
     const placeName = (opts.place || "").trim();
-    const built = this._vitalDateText(opts.dateIso, opts.dateText);
-    if (built.error) return false;
+    const built = this._vitalDateTextFromForm(eventType);
+    if (built.error) {
+      this._error = this._tt("date_invalid");
+      return false;
+    }
     if (!built.text && !placeName) return true;
     const placeId = placeName ? await this._resolvePlaceId(placeName) : null;
     await saveEvent(this.hass, {
@@ -1335,16 +1478,12 @@ export class FamilyTreePanel extends LitElement {
   private async _savePersonVitals(personId: string): Promise<boolean> {
     const ids = await this._resolvePersonEventIds(personId);
     const birthOk = await this._savePersonVitalEvent(personId, "birth", {
-      dateIso: this._form.birth_date_iso || "",
-      dateText: this._form.birth_date_text || "",
       place: this._form.birth_place || "",
       eventId: ids.birth,
     });
     if (!birthOk) return false;
     if (this._form.deceased === "true") {
       const deathOk = await this._savePersonVitalEvent(personId, "death", {
-        dateIso: this._form.death_date_iso || "",
-        dateText: this._form.death_date_text || "",
         place: this._form.death_place || "",
         eventId: ids.death,
       });
@@ -2182,20 +2321,21 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _familyPresenceSpan(f: FamilySummaryDto): string {
-    if (f.year_from == null) return "";
+    const from = f.year_from;
+    if (from == null || Number.isNaN(Number(from))) return "";
     const end = f.has_living
       ? this._tt("family_span_now")
-      : f.year_to != null
+      : f.year_to != null && !Number.isNaN(Number(f.year_to))
         ? String(f.year_to)
         : "";
-    if (!end) return String(f.year_from);
-    return `${f.year_from} – ${end}`;
+    if (!end) return String(from);
+    return `${from} – ${end}`;
   }
 
   private _renderDashboard() {
     const s = this._stats;
     const upcoming = this._settings?.upcoming_birthdays || [];
-    const anniversaries = this._settings?.upcoming_anniversaries || [];
+    const onThisDay = this._settings?.on_this_day || [];
     const familyCards =
       this._familySummaries.length > 0
         ? this._familySummaries
@@ -2247,10 +2387,9 @@ export class FamilyTreePanel extends LitElement {
                 >
                   <span class="family-stat-name">${sc}</span>
                   <span class="family-stat-n">${f.total}</span>
-                  <span class="family-stat-label">${this._tt("stats_total")}</span>
-                  ${span
-                    ? html`<span class="family-stat-span muted">${span}</span>`
-                    : nothing}
+                  <span class="family-stat-span muted"
+                    >${span || "—"}</span
+                  >
                 </button>`;
               })}
             </div>
@@ -2278,36 +2417,55 @@ export class FamilyTreePanel extends LitElement {
         </div>
         <div class="block dashboard-panel">
           <h3 class="heading-with-tip">
-            ${this._tt("upcoming_anniversaries")}
+            ${this._tt("on_this_day")}
             ${tooltip(
-              this._tt("anniversaries_hint"),
+              this._tt("on_this_day_hint"),
               html`<span class="info-tip">${icon(MDI_INFORMATION)}</span>`,
             )}
           </h3>
           <ul class="plain">
-            ${anniversaries.length
-              ? anniversaries.slice(0, 8).map((u) => {
+            ${onThisDay.length
+              ? onThisDay.slice(0, 8).map((u) => {
+                  const kind = String(u.kind || "");
+                  const kindLabel =
+                    kind === "death"
+                      ? this._tt("on_this_day_death")
+                      : kind === "marriage"
+                        ? this._tt("on_this_day_marriage")
+                        : this._tt("on_this_day_birth");
                   const names = (u.names as string[]) || [];
-                  const label = names.join(" & ");
-                  const years = u.years != null ? this._tt("anniversary_years").replace("%s", String(u.years)) : "";
-                  const match = names[0]
-                    ? this._people.find(
-                        (p) =>
-                          personDisplayName(p).toLowerCase() === names[0].toLowerCase(),
-                      )
-                    : undefined;
+                  const label =
+                    names.length > 1
+                      ? names.join(" & ")
+                      : String(u.name || names[0] || "—");
+                  const yearsAgo =
+                    u.years_ago != null
+                      ? this._tt("on_this_day_years_ago").replace(
+                          "%s",
+                          String(u.years_ago),
+                        )
+                      : "";
+                  const year = u.year != null ? String(u.year) : "";
+                  const personId = u.person_id ? String(u.person_id) : "";
+                  const when =
+                    Number(u.days_until) === 0
+                      ? ""
+                      : daysUntilLabel(Number(u.days_until), this._tt("days"));
                   return html`<li>
-                    ${match
-                      ? html`<button class="linkish" @click=${() => this._openPerson(match.id)}>
-                          ${label}
+                    ${personId
+                      ? html`<button
+                          class="linkish"
+                          @click=${() => this._openPerson(personId)}
+                        >
+                          ${kindLabel}: ${label}
                         </button>`
-                      : html`<span>${label}</span>`}
+                      : html`<span>${kindLabel}: ${label}</span>`}
                     <span class="muted">
-                      ${years ? `${years} · ` : ""}${daysUntilLabel(Number(u.days_until), this._tt("days"))}
+                      ${[year, yearsAgo, when].filter(Boolean).join(" · ")}
                     </span>
                   </li>`;
                 })
-              : html`<li class="muted">${this._tt("no_anniversaries")}</li>`}
+              : html`<li class="muted">—</li>`}
           </ul>
         </div>
       </section>`}
@@ -2634,6 +2792,7 @@ export class FamilyTreePanel extends LitElement {
     const death = formatDeathCell(p.birth, p.death, p.is_living, lang);
     const parents = [p.father?.name, p.mother?.name].filter(Boolean).join(" · ");
     const isTrash = this._view === "trash";
+    const name = personDisplayName(p);
     return html`
       <div class="person-card-wrap">
         <button type="button" class="person-card" @click=${() => this._openPerson(p.id)}>
@@ -2641,14 +2800,14 @@ export class FamilyTreePanel extends LitElement {
             ${renderPersonAvatar(p, { size: "sm", hass: this.hass, deceasedOverlay: true })}
             <div class="person-card-head-text">
               <div class="person-card-title-row">
-                <div class="person-card-title person-card-title--clamp">
-                  ${personDisplayName(p)}
+                <div class="person-card-title-main">
+                  <div class="person-card-title person-card-title--clamp">${name}</div>
+                  ${this._lineageBadge(p.id, name)}
                 </div>
-                ${this._lineageBadge(p.id, personDisplayName(p))}
+                <span class="person-card-sex">${this._sexIconBadge(p.sex)}</span>
               </div>
             </div>
           </div>
-          <div class="person-card-meta">${this._sexIconBadge(p.sex)}</div>
           ${birth ? html`<div class="person-card-meta">${birth}</div>` : nothing}
           ${death ? html`<div class="person-card-meta">${death}</div>` : nothing}
           ${parents ? html`<div class="person-card-meta">${parents}</div>` : nothing}
@@ -4671,32 +4830,7 @@ export class FamilyTreePanel extends LitElement {
 
     const birthBody = html`<div class="form-stack">
       ${this._renderPersonPlaceField("birth_place", this._tt("birth_place"), write)}
-      <label class="vital-date-field"
-        >${this._tt("col_birth")}
-        <input
-          type="date"
-          .value=${this._form.birth_date_iso || ""}
-          ?disabled=${!write}
-          @input=${(e: Event) =>
-            (this._form = {
-              ...this._form,
-              birth_date_iso: (e.target as HTMLInputElement).value,
-            })}
-        />
-      </label>
-      <label
-        >${this._tt("birth_date_unformatted")}
-        <input
-          placeholder=${this._tt("date_gedcom_hint")}
-          .value=${this._form.birth_date_text || ""}
-          ?disabled=${!write}
-          @input=${(e: Event) =>
-            (this._form = {
-              ...this._form,
-              birth_date_text: (e.target as HTMLInputElement).value,
-            })}
-        />
-      </label>
+      ${this._renderPersonVitalDateField("birth", this._tt("col_birth"), write)}
     </div>`;
 
     const deceasedBody = html`<div class="form-stack">
@@ -4716,8 +4850,11 @@ export class FamilyTreePanel extends LitElement {
                   ? {}
                   : {
                       death_place: "",
+                      death_date_mode: "simple",
                       death_date_iso: "",
-                      death_date_text: "",
+                      death_date_qualifier: "exact",
+                      death_date_first: "",
+                      death_date_second: "",
                     }),
               };
             }}
@@ -4727,32 +4864,7 @@ export class FamilyTreePanel extends LitElement {
       ${deceasedOn
         ? html`
             ${this._renderPersonPlaceField("death_place", this._tt("death_place"), write)}
-            <label class="vital-date-field"
-              >${this._tt("col_death")}
-              <input
-                type="date"
-                .value=${this._form.death_date_iso || ""}
-                ?disabled=${!write}
-                @input=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
-                    death_date_iso: (e.target as HTMLInputElement).value,
-                  })}
-              />
-            </label>
-            <label
-              >${this._tt("death_date_unformatted")}
-              <input
-                placeholder=${this._tt("date_gedcom_hint")}
-                .value=${this._form.death_date_text || ""}
-                ?disabled=${!write}
-                @input=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
-                    death_date_text: (e.target as HTMLInputElement).value,
-                  })}
-              />
-            </label>
+            ${this._renderPersonVitalDateField("death", this._tt("col_death"), write)}
           `
         : nothing}
     </div>`;
@@ -5505,7 +5617,7 @@ export class FamilyTreePanel extends LitElement {
     }
     .family-stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
     }
     .family-stat {
@@ -5540,13 +5652,9 @@ export class FamilyTreePanel extends LitElement {
       line-height: 1.2;
       margin-top: 6px;
     }
-    .family-stat-label {
-      font-size: 0.85rem;
-      color: var(--secondary-text-color);
-    }
     .family-stat-span {
-      font-size: 0.8rem;
-      margin-top: 6px;
+      font-size: 0.85rem;
+      margin-top: 4px;
     }
     .charts {
       display: grid;
@@ -6177,19 +6285,33 @@ export class FamilyTreePanel extends LitElement {
     .person-card-head-text {
       flex: 1;
       min-width: 0;
+      display: flex;
+      align-items: center;
+      min-height: 32px;
     }
     .person-card-title-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+    }
+    .person-card-title-main {
+      display: flex;
+      align-items: center;
       gap: 6px;
+      min-width: 0;
+      flex: 1;
+    }
+    .person-card-sex {
+      flex-shrink: 0;
+      margin-left: auto;
     }
     .person-card-title--clamp {
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
-      flex: 1;
       min-width: 0;
     }
     .person-head-main {
@@ -6619,17 +6741,24 @@ export class FamilyTreePanel extends LitElement {
       font-weight: 600;
     }
     .settings-linked-users {
-      align-items: flex-start;
+      align-items: stretch;
     }
     .settings-linked-grid {
       display: flex;
       flex-wrap: wrap;
       gap: 12px;
-      align-items: flex-start;
+      align-items: stretch;
     }
     .settings-linked-grid > .person-card-wrap {
       width: min(100%, 280px);
       flex: 0 1 280px;
+      display: flex;
+      flex-direction: column;
+    }
+    .settings-linked-grid > .person-card-wrap > .person-card {
+      flex: 1 1 auto;
+      height: 100%;
+      box-sizing: border-box;
     }
     .settings-page .collapse-body {
       background: transparent;
@@ -6986,6 +7115,12 @@ export class FamilyTreePanel extends LitElement {
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 6px;
       }
+      .family-stats-row {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .family-stat { padding: 10px 8px; }
+      .family-stat-n { font-size: 1.15rem; }
       .stat { padding: 8px 6px; }
       .stat-n { font-size: 1.15rem; }
       .stat-label { font-size: 0.7rem; }

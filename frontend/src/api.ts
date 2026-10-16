@@ -137,6 +137,7 @@ export interface SettingsDto {
   can_write: boolean;
   upcoming_birthdays: Array<Record<string, unknown>>;
   upcoming_anniversaries: Array<Record<string, unknown>>;
+  on_this_day?: Array<Record<string, unknown>>;
 }
 
 export interface PersonDetail {
