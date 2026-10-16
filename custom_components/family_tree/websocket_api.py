@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -405,20 +406,77 @@ async def ws_stats(
 async def ws_families(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
 ) -> None:
-    """Return family shortcut groups (surname prefixes from options)."""
+    """Return family shortcut groups with counts and presence year spans."""
     coordinator = _coordinator(hass, msg)
     shortcuts = coordinator.family_shortcuts
 
     def _run() -> dict[str, Any]:
+        from datetime import date as date_cls
+
+        from .dates import year_from_sort_date
+
         persons, _ = coordinator.repo.list_persons(limit=MAX_PERSONS, offset=0)
+        today_year = date_cls.today().year
         groups: list[dict[str, Any]] = []
         for shortcut in shortcuts:
-            matched = [
-                {**p.to_dict(), "display_name": display_name(p)}
-                for p in persons
-                if matches_family_shortcut(p, shortcut)
+            matched = [p for p in persons if matches_family_shortcut(p, shortcut)]
+            life = coordinator.repo.life_events_for_persons([p.id for p in matched])
+            year_from: int | None = None
+            last_birth: int | None = None
+            last_death: int | None = None
+            has_living = False
+            for p in matched:
+                if p.is_living:
+                    has_living = True
+                events = life.get(p.id) or []
+                birth_y = None
+                baptism_y = None
+                death_y = None
+                burial_y = None
+                for ev in events:
+                    et = ev.get("type")
+                    y = year_from_sort_date(ev.get("sort_date"))
+                    if y is None:
+                        parsed = parse_gedcom_date(str(ev.get("date_text") or ""))
+                        y = year_from_sort_date(
+                            parsed.sort_date if parsed else None
+                        )
+                    if y is None:
+                        continue
+                    if et == "birth" and birth_y is None:
+                        birth_y = y
+                    elif et == "baptism" and baptism_y is None:
+                        baptism_y = y
+                    elif et == "death" and death_y is None:
+                        death_y = y
+                    elif et == "burial" and burial_y is None:
+                        burial_y = y
+                birth_y = birth_y if birth_y is not None else baptism_y
+                death_y = death_y if death_y is not None else burial_y
+                if birth_y is not None:
+                    year_from = birth_y if year_from is None else min(year_from, birth_y)
+                    last_birth = birth_y if last_birth is None else max(last_birth, birth_y)
+                if death_y is not None:
+                    last_death = death_y if last_death is None else max(last_death, death_y)
+            if has_living:
+                year_to: int | None = today_year
+            elif last_death is not None:
+                year_to = last_death
+            else:
+                year_to = last_birth
+            matched_dicts = [
+                {**p.to_dict(), "display_name": display_name(p)} for p in matched
             ]
-            groups.append({"shortcut": shortcut, "persons": matched[:100], "total": len(matched)})
+            groups.append(
+                {
+                    "shortcut": shortcut,
+                    "persons": matched_dicts[:100],
+                    "total": len(matched),
+                    "year_from": year_from,
+                    "year_to": year_to,
+                    "has_living": has_living,
+                }
+            )
         return {"families": groups}
 
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
@@ -847,6 +905,9 @@ async def ws_settings(
             "upcoming_anniversaries": (
                 coordinator.data.upcoming_anniversaries if coordinator.data else []
             ),
+            "on_this_day": (
+                coordinator.data.on_this_day if coordinator.data else []
+            ),
         },
     )
 
@@ -1057,10 +1118,19 @@ async def ws_persons_media_list(
     def _run() -> dict[str, Any]:
         items = coordinator.repo.list_person_media(msg["person_id"])
         person = coordinator.repo.get_person(msg["person_id"])
-        profile_id = person.profile_media_id if person else None
+        if person is None:
+            return {
+                "media": [m.to_dict() for m in items],
+                "profile_media_id": None,
+                "profile_source_media_id": None,
+                "profile_crop": None,
+            }
+        pdata = person.to_dict()
         return {
             "media": [m.to_dict() for m in items],
-            "profile_media_id": profile_id,
+            "profile_media_id": pdata.get("profile_media_id"),
+            "profile_source_media_id": pdata.get("profile_source_media_id"),
+            "profile_crop": pdata.get("profile_crop"),
         }
 
     connection.send_result(msg["id"], await hass.async_add_executor_job(_run))
@@ -1071,6 +1141,18 @@ async def ws_persons_media_list(
         vol.Required("type"): f"{DOMAIN}/persons/media/set_profile",
         vol.Required("person_id"): str,
         vol.Required("media_id"): str,
+        vol.Optional("source_media_id"): vol.Any(str, None),
+        vol.Optional("crop"): vol.Any(
+            vol.Schema(
+                {
+                    vol.Required("scale"): vol.Coerce(float),
+                    vol.Required("offsetX"): vol.Coerce(float),
+                    vol.Required("offsetY"): vol.Coerce(float),
+                }
+            ),
+            None,
+        ),
+        vol.Optional("crop_json"): vol.Any(str, None),
         **_OPTIONAL_ENTRY,
     }
 )
@@ -1084,8 +1166,42 @@ async def ws_persons_media_set_profile(
         connection.send_error(msg["id"], "unauthorized", "Unauthorized")
         return
     coordinator = _coordinator(hass, msg)
+    crop = msg.get("crop")
+    crop_json: str | None = None
+    if isinstance(crop, dict):
+        scale = float(crop["scale"])
+        offset_x = float(crop["offsetX"])
+        offset_y = float(crop["offsetY"])
+        if scale < 1 or scale > 3:
+            connection.send_error(msg["id"], "invalid_crop", "Invalid crop scale")
+            return
+        crop_json = json.dumps(
+            {"scale": scale, "offsetX": offset_x, "offsetY": offset_y}
+        )
+    elif isinstance(msg.get("crop_json"), str) and msg["crop_json"].strip():
+        try:
+            parsed = json.loads(msg["crop_json"])
+            if not isinstance(parsed, dict):
+                raise ValueError("crop_json must be object")
+            scale = float(parsed.get("scale", 1))
+            offset_x = float(parsed.get("offsetX", 0))
+            offset_y = float(parsed.get("offsetY", 0))
+            if scale < 1 or scale > 3:
+                raise ValueError("Invalid crop scale")
+            crop_json = json.dumps(
+                {"scale": scale, "offsetX": offset_x, "offsetY": offset_y}
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            connection.send_error(msg["id"], "invalid_crop", "Invalid crop")
+            return
+    source_media_id = msg.get("source_media_id")
     ok = await hass.async_add_executor_job(
-        coordinator.repo.set_profile_media, msg["person_id"], msg["media_id"]
+        lambda: coordinator.repo.set_profile_media(
+            msg["person_id"],
+            msg["media_id"],
+            source_media_id=source_media_id,
+            crop_json=crop_json,
+        )
     )
     if not ok:
         connection.send_error(msg["id"], "not_found", "Not found")

@@ -43,11 +43,13 @@ class FamilyTreeData:
         stats: dict[str, Any],
         upcoming_birthdays: list[dict[str, Any]],
         upcoming_anniversaries: list[dict[str, Any]],
+        on_this_day: list[dict[str, Any]],
         revision: int,
     ) -> None:
         self.stats = stats
         self.upcoming_birthdays = upcoming_birthdays
         self.upcoming_anniversaries = upcoming_anniversaries
+        self.on_this_day = on_this_day
         self.revision = revision
 
 
@@ -159,21 +161,29 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
         self.update_context = Context()
         today = date.today()
 
-        def _compute() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], int]:
+        def _compute() -> tuple[
+            dict[str, Any],
+            list[dict[str, Any]],
+            list[dict[str, Any]],
+            list[dict[str, Any]],
+            int,
+        ]:
             stats = compute_stats(self.repo.db, today=today)
             birthdays = _upcoming_birthdays(self.repo, today=today)
             anniversaries = _upcoming_anniversaries(self.repo, today=today)
+            on_this_day = _on_this_day(self.repo, today=today)
             revision = self.repo.get_revision()
-            return stats, birthdays, anniversaries, revision
+            return stats, birthdays, anniversaries, on_this_day, revision
 
-        stats, birthdays, anniversaries, revision = await self.hass.async_add_executor_job(
-            _compute
+        stats, birthdays, anniversaries, on_this_day, revision = (
+            await self.hass.async_add_executor_job(_compute)
         )
         await self._async_fire_transition_events(birthdays, anniversaries, today)
         return FamilyTreeData(
             stats=stats,
             upcoming_birthdays=birthdays,
             upcoming_anniversaries=anniversaries,
+            on_this_day=on_this_day,
             revision=revision,
         )
 
@@ -368,3 +378,132 @@ def _upcoming_anniversaries(
         )
     out.sort(key=lambda i: (i["days_until"], ",".join(i["names"])))
     return out
+
+
+def _event_sort_date(event: Any) -> str | None:
+    parsed = parse_gedcom_date(event.date_text)
+    return event.sort_date or (parsed.sort_date if parsed else None)
+
+
+def _on_this_day(
+    repo: Repository, *, today: date, within_days: int = 60, limit: int = 12
+) -> list[dict[str, Any]]:
+    """Historic births/deaths/weddings for today, else tomorrow, else upcoming."""
+    candidates: list[dict[str, Any]] = []
+
+    for event in repo.list_events_by_type(EventType.BIRTH.value):
+        if event.subject_type != SubjectType.PERSON:
+            continue
+        person = repo.get_person(event.subject_id)
+        if person is None or person.is_living:
+            continue
+        sort = _event_sort_date(event)
+        if not sort or len(sort) < 10:
+            continue
+        md = _month_day_from_sort(sort)
+        if md is None:
+            continue
+        month, day = md
+        next_date = _next_occurrence(month, day, today)
+        days = (next_date - today).days
+        if days > within_days:
+            continue
+        year = int(sort[:4])
+        candidates.append(
+            {
+                "kind": "birth",
+                "person_id": person.id,
+                "name": display_name(person),
+                "names": [display_name(person)],
+                "next_date": next_date.isoformat(),
+                "days_until": days,
+                "year": year,
+                "years_ago": next_date.year - year,
+            }
+        )
+
+    for event in repo.list_events_by_type(EventType.DEATH.value):
+        if event.subject_type != SubjectType.PERSON:
+            continue
+        person = repo.get_person(event.subject_id)
+        if person is None:
+            continue
+        sort = _event_sort_date(event)
+        if not sort or len(sort) < 10:
+            continue
+        md = _month_day_from_sort(sort)
+        if md is None:
+            continue
+        month, day = md
+        next_date = _next_occurrence(month, day, today)
+        days = (next_date - today).days
+        if days > within_days:
+            continue
+        year = int(sort[:4])
+        candidates.append(
+            {
+                "kind": "death",
+                "person_id": person.id,
+                "name": display_name(person),
+                "names": [display_name(person)],
+                "next_date": next_date.isoformat(),
+                "days_until": days,
+                "year": year,
+                "years_ago": next_date.year - year,
+            }
+        )
+
+    for event in repo.list_events_by_type(EventType.MARRIAGE.value):
+        if event.subject_type != SubjectType.UNION:
+            continue
+        union = repo.get_union(event.subject_id)
+        if union is None:
+            continue
+        partners = repo.list_union_partners(union.id)
+        people = [repo.get_person(p.person_id) for p in partners]
+        people = [p for p in people if p is not None]
+        if not people:
+            continue
+        sort = _event_sort_date(event)
+        if not sort or len(sort) < 10:
+            continue
+        md = _month_day_from_sort(sort)
+        if md is None:
+            continue
+        month, day = md
+        next_date = _next_occurrence(month, day, today)
+        days = (next_date - today).days
+        if days > within_days:
+            continue
+        year = int(sort[:4])
+        names = [display_name(p) for p in people]
+        candidates.append(
+            {
+                "kind": "marriage",
+                "union_id": union.id,
+                "person_id": people[0].id,
+                "name": " & ".join(names),
+                "names": names,
+                "next_date": next_date.isoformat(),
+                "days_until": days,
+                "year": year,
+                "years_ago": next_date.year - year,
+            }
+        )
+
+    today_items = [c for c in candidates if c["days_until"] == 0]
+    if today_items:
+        pool = today_items
+    else:
+        tomorrow_items = [c for c in candidates if c["days_until"] == 1]
+        pool = tomorrow_items or candidates
+
+    kind_order = {"birth": 0, "marriage": 1, "death": 2}
+    pool.sort(
+        key=lambda i: (
+            i["days_until"],
+            kind_order.get(str(i["kind"]), 9),
+            str(i.get("name") or ""),
+        )
+    )
+    return pool[:limit]

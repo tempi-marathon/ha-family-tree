@@ -57,6 +57,14 @@ export interface PersonDto {
   birth?: VitalSummary | null;
   death?: VitalSummary | null;
   profile_media_id?: string | null;
+  profile_source_media_id?: string | null;
+  profile_crop?: ProfileCropDto | null;
+}
+
+export interface ProfileCropDto {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
 }
 
 export interface PersonMediaDto {
@@ -129,6 +137,7 @@ export interface SettingsDto {
   can_write: boolean;
   upcoming_birthdays: Array<Record<string, unknown>>;
   upcoming_anniversaries: Array<Record<string, unknown>>;
+  on_this_day?: Array<Record<string, unknown>>;
 }
 
 export interface PersonDetail {
@@ -294,11 +303,20 @@ export async function getStats(hass: HomeAssistant): Promise<StatsDto> {
   return msg(hass, "family_tree/stats") as Promise<StatsDto>;
 }
 
+export interface FamilySummaryDto {
+  shortcut: string;
+  total: number;
+  year_from?: number | null;
+  year_to?: number | null;
+  has_living?: boolean;
+  persons?: PersonDto[];
+}
+
 export async function getFamilies(
   hass: HomeAssistant,
-): Promise<{ families: Array<{ shortcut: string; persons: PersonDto[]; total: number }> }> {
+): Promise<{ families: FamilySummaryDto[] }> {
   return msg(hass, "family_tree/families") as Promise<{
-    families: Array<{ shortcut: string; persons: PersonDto[]; total: number }>;
+    families: FamilySummaryDto[];
   }>;
 }
 
@@ -529,20 +547,38 @@ export async function claimUserLink(
 export async function listPersonMedia(
   hass: HomeAssistant,
   personId: string,
-): Promise<{ media: PersonMediaDto[]; profile_media_id: string | null }> {
+): Promise<{
+  media: PersonMediaDto[];
+  profile_media_id: string | null;
+  profile_source_media_id?: string | null;
+  profile_crop?: ProfileCropDto | null;
+}> {
   return msg(hass, "family_tree/persons/media/list", {
     person_id: personId,
-  }) as Promise<{ media: PersonMediaDto[]; profile_media_id: string | null }>;
+  }) as Promise<{
+    media: PersonMediaDto[];
+    profile_media_id: string | null;
+    profile_source_media_id?: string | null;
+    profile_crop?: ProfileCropDto | null;
+  }>;
 }
 
 export async function setProfileMedia(
   hass: HomeAssistant,
   personId: string,
   mediaId: string,
+  opts?: {
+    sourceMediaId?: string | null;
+    crop?: ProfileCropDto | null;
+  },
 ): Promise<{ ok: boolean }> {
   return msg(hass, "family_tree/persons/media/set_profile", {
     person_id: personId,
     media_id: mediaId,
+    ...(opts?.sourceMediaId !== undefined
+      ? { source_media_id: opts.sourceMediaId }
+      : {}),
+    ...(opts?.crop !== undefined ? { crop: opts.crop } : {}),
   }) as Promise<{ ok: boolean }>;
 }
 

@@ -386,6 +386,9 @@ class Repository:
                 sex=person.sex,
                 is_living=person.is_living,
                 notes=person.notes,
+                profile_media_id=person.profile_media_id,
+                profile_source_media_id=person.profile_source_media_id,
+                profile_crop_json=person.profile_crop_json,
                 created_at=person.created_at,
                 updated_at=_now(),
                 deleted_at=person.deleted_at,
@@ -1307,7 +1310,14 @@ class Repository:
 
         return self._mutate(_do)
 
-    def set_profile_media(self, person_id: str, media_id: str) -> bool:
+    def set_profile_media(
+        self,
+        person_id: str,
+        media_id: str,
+        *,
+        source_media_id: str | None = None,
+        crop_json: str | None = None,
+    ) -> bool:
         pid = normalize_entity_id(person_id)
         mid = normalize_entity_id(media_id)
         if not pid or not mid:
@@ -1318,11 +1328,20 @@ class Repository:
         person = self.get_person(pid)
         if person is None or person.deleted_at:
             return False
+        source_mid: str | None = None
+        if source_media_id is not None:
+            source_mid = normalize_entity_id(source_media_id)
+            if not source_mid:
+                return False
+            source = self.get_person_media(source_mid)
+            if source is None or source.person_id != pid:
+                return False
 
         def _do() -> bool:
             self.db.execute(
-                "UPDATE persons SET profile_media_id = ?, updated_at = ? WHERE id = ?",
-                (mid, _now(), pid),
+                "UPDATE persons SET profile_media_id = ?, profile_source_media_id = ?, "
+                "profile_crop_json = ?, updated_at = ? WHERE id = ?",
+                (mid, source_mid, crop_json, _now(), pid),
             )
             return True
 
@@ -1337,10 +1356,17 @@ class Repository:
             return None
 
         def _do() -> PersonMedia:
+            now = _now()
             self.db.execute(
                 "UPDATE persons SET profile_media_id = NULL, updated_at = ? "
                 "WHERE profile_media_id = ?",
-                (_now(), mid),
+                (now, mid),
+            )
+            self.db.execute(
+                "UPDATE persons SET profile_source_media_id = NULL, "
+                "profile_crop_json = NULL, updated_at = ? "
+                "WHERE profile_source_media_id = ?",
+                (now, mid),
             )
             self.db.execute("DELETE FROM person_media WHERE id = ?", (mid,))
             return existing

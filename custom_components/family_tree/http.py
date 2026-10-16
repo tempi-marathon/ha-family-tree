@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from http import HTTPStatus
 
@@ -258,6 +259,24 @@ class FamilyTreePersonMediaUploadView(HomeAssistantView):
 
         root = media_dir(hass)
         set_profile = request.query.get("set_profile", "").lower() in ("1", "true", "yes")
+        source_media_id = (request.query.get("source_media_id") or "").strip() or None
+        crop_json_raw = (request.query.get("crop_json") or "").strip() or None
+        crop_json: str | None = None
+        if crop_json_raw:
+            try:
+                parsed = json.loads(crop_json_raw)
+                if not isinstance(parsed, dict):
+                    return self.json_message("Invalid crop", HTTPStatus.BAD_REQUEST)
+                scale = float(parsed.get("scale", 1))
+                offset_x = float(parsed.get("offsetX", 0))
+                offset_y = float(parsed.get("offsetY", 0))
+                if scale < 1 or scale > 3:
+                    return self.json_message("Invalid crop scale", HTTPStatus.BAD_REQUEST)
+                crop_json = json.dumps(
+                    {"scale": scale, "offsetX": offset_x, "offsetY": offset_y}
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return self.json_message("Invalid crop", HTTPStatus.BAD_REQUEST)
 
         def _upload() -> dict:
             media = upload_person_media(
@@ -269,7 +288,12 @@ class FamilyTreePersonMediaUploadView(HomeAssistantView):
                 set_profile_if_empty=False,
             )
             if set_profile:
-                coordinator.repo.set_profile_media(person_id, media.id)
+                coordinator.repo.set_profile_media(
+                    person_id,
+                    media.id,
+                    source_media_id=source_media_id,
+                    crop_json=crop_json,
+                )
             return {"media": media.to_dict()}
 
         try:

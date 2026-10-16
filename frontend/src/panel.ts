@@ -26,7 +26,9 @@ import {
   getPerson,
   getSiblings,
   getSettings,
+  getFamilies,
   getStats,
+  type FamilySummaryDto,
   listPersonMedia,
   deletePersonMedia,
   listHaUsers,
@@ -35,7 +37,6 @@ import {
   listUserLinks,
   personMediaUploadUrl,
   purgePerson,
-  setProfileMedia,
   restorePerson,
   listPlaces,
   saveCitation,
@@ -57,7 +58,6 @@ import {
   formatEventDate,
   formatLifespan,
   gedcomToForm,
-  parseGedcomDate,
 } from "./date_format";
 import {
   daysUntilLabel,
@@ -92,7 +92,6 @@ import {
   defaultCropTransform,
   drawProfileCropPreview,
   loadImageFromBlob,
-  loadImageFromFile,
   encodeImageForUpload,
   renderCroppedJpeg,
   type CropTransform,
@@ -254,6 +253,7 @@ export class FamilyTreePanel extends LitElement {
   @state() private _people: PersonDto[] = [];
   @state() private _total = 0;
   @state() private _stats: StatsDto | null = null;
+  @state() private _familySummaries: FamilySummaryDto[] = [];
   @state() private _settings: SettingsDto | null = null;
   @state() private _detail: PersonDetail | null = null;
   @state() private _personTab: PersonTab = "details";
@@ -320,8 +320,11 @@ export class FamilyTreePanel extends LitElement {
   @state() private _photoLightbox: string | null = null;
   @state() private _profileCropTransform: CropTransform = defaultCropTransform();
   @state() private _profileCropHasImage = false;
+  @state() private _profileCropSourceMediaId: string | null = null;
 
   private _profileCropImage: HTMLImageElement | null = null;
+  private _profileCropPendingBlob: Blob | null = null;
+  private _profileCropPendingName = "photo.jpg";
   private _profileCropDrag: { active: boolean; lastX: number; lastY: number } = {
     active: false,
     lastX: 0,
@@ -468,7 +471,7 @@ export class FamilyTreePanel extends LitElement {
     if (!this.hass) return;
     try {
       const trashed = this._view === "trash";
-      const [list, stats, settings, lineage, userLinks] = await Promise.all([
+      const [list, stats, settings, lineage, userLinks, families] = await Promise.all([
         listPersons(this.hass, {
           trashed,
           // Full tree — filters apply client-side (ready-home pattern).
@@ -478,14 +481,25 @@ export class FamilyTreePanel extends LitElement {
         getSettings(this.hass),
         getMyLineage(this.hass).catch(() => null),
         listUserLinks(this.hass).catch(() => ({ links: [] as Array<Record<string, unknown>> })),
+        getFamilies(this.hass).catch(() => ({ families: [] as FamilySummaryDto[] })),
       ]);
       this._people = list.persons;
       this._total = list.total;
       this._stats = stats;
       this._settings = settings;
+      this._familySummaries = families.families;
       this._syncShortcutsDraft();
       this._lineage = lineage;
       this._userLinks = userLinks.links;
+      if (this._canWrite()) {
+        try {
+          this._haUsers = await listHaUsers(this.hass);
+          this._haUsersLoadError = "";
+        } catch (err) {
+          this._haUsers = [];
+          this._haUsersLoadError = formatHassError(err);
+        }
+      }
       if (this._detail) {
         this._detail = await getPerson(this.hass, this._detail.person.id);
       }
@@ -600,6 +614,8 @@ export class FamilyTreePanel extends LitElement {
         person: {
           ...this._detail.person,
           profile_media_id: data.profile_media_id,
+          profile_source_media_id: data.profile_source_media_id ?? null,
+          profile_crop: data.profile_crop ?? null,
         },
       };
     } catch {
@@ -607,9 +623,10 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _openProfilePhotoEditor() {
+  private _openProfilePhotoEditor(opts?: { sourceMediaId?: string }) {
     if (!this._canWrite()) return;
     this._resetProfileCropState();
+    this._profileCropSourceMediaId = opts?.sourceMediaId ?? null;
     this._error = "";
     this._dialogMode = "profilePhoto";
     this._dialogOpen = true;
@@ -617,12 +634,19 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private async _bootstrapProfilePhotoEditor() {
-    const profileId = this._detail?.person.profile_media_id;
-    if (!profileId || !this.hass) return;
-    const path = personMediaApiPath(profileId, "full");
+    if (!this.hass || !this._detail) return;
+    const person = this._detail.person;
+    const sourceId =
+      this._profileCropSourceMediaId ||
+      person.profile_source_media_id ||
+      person.profile_media_id ||
+      null;
+    if (!sourceId) return;
+    this._profileCropSourceMediaId = sourceId;
+    const path = personMediaApiPath(sourceId, "full");
     if (!path) return;
     try {
-      const resp = await fetch(path, {
+      const resp = await fetch(apiUrl(this.hass, path), {
         method: "GET",
         credentials: "same-origin",
         headers: await this._authHeaders(),
@@ -630,7 +654,17 @@ export class FamilyTreePanel extends LitElement {
       if (!resp.ok) return;
       const blob = await resp.blob();
       this._profileCropImage = await loadImageFromBlob(blob);
-      this._profileCropTransform = defaultCropTransform();
+      const stored =
+        person.profile_source_media_id === sourceId && person.profile_crop
+          ? person.profile_crop
+          : null;
+      this._profileCropTransform = stored
+        ? {
+            scale: Number(stored.scale) || 1,
+            offsetX: Number(stored.offsetX) || 0,
+            offsetY: Number(stored.offsetY) || 0,
+          }
+        : defaultCropTransform();
       this._profileCropHasImage = true;
       await this.updateComplete;
       this._redrawProfileCropCanvas();
@@ -643,6 +677,9 @@ export class FamilyTreePanel extends LitElement {
     this._profileCropImage = null;
     this._profileCropHasImage = false;
     this._profileCropTransform = defaultCropTransform();
+    this._profileCropSourceMediaId = null;
+    this._profileCropPendingBlob = null;
+    this._profileCropPendingName = "photo.jpg";
     this._profileCropDrag = { active: false, lastX: 0, lastY: 0 };
   }
 
@@ -660,7 +697,13 @@ export class FamilyTreePanel extends LitElement {
     input.value = "";
     if (!file) return;
     try {
-      this._profileCropImage = await loadImageFromFile(file);
+      // Encode once so editor preview matches the stored original dimensions.
+      const blob = await encodeImageForUpload(file);
+      const baseName = file.name.replace(/\.[^.]+$/, "") || "photo";
+      this._profileCropPendingBlob = blob;
+      this._profileCropPendingName = `${baseName}.jpg`;
+      this._profileCropSourceMediaId = null;
+      this._profileCropImage = await loadImageFromBlob(blob);
       this._profileCropTransform = defaultCropTransform();
       this._profileCropHasImage = true;
       await this.updateComplete;
@@ -668,6 +711,35 @@ export class FamilyTreePanel extends LitElement {
     } catch (err) {
       this._error = formatHassError(err);
     }
+  }
+
+  private async _uploadMediaBlob(
+    blob: Blob,
+    filename: string,
+    query?: Record<string, string>,
+  ): Promise<{ id: string }> {
+    if (!this.hass || !this._detail) throw new Error("Not ready");
+    const form = new FormData();
+    form.append("file", blob, filename);
+    const url = apiUrl(
+      this.hass,
+      personMediaUploadUrl(this._detail.person.id, this.hass, query),
+    );
+    const resp = await fetch(url, {
+      method: "POST",
+      body: form,
+      credentials: "same-origin",
+      headers: await this._authHeaders(),
+    });
+    if (!resp.ok) {
+      throw new Error(
+        await this._uploadErrorMessage(resp, `Upload failed (${resp.status})`),
+      );
+    }
+    const data = (await resp.json()) as { media?: { id?: string } };
+    const id = data.media?.id;
+    if (!id) throw new Error("Upload failed");
+    return { id };
   }
 
   private _onProfileCropPointerDown(e: PointerEvent) {
@@ -709,26 +781,26 @@ export class FamilyTreePanel extends LitElement {
     if (!this.hass || !this._detail || !this._profileCropImage || !this._canWrite()) return;
     this._saving = true;
     try {
-      const blob = await renderCroppedJpeg(this._profileCropImage, this._profileCropTransform);
-      const form = new FormData();
-      form.append("file", blob, "profile.jpg");
-      const url = apiUrl(
-        this.hass,
-        personMediaUploadUrl(this._detail.person.id, this.hass, {
-          set_profile: "1",
-        }),
-      );
-      const resp = await fetch(url, {
-        method: "POST",
-        body: form,
-        credentials: "same-origin",
-        headers: await this._authHeaders(),
-      });
-      if (!resp.ok) {
-        throw new Error(
-          await this._uploadErrorMessage(resp, `Upload failed (${resp.status})`),
+      let sourceMediaId = this._profileCropSourceMediaId;
+      if (this._profileCropPendingBlob) {
+        const uploaded = await this._uploadMediaBlob(
+          this._profileCropPendingBlob,
+          this._profileCropPendingName,
         );
+        sourceMediaId = uploaded.id;
       }
+      if (!sourceMediaId) {
+        throw new Error("Missing source image");
+      }
+      const cropped = await renderCroppedJpeg(
+        this._profileCropImage,
+        this._profileCropTransform,
+      );
+      await this._uploadMediaBlob(cropped, "profile.jpg", {
+        set_profile: "1",
+        source_media_id: sourceMediaId,
+        crop_json: JSON.stringify(this._profileCropTransform),
+      });
       await this._loadPersonMedia();
       await this._refreshAll();
       this._error = "";
@@ -768,15 +840,9 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private async _setProfilePhoto(mediaId: string) {
-    if (!this.hass || !this._detail || !this._canWrite()) return;
-    try {
-      await setProfileMedia(this.hass, this._detail.person.id, mediaId);
-      await this._loadPersonMedia();
-      await this._refreshAll();
-    } catch (err) {
-      this._error = formatHassError(err);
-    }
+  private _setProfilePhoto(mediaId: string) {
+    if (!this._canWrite() || !mediaId) return;
+    this._openProfilePhotoEditor({ sourceMediaId: mediaId });
   }
 
   private async _deletePersonPhoto(mediaId: string) {
@@ -831,11 +897,17 @@ export class FamilyTreePanel extends LitElement {
     return {
       profession: "",
       birth_place: "",
+      birth_date_mode: "simple",
       birth_date_iso: "",
-      birth_date_text: "",
+      birth_date_qualifier: "exact",
+      birth_date_first: "",
+      birth_date_second: "",
       death_place: "",
+      death_date_mode: "simple",
       death_date_iso: "",
-      death_date_text: "",
+      death_date_qualifier: "exact",
+      death_date_first: "",
+      death_date_second: "",
       birth_event_id: "",
       death_event_id: "",
       occupation_event_id: "",
@@ -866,20 +938,32 @@ export class FamilyTreePanel extends LitElement {
     };
   }
 
+  private _vitalDateFieldsFromText(
+    prefix: "birth" | "death",
+    dateText: string,
+  ): Record<string, string> {
+    const form = gedcomToForm(dateText || "");
+    const dateIso = gedcomToIsoDate(form.first) || "";
+    const simple = form.qualifier === "exact" && dateIso !== "";
+    return {
+      [`${prefix}_date_mode`]: simple ? "simple" : dateText.trim() ? "advanced" : "simple",
+      [`${prefix}_date_iso`]: simple ? dateIso : "",
+      [`${prefix}_date_qualifier`]: form.qualifier,
+      [`${prefix}_date_first`]: simple ? "" : form.first,
+      [`${prefix}_date_second`]: simple ? "" : form.second,
+    };
+  }
+
   private _vitalFieldsFromPerson(person: PersonDto, events: EventDto[]): Record<string, string> {
     const ids = this._vitalEventIds(events);
     const birthText = person.birth?.date_text || "";
-    const birthIso = gedcomToIsoDate(birthText) || "";
     const deathText = person.death?.date_text || "";
-    const deathIso = gedcomToIsoDate(deathText) || "";
     return {
       profession: this._professionFromEvents(events),
       birth_place: person.birth?.place_name || "",
-      birth_date_iso: birthIso,
-      birth_date_text: birthIso ? "" : birthText,
+      ...this._vitalDateFieldsFromText("birth", birthText),
       death_place: person.death?.place_name || "",
-      death_date_iso: deathIso,
-      death_date_text: deathIso ? "" : deathText,
+      ...this._vitalDateFieldsFromText("death", deathText),
       birth_event_id: ids.birth || "",
       death_event_id: ids.death || "",
       occupation_event_id: ids.occupation || "",
@@ -1057,13 +1141,20 @@ export class FamilyTreePanel extends LitElement {
     return html`<span class="lineage-marker">${icon(MDI_ACCOUNT_HEART)}</span>`;
   }
 
-  private _lineageBadge(personId: string, personName?: string) {
+  private _lineageSentence(personId: string, personName?: string): string {
     if (personId === this._myLinkedPersonId()) {
-      return tooltip(this._tt("lineage_me"), this._lineageIconSpan());
+      return this._tt("lineage_me");
+    }
+    return this._lineageTooltip(personId, personName);
+  }
+
+  private _lineageBadge(personId: string, _personName?: string) {
+    if (personId === this._myLinkedPersonId()) {
+      return this._lineageIconSpan();
     }
     const rel = this._lineageRel(personId);
     if (!rel) return nothing;
-    return tooltip(this._lineageTooltip(personId, personName), this._lineageIconSpan());
+    return this._lineageIconSpan();
   }
 
   private _deceasedIcon(isLiving: boolean) {
@@ -1177,19 +1268,144 @@ export class FamilyTreePanel extends LitElement {
     }, 250);
   }
 
-  private _vitalDateText(iso: string, unformatted: string): { text: string; error: boolean } {
-    const raw = (unformatted || "").trim();
-    if (raw) {
-      const parsed = parseGedcomDate(raw);
-      if (!parsed.first && !parsed.second && !/\d/.test(raw)) {
-        return { text: "", error: true };
-      }
-      return { text: raw, error: false };
+  private _vitalDateTextFromForm(
+    prefix: "birth" | "death",
+  ): { text: string; error: boolean } {
+    const mode = this._form[`${prefix}_date_mode`] || "simple";
+    if (mode === "simple") {
+      const isoTrim = (this._form[`${prefix}_date_iso`] || "").trim();
+      if (!isoTrim) return { text: "", error: false };
+      const gedcom = isoToGedcomDate(isoTrim);
+      return gedcom ? { text: gedcom, error: false } : { text: "", error: true };
     }
-    const isoTrim = (iso || "").trim();
-    if (!isoTrim) return { text: "", error: false };
-    const gedcom = isoToGedcomDate(isoTrim);
-    return gedcom ? { text: gedcom, error: false } : { text: "", error: true };
+    const qualifier = (this._form[`${prefix}_date_qualifier`] ||
+      "exact") as DateQualifier;
+    const built = buildGedcomDate(
+      qualifier,
+      this._form[`${prefix}_date_first`] || "",
+      this._form[`${prefix}_date_second`] || "",
+    );
+    if (built.error) return { text: "", error: true };
+    return { text: built.value, error: false };
+  }
+
+  private _togglePersonVitalDateMode(prefix: "birth" | "death") {
+    const mode = this._form[`${prefix}_date_mode`] || "simple";
+    if (mode === "simple") {
+      const dateFirst = this._form[`${prefix}_date_iso`]
+        ? isoToGedcomDate(this._form[`${prefix}_date_iso`])
+        : this._form[`${prefix}_date_first`] || "";
+      this._form = {
+        ...this._form,
+        [`${prefix}_date_mode`]: "advanced",
+        [`${prefix}_date_qualifier`]: "exact",
+        [`${prefix}_date_first`]: dateFirst,
+        [`${prefix}_date_iso`]: "",
+      };
+      return;
+    }
+    const dateIso = gedcomToIsoDate(this._form[`${prefix}_date_first`] || "") || "";
+    this._form = {
+      ...this._form,
+      [`${prefix}_date_mode`]: "simple",
+      [`${prefix}_date_iso`]: dateIso,
+      [`${prefix}_date_qualifier`]: "exact",
+      [`${prefix}_date_first`]: "",
+      [`${prefix}_date_second`]: "",
+    };
+  }
+
+  private _renderPersonVitalDateField(
+    prefix: "birth" | "death",
+    label: string,
+    write: boolean,
+  ) {
+    const advanced = (this._form[`${prefix}_date_mode`] || "simple") === "advanced";
+    const needsSecond =
+      advanced &&
+      (this._form[`${prefix}_date_qualifier`] === "between" ||
+        this._form[`${prefix}_date_qualifier`] === "from_to");
+    return html`<div class="event-date-field">
+      ${advanced
+        ? html`<label
+            >${this._tt("date_qualifier")}
+            <select
+              .value=${this._form[`${prefix}_date_qualifier`] || "exact"}
+              ?disabled=${!write}
+              @change=${(e: Event) =>
+                (this._form = {
+                  ...this._form,
+                  [`${prefix}_date_qualifier`]: (e.target as HTMLSelectElement).value,
+                })}
+            >
+              ${FORM_QUALIFIERS.map(
+                (q) =>
+                  html`<option value=${q}>${this._tt(QUALIFIER_KEYS[q])}</option>`,
+              )}
+            </select>
+          </label>
+          <label
+            >${label}
+            <input
+              .value=${this._form[`${prefix}_date_first`] || ""}
+              placeholder=${this._tt("date_gedcom_hint")}
+              ?disabled=${!write}
+              @input=${(e: Event) =>
+                (this._form = {
+                  ...this._form,
+                  [`${prefix}_date_first`]: (e.target as HTMLInputElement).value,
+                })}
+            />
+          </label>
+          ${needsSecond
+            ? html`<label
+                >${this._tt("date_second")}
+                <input
+                  .value=${this._form[`${prefix}_date_second`] || ""}
+                  placeholder=${this._tt("date_gedcom_hint")}
+                  ?disabled=${!write}
+                  @input=${(e: Event) =>
+                    (this._form = {
+                      ...this._form,
+                      [`${prefix}_date_second`]: (e.target as HTMLInputElement).value,
+                    })}
+                />
+              </label>`
+            : nothing}
+          ${write
+            ? html`<button
+                type="button"
+                class="linkish date-mode-toggle"
+                @click=${() => this._togglePersonVitalDateMode(prefix)}
+              >
+                ${this._tt("date_simple")}
+              </button>`
+            : nothing}`
+        : html`<div class="date-input-row">
+            <div class="date-label-grow">
+              <span class="field-label">${label}</span>
+              <input
+                type="date"
+                .value=${this._form[`${prefix}_date_iso`] || ""}
+                ?disabled=${!write}
+                @input=${(e: Event) =>
+                  (this._form = {
+                    ...this._form,
+                    [`${prefix}_date_iso`]: (e.target as HTMLInputElement).value,
+                  })}
+              />
+            </div>
+            ${write
+              ? html`<button
+                  type="button"
+                  class="linkish date-mode-toggle"
+                  @click=${() => this._togglePersonVitalDateMode(prefix)}
+                >
+                  ${this._tt("date_advanced")}
+                </button>`
+              : nothing}
+          </div>`}
+    </div>`;
   }
 
   private async _resolvePlaceId(placeName: string): Promise<string | null> {
@@ -1218,14 +1434,14 @@ export class FamilyTreePanel extends LitElement {
         Boolean(
           (this._form.birth_place || "").trim() ||
             (this._form.birth_date_iso || "").trim() ||
-            (this._form.birth_date_text || "").trim(),
+            (this._form.birth_date_first || "").trim(),
         )) ||
       (this._form.deceased === "true" &&
         !fromForm.death &&
         Boolean(
           (this._form.death_place || "").trim() ||
             (this._form.death_date_iso || "").trim() ||
-            (this._form.death_date_text || "").trim(),
+            (this._form.death_date_first || "").trim(),
         )) ||
       (!fromForm.occupation && Boolean((this._form.profession || "").trim()));
     if (!needFetch || !this.hass) return fromForm;
@@ -1240,18 +1456,19 @@ export class FamilyTreePanel extends LitElement {
 
   private async _savePersonVitalEvent(
     personId: string,
-    eventType: string,
+    eventType: "birth" | "death",
     opts: {
-      dateIso: string;
-      dateText: string;
       place: string;
       eventId?: string;
     },
   ): Promise<boolean> {
     if (!this.hass) return false;
     const placeName = (opts.place || "").trim();
-    const built = this._vitalDateText(opts.dateIso, opts.dateText);
-    if (built.error) return false;
+    const built = this._vitalDateTextFromForm(eventType);
+    if (built.error) {
+      this._error = this._tt("date_invalid");
+      return false;
+    }
     if (!built.text && !placeName) return true;
     const placeId = placeName ? await this._resolvePlaceId(placeName) : null;
     await saveEvent(this.hass, {
@@ -1270,16 +1487,12 @@ export class FamilyTreePanel extends LitElement {
   private async _savePersonVitals(personId: string): Promise<boolean> {
     const ids = await this._resolvePersonEventIds(personId);
     const birthOk = await this._savePersonVitalEvent(personId, "birth", {
-      dateIso: this._form.birth_date_iso || "",
-      dateText: this._form.birth_date_text || "",
       place: this._form.birth_place || "",
       eventId: ids.birth,
     });
     if (!birthOk) return false;
     if (this._form.deceased === "true") {
       const deathOk = await this._savePersonVitalEvent(personId, "death", {
-        dateIso: this._form.death_date_iso || "",
-        dateText: this._form.death_date_text || "",
         place: this._form.death_place || "",
         eventId: ids.death,
       });
@@ -1496,7 +1709,13 @@ export class FamilyTreePanel extends LitElement {
 
   private _haUserDisplayName(userId: string): string {
     const u = this._haUsers.find((x) => x.id === userId);
-    return u ? u.name || u.id : userId;
+    if (u?.name?.trim()) return u.name.trim();
+    // Current session user is known even before ha_users/list loads.
+    if (this.hass?.user?.id === userId) {
+      const selfName = (this.hass.user.name || "").trim();
+      if (selfName) return selfName;
+    }
+    return "";
   }
 
   private _renderPersonSearchHits(
@@ -2116,11 +2335,28 @@ export class FamilyTreePanel extends LitElement {
     `;
   }
 
+  private _familyPresenceSpan(f: FamilySummaryDto): string {
+    const from = f.year_from;
+    if (from == null || Number.isNaN(Number(from))) return "";
+    const end = f.has_living
+      ? this._tt("family_span_now")
+      : f.year_to != null && !Number.isNaN(Number(f.year_to))
+        ? String(f.year_to)
+        : "";
+    if (!end) return String(from);
+    return `${from} – ${end}`;
+  }
+
   private _renderDashboard() {
     const s = this._stats;
     const upcoming = this._settings?.upcoming_birthdays || [];
-    const anniversaries = this._settings?.upcoming_anniversaries || [];
-    const shortcuts = this._settings?.family_shortcuts || [];
+    const onThisDay = this._settings?.on_this_day || [];
+    const familyCards =
+      this._familySummaries.length > 0
+        ? this._familySummaries
+        : (this._settings?.family_shortcuts || []).map(
+            (shortcut) => ({ shortcut, total: 0 }) as FamilySummaryDto,
+          );
     const emptyTree = (s?.total_persons ?? 0) === 0;
     const hasAges = Boolean(s?.ages.labels.length);
     const hasCenturies = Boolean(s?.centuries.labels.length);
@@ -2148,16 +2384,29 @@ export class FamilyTreePanel extends LitElement {
               : nothing}
           </section>`
         : nothing}
-      ${shortcuts.length
+      ${familyCards.length
         ? html`<section class="block">
             <h3>${this._tt("families")}</h3>
-            <div class="chip-row">
-              ${shortcuts.map(
-                (sc) => html`<button class="chip ${this._familyShortcut === sc ? "on" : ""}"
-                  @click=${() => { this._familyShortcut = this._familyShortcut === sc ? "" : sc; this._persistViewState(); this._setView("people"); }}>
-                  ${sc}
-                </button>`,
-              )}
+            <div class="family-stats-row">
+              ${familyCards.map((f) => {
+                const span = this._familyPresenceSpan(f);
+                const sc = f.shortcut;
+                return html`<button
+                  type="button"
+                  class="family-stat"
+                  @click=${() => {
+                    this._familyShortcut = sc;
+                    this._persistViewState();
+                    this._setView("people");
+                  }}
+                >
+                  <span class="family-stat-name">${sc}</span>
+                  <span class="family-stat-n">${f.total}</span>
+                  <span class="family-stat-span muted"
+                    >${span || "—"}</span
+                  >
+                </button>`;
+              })}
             </div>
           </section>`
         : nothing}
@@ -2183,36 +2432,55 @@ export class FamilyTreePanel extends LitElement {
         </div>
         <div class="block dashboard-panel">
           <h3 class="heading-with-tip">
-            ${this._tt("upcoming_anniversaries")}
+            ${this._tt("on_this_day")}
             ${tooltip(
-              this._tt("anniversaries_hint"),
+              this._tt("on_this_day_hint"),
               html`<span class="info-tip">${icon(MDI_INFORMATION)}</span>`,
             )}
           </h3>
           <ul class="plain">
-            ${anniversaries.length
-              ? anniversaries.slice(0, 8).map((u) => {
+            ${onThisDay.length
+              ? onThisDay.slice(0, 8).map((u) => {
+                  const kind = String(u.kind || "");
+                  const kindLabel =
+                    kind === "death"
+                      ? this._tt("on_this_day_death")
+                      : kind === "marriage"
+                        ? this._tt("on_this_day_marriage")
+                        : this._tt("on_this_day_birth");
                   const names = (u.names as string[]) || [];
-                  const label = names.join(" & ");
-                  const years = u.years != null ? this._tt("anniversary_years").replace("%s", String(u.years)) : "";
-                  const match = names[0]
-                    ? this._people.find(
-                        (p) =>
-                          personDisplayName(p).toLowerCase() === names[0].toLowerCase(),
-                      )
-                    : undefined;
+                  const label =
+                    names.length > 1
+                      ? names.join(" & ")
+                      : String(u.name || names[0] || "—");
+                  const yearsAgo =
+                    u.years_ago != null
+                      ? this._tt("on_this_day_years_ago").replace(
+                          "%s",
+                          String(u.years_ago),
+                        )
+                      : "";
+                  const year = u.year != null ? String(u.year) : "";
+                  const personId = u.person_id ? String(u.person_id) : "";
+                  const when =
+                    Number(u.days_until) === 0
+                      ? ""
+                      : daysUntilLabel(Number(u.days_until), this._tt("days"));
                   return html`<li>
-                    ${match
-                      ? html`<button class="linkish" @click=${() => this._openPerson(match.id)}>
-                          ${label}
+                    ${personId
+                      ? html`<button
+                          class="linkish"
+                          @click=${() => this._openPerson(personId)}
+                        >
+                          ${kindLabel}: ${label}
                         </button>`
-                      : html`<span>${label}</span>`}
+                      : html`<span>${kindLabel}: ${label}</span>`}
                     <span class="muted">
-                      ${years ? `${years} · ` : ""}${daysUntilLabel(Number(u.days_until), this._tt("days"))}
+                      ${[year, yearsAgo, when].filter(Boolean).join(" · ")}
                     </span>
                   </li>`;
                 })
-              : html`<li class="muted">${this._tt("no_anniversaries")}</li>`}
+              : html`<li class="muted">—</li>`}
           </ul>
         </div>
       </section>`}
@@ -2223,9 +2491,7 @@ export class FamilyTreePanel extends LitElement {
     const names: string[] = [];
     for (const link of this._userLinks) {
       if (String(link.person_id) !== personId) continue;
-      const label =
-        this._haUserDisplayName(String(link.ha_user_id)) ||
-        String(link.person_name || "");
+      const label = this._haUserDisplayName(String(link.ha_user_id));
       if (label) names.push(label);
     }
     return names.join(", ");
@@ -2539,6 +2805,7 @@ export class FamilyTreePanel extends LitElement {
     const death = formatDeathCell(p.birth, p.death, p.is_living, lang);
     const parents = [p.father?.name, p.mother?.name].filter(Boolean).join(" · ");
     const isTrash = this._view === "trash";
+    const name = personDisplayName(p);
     return html`
       <div class="person-card-wrap">
         <button type="button" class="person-card" @click=${() => this._openPerson(p.id)}>
@@ -2546,14 +2813,14 @@ export class FamilyTreePanel extends LitElement {
             ${renderPersonAvatar(p, { size: "sm", hass: this.hass, deceasedOverlay: true })}
             <div class="person-card-head-text">
               <div class="person-card-title-row">
-                <div class="person-card-title person-card-title--clamp">
-                  ${personDisplayName(p)}
+                <div class="person-card-title-main">
+                  <div class="person-card-title person-card-title--clamp">${name}</div>
+                  ${this._lineageBadge(p.id, name)}
                 </div>
-                ${this._lineageBadge(p.id, personDisplayName(p))}
+                <span class="person-card-sex">${this._sexIconBadge(p.sex)}</span>
               </div>
             </div>
           </div>
-          <div class="person-card-meta">${this._sexIconBadge(p.sex)}</div>
           ${birth ? html`<div class="person-card-meta">${birth}</div>` : nothing}
           ${death ? html`<div class="person-card-meta">${death}</div>` : nothing}
           ${parents ? html`<div class="person-card-meta">${parents}</div>` : nothing}
@@ -3378,7 +3645,7 @@ export class FamilyTreePanel extends LitElement {
                   ? html`<div class="photo-actions">
                       ${profileId !== m.id
                         ? html`<button type="button" class="linkish" @click=${() =>
-                            void this._setProfilePhoto(m.id)}>
+                            this._setProfilePhoto(m.id)}>
                             ${this._tt("set_profile_photo")}
                           </button>`
                         : nothing}
@@ -3542,7 +3809,16 @@ export class FamilyTreePanel extends LitElement {
       sibling_count: siblingCount,
       ...(tree?.person || {}),
     };
-    const unionChildren = activeUnion?.children || [];
+    const unionChildren = [...(activeUnion?.children || [])].sort((a, b) => {
+      const da =
+        typeof a.birth_sort_date === "string" ? a.birth_sort_date : "";
+      const db =
+        typeof b.birth_sort_date === "string" ? b.birth_sort_date : "";
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
     const knownCount = activeUnion?.known_children_count;
     const unknownCount =
       knownCount != null && knownCount > unionChildren.length
@@ -3806,10 +4082,18 @@ export class FamilyTreePanel extends LitElement {
                 deceasedOverlay: true,
                 deceasedMarkPx: 20,
               })}
-          <h2>
-            ${this._deceasedIcon(p.is_living)} ${personDisplayName(p)}
-            ${this._lineageBadge(p.id, personDisplayName(p))}
-          </h2>
+          <div class="person-head-text">
+            <h2>
+              ${personDisplayName(p)}
+              ${this._lineageBadge(p.id, personDisplayName(p))}
+            </h2>
+            ${(() => {
+              const lineage = this._lineageSentence(p.id, personDisplayName(p));
+              return lineage
+                ? html`<p class="muted lineage-sentence">${lineage}</p>`
+                : nothing;
+            })()}
+          </div>
         </div>
       </div>
       <div class="subtabs person-subtabs">
@@ -4168,7 +4452,6 @@ export class FamilyTreePanel extends LitElement {
           </div>`
         : nothing}
       ${linkCards}
-      <h3 class="settings-subhead">${this._tt("this_is_me")}</h3>
       ${myLinkInGrid ? nothing : html`<p class="muted settings-me-username">${userName}</p>`}
       <p class="lineage-legend muted">
         <span class="lineage-marker" aria-hidden="true">${icon(MDI_ACCOUNT_HEART)}</span>
@@ -4560,32 +4843,7 @@ export class FamilyTreePanel extends LitElement {
 
     const birthBody = html`<div class="form-stack">
       ${this._renderPersonPlaceField("birth_place", this._tt("birth_place"), write)}
-      <label class="vital-date-field"
-        >${this._tt("col_birth")}
-        <input
-          type="date"
-          .value=${this._form.birth_date_iso || ""}
-          ?disabled=${!write}
-          @input=${(e: Event) =>
-            (this._form = {
-              ...this._form,
-              birth_date_iso: (e.target as HTMLInputElement).value,
-            })}
-        />
-      </label>
-      <label
-        >${this._tt("birth_date_unformatted")}
-        <input
-          placeholder=${this._tt("date_gedcom_hint")}
-          .value=${this._form.birth_date_text || ""}
-          ?disabled=${!write}
-          @input=${(e: Event) =>
-            (this._form = {
-              ...this._form,
-              birth_date_text: (e.target as HTMLInputElement).value,
-            })}
-        />
-      </label>
+      ${this._renderPersonVitalDateField("birth", this._tt("col_birth"), write)}
     </div>`;
 
     const deceasedBody = html`<div class="form-stack">
@@ -4605,8 +4863,11 @@ export class FamilyTreePanel extends LitElement {
                   ? {}
                   : {
                       death_place: "",
+                      death_date_mode: "simple",
                       death_date_iso: "",
-                      death_date_text: "",
+                      death_date_qualifier: "exact",
+                      death_date_first: "",
+                      death_date_second: "",
                     }),
               };
             }}
@@ -4616,32 +4877,7 @@ export class FamilyTreePanel extends LitElement {
       ${deceasedOn
         ? html`
             ${this._renderPersonPlaceField("death_place", this._tt("death_place"), write)}
-            <label class="vital-date-field"
-              >${this._tt("col_death")}
-              <input
-                type="date"
-                .value=${this._form.death_date_iso || ""}
-                ?disabled=${!write}
-                @input=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
-                    death_date_iso: (e.target as HTMLInputElement).value,
-                  })}
-              />
-            </label>
-            <label
-              >${this._tt("death_date_unformatted")}
-              <input
-                placeholder=${this._tt("date_gedcom_hint")}
-                .value=${this._form.death_date_text || ""}
-                ?disabled=${!write}
-                @input=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
-                    death_date_text: (e.target as HTMLInputElement).value,
-                  })}
-              />
-            </label>
+            ${this._renderPersonVitalDateField("death", this._tt("col_death"), write)}
           `
         : nothing}
     </div>`;
@@ -5225,14 +5461,24 @@ export class FamilyTreePanel extends LitElement {
                     deceasedMarkPx: 16,
                   })}
                     <span class="dialog-preview-head-text">
-                      <span class="dialog-title-text"
-                        >${this._deceasedIcon(preview.person.is_living)}
-                        ${personDisplayName(preview.person)}</span
-                      >
-                      ${this._lineageBadge(
-                        preview.person.id,
-                        personDisplayName(preview.person),
-                      )}
+                      <span class="dialog-title-row">
+                        <span class="dialog-title-text"
+                          >${personDisplayName(preview.person)}</span
+                        >
+                        ${this._lineageBadge(
+                          preview.person.id,
+                          personDisplayName(preview.person),
+                        )}
+                      </span>
+                      ${(() => {
+                        const lineage = this._lineageSentence(
+                          preview.person.id,
+                          personDisplayName(preview.person),
+                        );
+                        return lineage
+                          ? html`<span class="muted lineage-sentence">${lineage}</span>`
+                          : nothing;
+                      })()}
                     </span>`
                 : dialogTitle}
             </h2>
@@ -5381,6 +5627,43 @@ export class FamilyTreePanel extends LitElement {
       margin-top: 4px;
       font-size: 0.85rem;
       color: var(--secondary-text-color);
+    }
+    .family-stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .family-stat {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      text-align: left;
+      padding: 16px;
+      border: none;
+      border-radius: var(--ha-border-radius-md, 8px);
+      border-left: 3px solid var(--primary-color);
+      background: var(--card-background-color, var(--secondary-background-color));
+      box-shadow: var(--ha-card-box-shadow, none);
+      color: inherit;
+      cursor: pointer;
+      font: inherit;
+    }
+    .family-stat-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+    .family-stat-n {
+      font-size: 1.5rem;
+      font-weight: 600;
+      line-height: 1.2;
+      margin-top: 6px;
+    }
+    .family-stat-span {
+      font-size: 0.85rem;
+      margin-top: 4px;
     }
     .charts {
       display: grid;
@@ -6011,19 +6294,33 @@ export class FamilyTreePanel extends LitElement {
     .person-card-head-text {
       flex: 1;
       min-width: 0;
+      display: flex;
+      align-items: center;
+      min-height: 32px;
     }
     .person-card-title-row {
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+    }
+    .person-card-title-main {
+      display: flex;
+      align-items: center;
       gap: 6px;
+      min-width: 0;
+      flex: 1;
+    }
+    .person-card-sex {
+      flex-shrink: 0;
+      margin-left: auto;
     }
     .person-card-title--clamp {
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
-      flex: 1;
       min-width: 0;
     }
     .person-head-main {
@@ -6032,6 +6329,18 @@ export class FamilyTreePanel extends LitElement {
       gap: 14px;
       flex-wrap: wrap;
       width: 100%;
+    }
+    .person-head-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+      flex: 1;
+    }
+    .lineage-sentence {
+      margin: 0;
+      font-size: 0.9rem;
+      line-height: 1.35;
     }
     .person-head-main h2 {
       display: flex;
@@ -6387,11 +6696,18 @@ export class FamilyTreePanel extends LitElement {
     }
     .dialog-preview-head-text {
       display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+      min-width: 0;
+      flex: 1;
+    }
+    .dialog-title-row {
+      display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 6px;
       min-width: 0;
-      flex: 1;
     }
     .dialog-close {
       flex-shrink: 0;
@@ -6434,17 +6750,24 @@ export class FamilyTreePanel extends LitElement {
       font-weight: 600;
     }
     .settings-linked-users {
-      align-items: flex-start;
+      align-items: stretch;
     }
     .settings-linked-grid {
       display: flex;
       flex-wrap: wrap;
       gap: 12px;
-      align-items: flex-start;
+      align-items: stretch;
     }
     .settings-linked-grid > .person-card-wrap {
       width: min(100%, 280px);
       flex: 0 1 280px;
+      display: flex;
+      flex-direction: column;
+    }
+    .settings-linked-grid > .person-card-wrap > .person-card {
+      flex: 1 1 auto;
+      height: 100%;
+      box-sizing: border-box;
     }
     .settings-page .collapse-body {
       background: transparent;
@@ -6584,7 +6907,12 @@ export class FamilyTreePanel extends LitElement {
     .sex-male { background: color-mix(in srgb, #2196f3 15%, transparent); color: #1565c0; }
     .sex-female { background: color-mix(in srgb, #e91e63 15%, transparent); color: #ad1457; }
     .sex-other { background: var(--secondary-background-color); }
-    .lineage-marker { color: var(--primary-color); display: inline-flex; flex-shrink: 0; }
+    .lineage-marker {
+      color: var(--primary-color);
+      display: inline-flex;
+      flex-shrink: 0;
+      pointer-events: none;
+    }
     .lineage-marker svg { width: 16px; height: 16px; }
     .lineage-legend {
       display: flex;
@@ -6796,6 +7124,12 @@ export class FamilyTreePanel extends LitElement {
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 6px;
       }
+      .family-stats-row {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .family-stat { padding: 10px 8px; }
+      .family-stat-n { font-size: 1.15rem; }
       .stat { padding: 8px 6px; }
       .stat-n { font-size: 1.15rem; }
       .stat-label { font-size: 0.7rem; }
