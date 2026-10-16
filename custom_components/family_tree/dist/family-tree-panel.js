@@ -250,7 +250,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
           <h3>${this._tt(`upcoming_birthdays`)}</h3>
           <ul class="plain">
             ${t.length?t.slice(0,8).map(e=>W`<li>
-                    <button class="linkish" @click=${()=>this._openPerson(String(e.person_id))}>
+                    <button class="linkish" @click=${()=>void this._openPersonPreview(String(e.person_id))}>
                       ${e.name}
                     </button>
                     <span class="muted">${af(Number(e.days_until),this._tt(`days`))}</span>
@@ -266,7 +266,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
             ${n.length?n.slice(0,8).map(e=>{let t=String(e.kind||``),n=t===`death`?this._tt(`on_this_day_death`):t===`marriage`?this._tt(`on_this_day_marriage`):this._tt(`on_this_day_birth`),r=e.names||[],i=r.length>1?r.join(` & `):String(e.name||r[0]||`—`),a=e.years_ago==null?``:this._tt(`on_this_day_years_ago`).replace(`%s`,String(e.years_ago)),o=e.year==null?``:String(e.year),s=e.person_id?String(e.person_id):``,c=Number(e.days_until)===0?``:af(Number(e.days_until),this._tt(`days`));return W`<li>
                     ${s?W`<button
                           class="linkish"
-                          @click=${()=>this._openPerson(s)}
+                          @click=${()=>void this._openPersonPreview(s)}
                         >
                           ${n}: ${i}
                         </button>`:W`<span>${n}: ${i}</span>`}
