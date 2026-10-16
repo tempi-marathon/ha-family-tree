@@ -491,6 +491,15 @@ export class FamilyTreePanel extends LitElement {
       this._syncShortcutsDraft();
       this._lineage = lineage;
       this._userLinks = userLinks.links;
+      if (this._canWrite()) {
+        try {
+          this._haUsers = await listHaUsers(this.hass);
+          this._haUsersLoadError = "";
+        } catch (err) {
+          this._haUsers = [];
+          this._haUsersLoadError = formatHassError(err);
+        }
+      }
       if (this._detail) {
         this._detail = await getPerson(this.hass, this._detail.person.id);
       }
@@ -1700,7 +1709,13 @@ export class FamilyTreePanel extends LitElement {
 
   private _haUserDisplayName(userId: string): string {
     const u = this._haUsers.find((x) => x.id === userId);
-    return u ? u.name || u.id : userId;
+    if (u?.name?.trim()) return u.name.trim();
+    // Current session user is known even before ha_users/list loads.
+    if (this.hass?.user?.id === userId) {
+      const selfName = (this.hass.user.name || "").trim();
+      if (selfName) return selfName;
+    }
+    return "";
   }
 
   private _renderPersonSearchHits(
@@ -2378,9 +2393,9 @@ export class FamilyTreePanel extends LitElement {
                 const sc = f.shortcut;
                 return html`<button
                   type="button"
-                  class="family-stat ${this._familyShortcut === sc ? "on" : ""}"
+                  class="family-stat"
                   @click=${() => {
-                    this._familyShortcut = this._familyShortcut === sc ? "" : sc;
+                    this._familyShortcut = sc;
                     this._persistViewState();
                     this._setView("people");
                   }}
@@ -2476,9 +2491,7 @@ export class FamilyTreePanel extends LitElement {
     const names: string[] = [];
     for (const link of this._userLinks) {
       if (String(link.person_id) !== personId) continue;
-      const label =
-        this._haUserDisplayName(String(link.ha_user_id)) ||
-        String(link.person_name || "");
+      const label = this._haUserDisplayName(String(link.ha_user_id));
       if (label) names.push(label);
     }
     return names.join(", ");
@@ -5635,10 +5648,6 @@ export class FamilyTreePanel extends LitElement {
       color: inherit;
       cursor: pointer;
       font: inherit;
-    }
-    .family-stat.on {
-      outline: 2px solid var(--primary-color);
-      outline-offset: 1px;
     }
     .family-stat-name {
       font-weight: 600;
