@@ -2259,7 +2259,7 @@ export class FamilyTreePanel extends LitElement {
 
         <main class="main">
           ${this._loading
-            ? html`<p class="muted">${this._tt("loading")}</p>`
+            ? this._renderLoading()
             : this._view === "dashboard"
               ? this._renderDashboard()
               : this._view === "person" && this._detail
@@ -2271,6 +2271,80 @@ export class FamilyTreePanel extends LitElement {
       </div>
       ${this._dialogOpen ? this._renderDialog() : nothing}
       ${this._rowMenu ? this._renderFixedRowMenu() : nothing}
+    `;
+  }
+
+  private _renderLoading() {
+    const skeleton =
+      this._view === "settings"
+        ? this._renderSettingsSkeleton()
+        : this._view === "dashboard"
+          ? this._renderDashboardSkeleton()
+          : this._renderPeopleSkeleton();
+    return html`
+      <div class="loading-panel" role="status" aria-busy="true">
+        <span class="sr-only">${this._tt("loading")}</span>
+        <div class="loading-bar" aria-hidden="true">
+          <div class="loading-bar-fill"></div>
+        </div>
+        <div class="loading-skel" aria-hidden="true">${skeleton}</div>
+      </div>
+    `;
+  }
+
+  private _renderDashboardSkeleton() {
+    return html`
+      <section class="stats-row">
+        ${[0, 1, 2].map(
+          () => html`<div class="stat skel-stat">
+            <div class="skel skel-line skel-line--lg"></div>
+            <div class="skel skel-line skel-line--sm"></div>
+          </div>`,
+        )}
+      </section>
+      <section class="charts">
+        ${[0, 1].map(
+          () => html`<div class="chart-card">
+            <div class="skel skel-line skel-line--md"></div>
+            <div class="skel skel-chart"></div>
+          </div>`,
+        )}
+      </section>
+    `;
+  }
+
+  private _renderPeopleSkeleton() {
+    return html`
+      <div class="toolbar">
+        <div class="skel skel-toolbar-search"></div>
+        <div class="skel skel-toolbar-btn"></div>
+      </div>
+      <div class="skel-people">
+        ${[0, 1, 2, 3, 4, 5, 6].map(
+          () => html`<div class="skel-person-row">
+            <div class="skel skel-avatar"></div>
+            <div class="skel-person-text">
+              <div class="skel skel-line skel-line--md"></div>
+              <div class="skel skel-line skel-line--sm"></div>
+            </div>
+          </div>`,
+        )}
+      </div>
+    `;
+  }
+
+  private _renderSettingsSkeleton() {
+    return html`
+      <div class="skel-settings">
+        ${[0, 1, 2].map(
+          () => html`<div class="dashboard-panel skel-settings-card">
+            <div class="skel skel-line skel-line--md"></div>
+            <div class="skel skel-line skel-line--full"></div>
+            <div class="skel skel-line skel-line--full"></div>
+            <div class="skel skel-line skel-line--sm"></div>
+          </div>`,
+        )}
+      </div>
     `;
   }
 
