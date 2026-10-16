@@ -162,6 +162,11 @@ _MIGRATIONS: dict[int, str] = {
     ALTER TABLE persons ADD COLUMN profile_media_id TEXT
         REFERENCES person_media(id) ON DELETE SET NULL;
     """,
+    3: """
+    ALTER TABLE persons ADD COLUMN profile_source_media_id TEXT
+        REFERENCES person_media(id) ON DELETE SET NULL;
+    ALTER TABLE persons ADD COLUMN profile_crop_json TEXT;
+    """,
 }
 
 

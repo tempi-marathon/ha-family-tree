@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -110,6 +111,8 @@ class Person:
     notes: str = ""
     id: str = field(default_factory=new_id)
     profile_media_id: str | None = None
+    profile_source_media_id: str | None = None
+    profile_crop_json: str | None = None
     created_at: str = field(default_factory=_utc_now_iso)
     updated_at: str = field(default_factory=_utc_now_iso)
     deleted_at: str | None = None
@@ -117,11 +120,25 @@ class Person:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["sex"] = self.sex.value
+        crop: dict[str, Any] | None = None
+        raw_crop = data.pop("profile_crop_json", None)
+        if raw_crop:
+            try:
+                parsed = json.loads(str(raw_crop))
+                if isinstance(parsed, dict):
+                    crop = parsed
+            except (TypeError, json.JSONDecodeError):
+                crop = None
+        data["profile_crop"] = crop
         return data
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Person:
         profile = raw.get("profile_media_id")
+        source = raw.get("profile_source_media_id")
+        crop_json = raw.get("profile_crop_json")
+        if crop_json is None and isinstance(raw.get("profile_crop"), dict):
+            crop_json = json.dumps(raw["profile_crop"])
         return cls(
             id=str(raw["id"]),
             given_names=str(raw.get("given_names") or ""),
@@ -132,6 +149,8 @@ class Person:
             is_living=bool(raw.get("is_living", True)),
             notes=str(raw.get("notes") or ""),
             profile_media_id=str(profile) if profile else None,
+            profile_source_media_id=str(source) if source else None,
+            profile_crop_json=str(crop_json) if crop_json else None,
             created_at=str(raw.get("created_at") or _utc_now_iso()),
             updated_at=str(raw.get("updated_at") or _utc_now_iso()),
             deleted_at=raw.get("deleted_at"),
