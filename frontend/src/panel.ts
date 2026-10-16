@@ -2421,7 +2421,7 @@ export class FamilyTreePanel extends LitElement {
             ${upcoming.length
               ? upcoming.slice(0, 8).map(
                   (u) => html`<li>
-                    <button class="linkish" @click=${() => this._openPerson(String(u.person_id))}>
+                    <button class="linkish" @click=${() => void this._openPersonPreview(String(u.person_id))}>
                       ${u.name}
                     </button>
                     <span class="muted">${daysUntilLabel(Number(u.days_until), this._tt("days"))}</span>
@@ -2470,7 +2470,7 @@ export class FamilyTreePanel extends LitElement {
                     ${personId
                       ? html`<button
                           class="linkish"
-                          @click=${() => this._openPerson(personId)}
+                          @click=${() => void this._openPersonPreview(personId)}
                         >
                           ${kindLabel}: ${label}
                         </button>`
