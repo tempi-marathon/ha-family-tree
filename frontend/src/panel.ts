@@ -1265,7 +1265,6 @@ export class FamilyTreePanel extends LitElement {
         ? html`<label
             >${this._tt("date_qualifier")}
             <select
-              .value=${this._form[`${prefix}_date_qualifier`] || "exact"}
               ?disabled=${!write}
               @change=${(e: Event) =>
                 (this._form = {
@@ -1273,10 +1272,12 @@ export class FamilyTreePanel extends LitElement {
                   [`${prefix}_date_qualifier`]: (e.target as HTMLSelectElement).value,
                 })}
             >
-              ${FORM_QUALIFIERS.map(
-                (q) =>
-                  html`<option value=${q}>${this._tt(QUALIFIER_KEYS[q])}</option>`,
-              )}
+              ${FORM_QUALIFIERS.map((q) => {
+                const current = this._form[`${prefix}_date_qualifier`] || "exact";
+                return html`<option value=${q} ?selected=${q === current}
+                  >${this._tt(QUALIFIER_KEYS[q])}</option
+                >`;
+              })}
             </select>
           </label>
           <label
