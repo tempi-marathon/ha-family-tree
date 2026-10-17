@@ -27,6 +27,20 @@ import { renderPersonAvatar } from "./person-avatar";
 import { nodeName } from "./tree_view";
 import { isHttpUrl } from "./url";
 
+/** Oldest first by birth_sort_date; missing dates last. */
+export function sortByBirthSortDate<T extends { birth_sort_date?: unknown }>(
+  items: T[],
+): T[] {
+  return [...items].sort((a, b) => {
+    const da = typeof a.birth_sort_date === "string" ? a.birth_sort_date : "";
+    const db = typeof b.birth_sort_date === "string" ? b.birth_sort_date : "";
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return da < db ? -1 : da > db ? 1 : 0;
+  });
+}
+
 export function renderPerson(host: FamilyTreePanel) {
   return (function (this: any) {
 
@@ -128,10 +142,11 @@ export function renderPersonDetailsTab(host: FamilyTreePanel, d: PersonDetail) {
           })
         : nothing}
     </div>
-    <div class="card-list">
-      ${d.events.map((ev: EventDto) => this._renderEventCard(ev))}
-      ${d.events.length === 0 ? html`<p class="muted">—</p>` : nothing}
-    </div>
+    ${d.events.length
+      ? html`<div class="event-timeline">
+          ${d.events.map((ev: EventDto) => this._renderEventCard(ev, p.birth))}
+        </div>`
+      : html`<p class="muted">—</p>`}
   `;
   const photos = this._renderPhotosSection(p);
   return html`
@@ -203,7 +218,7 @@ export function renderRelationshipsTab(host: FamilyTreePanel, d: PersonDetail) {
     ${partners.length
       ? html`<div class="card-list">
           ${partners.map((u) => {
-            const unionChildren = u.children || [];
+            const unionChildren = sortByBirthSortDate(u.children || []);
             const knownCount = u.known_children_count;
             const unknownCount =
               knownCount != null && knownCount > unionChildren.length
@@ -340,16 +355,7 @@ export function renderTreeTab(host: FamilyTreePanel, d: PersonDetail) {
     sibling_count: siblingCount,
     ...(tree?.person || {}),
   };
-  const unionChildren = [...(activeUnion?.children || [])].sort((a, b) => {
-    const da =
-      typeof a.birth_sort_date === "string" ? a.birth_sort_date : "";
-    const db =
-      typeof b.birth_sort_date === "string" ? b.birth_sort_date : "";
-    if (!da && !db) return 0;
-    if (!da) return 1;
-    if (!db) return -1;
-    return da < db ? -1 : da > db ? 1 : 0;
-  });
+  const unionChildren = sortByBirthSortDate(activeUnion?.children || []);
   const knownCount = activeUnion?.known_children_count;
   const unknownCount =
     knownCount != null && knownCount > unionChildren.length
