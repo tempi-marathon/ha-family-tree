@@ -388,7 +388,7 @@ def _event_sort_date(event: Any) -> str | None:
 def _on_this_day(
     repo: Repository, *, today: date, within_days: int = 60, limit: int = 12
 ) -> list[dict[str, Any]]:
-    """Historic births/deaths/weddings for today, else tomorrow, else upcoming."""
+    """Historic births/deaths/weddings in the next ``within_days``, soonest first."""
     candidates: list[dict[str, Any]] = []
 
     for event in repo.list_events_by_type(EventType.BIRTH.value):
@@ -491,19 +491,12 @@ def _on_this_day(
             }
         )
 
-    today_items = [c for c in candidates if c["days_until"] == 0]
-    if today_items:
-        pool = today_items
-    else:
-        tomorrow_items = [c for c in candidates if c["days_until"] == 1]
-        pool = tomorrow_items or candidates
-
     kind_order = {"birth": 0, "marriage": 1, "death": 2}
-    pool.sort(
+    candidates.sort(
         key=lambda i: (
             i["days_until"],
             kind_order.get(str(i["kind"]), 9),
             str(i.get("name") or ""),
         )
     )
-    return pool[:limit]
+    return candidates[:limit]

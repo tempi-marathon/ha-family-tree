@@ -18,7 +18,6 @@ import {
   MDI_DOTS_VERTICAL,
   MDI_GENDER_FEMALE,
   MDI_GENDER_MALE,
-  MDI_INFORMATION,
   MDI_MENU,
   MDI_MENU_DOWN,
   MDI_MENU_UP,
@@ -2432,25 +2431,25 @@ export class FamilyTreePanel extends LitElement {
           <h3>${this._tt("upcoming_birthdays")}</h3>
           <ul class="plain">
             ${upcoming.length
-              ? upcoming.slice(0, 8).map(
-                  (u) => html`<li>
+              ? upcoming.slice(0, 8).map((u) => {
+                  const when = daysUntilLabel(Number(u.days_until), this._tt("days"));
+                  const turns =
+                    u.age != null
+                      ? this._tt("turns_age").replace("%s", String(u.age))
+                      : "";
+                  const meta = [turns, when].filter(Boolean).join(" · ");
+                  return html`<li>
                     <button class="linkish" @click=${() => void this._openPersonPreview(String(u.person_id))}>
                       ${u.name}
                     </button>
-                    <span class="muted">${daysUntilLabel(Number(u.days_until), this._tt("days"))}</span>
-                  </li>`,
-                )
+                    <span class="muted">${meta}</span>
+                  </li>`;
+                })
               : html`<li class="muted">—</li>`}
           </ul>
         </div>
         <div class="block dashboard-panel">
-          <h3 class="heading-with-tip">
-            ${this._tt("on_this_day")}
-            ${tooltip(
-              this._tt("on_this_day_hint"),
-              html`<span class="info-tip">${icon(MDI_INFORMATION)}</span>`,
-            )}
-          </h3>
+          <h3>${this._tt("on_this_day")}</h3>
           <ul class="plain">
             ${onThisDay.length
               ? onThisDay.slice(0, 8).map((u) => {
@@ -2673,14 +2672,14 @@ export class FamilyTreePanel extends LitElement {
       ${showFilters && this._filtersOpen
         ? html`<div class="filters">
             <select
-              aria-label=${this._tt("filter_all")}
+              aria-label=${this._tt("filter_all_statuses")}
               .value=${this._filterLiving}
               @change=${(e: Event) => {
                 this._filterLiving = (e.target as HTMLSelectElement).value;
                 this._persistViewState();
               }}
             >
-              <option value="all">${this._tt("filter_all")}</option>
+              <option value="all">${this._tt("filter_all_statuses")}</option>
               <option value="living">${this._tt("filter_living")}</option>
               <option value="deceased">${this._tt("filter_deceased")}</option>
             </select>
@@ -2706,33 +2705,35 @@ export class FamilyTreePanel extends LitElement {
                 this._persistViewState();
               }}
             >
-              <option value="">${this._tt("filter_all")}</option>
+              <option value="">${this._tt("filter_all_people")}</option>
               <option value="linked">${this._tt("filter_linked_users")}</option>
             </select>
             <select
               aria-label=${this._tt("filter_family")}
-              .value=${this._familyShortcut}
               @change=${(e: Event) => {
                 this._familyShortcut = (e.target as HTMLSelectElement).value;
                 this._persistViewState();
               }}
             >
-              <option value="">${this._tt("filter_all_families")}</option>
+              <option value="" ?selected=${this._familyShortcut === ""}>
+                ${this._tt("filter_all_families")}
+              </option>
               ${families.map(
-                (f) => html`<option value=${f}>${f}</option>`,
+                (f) => html`<option value=${f} ?selected=${f === this._familyShortcut}>${f}</option>`,
               )}
             </select>
             <select
               aria-label=${this._tt("place")}
-              .value=${this._filterPlace}
               @change=${(e: Event) => {
                 this._filterPlace = (e.target as HTMLSelectElement).value;
                 this._persistViewState();
               }}
             >
-              <option value="">${this._tt("filter_all_places")}</option>
+              <option value="" ?selected=${this._filterPlace === ""}>
+                ${this._tt("filter_all_places")}
+              </option>
               ${places.map(
-                (p) => html`<option value=${p.id}>${p.label}</option>`,
+                (p) => html`<option value=${p.id} ?selected=${p.id === this._filterPlace}>${p.label}</option>`,
               )}
             </select>
             <label class="date-filter">

@@ -61,7 +61,7 @@ ENTITY_ID_HEX_LEN: Final = 32
 DATA_DIR_NAME: Final = "family_tree"
 DB_FILENAME: Final = "family_tree.db"
 GAZETTEER_DB_FILENAME: Final = "gazetteer.db"
-SCHEMA_VERSION: Final = 3
+SCHEMA_VERSION: Final = 4
 
 # Events
 EVENT_BIRTHDAY: Final = f"{DOMAIN}_birthday"

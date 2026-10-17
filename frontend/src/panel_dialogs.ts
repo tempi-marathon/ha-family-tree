@@ -3,7 +3,7 @@
 
 import { html, nothing } from "lit";
 import type { PersonDto } from "./api";
-import { FORM_QUALIFIERS, formatEventDate } from "./date_format";
+import { FORM_QUALIFIERS, formatLifespan } from "./date_format";
 import type { FamilyTreePanel } from "./panel";
 import { icon, mdButton, MDI_CLOSE, tooltip } from "./panel_chrome";
 import {
@@ -206,6 +206,9 @@ export function renderDialog(host: FamilyTreePanel) {
         />
       </span>
     </label>
+    ${!deceasedOn && this._editing && this._editing.is_living === false
+      ? html`<p class="muted" role="status">${this._tt("revive_unions_hint")}</p>`
+      : nothing}
     ${deceasedOn
       ? html`
           ${this._renderPersonPlaceField("death_place", this._tt("death_place"), write)}
@@ -401,8 +404,9 @@ export function renderDialog(host: FamilyTreePanel) {
           })}
       >
         <option value="ongoing">${this._tt("status_ongoing")}</option>
-        <option value="ended">${this._tt("status_ended")}</option>
-        <option value="unknown">${this._tt("status_unknown")}</option>
+        <option value="divorced">${this._tt("status_divorced")}</option>
+        <option value="separated">${this._tt("status_separated")}</option>
+        <option value="widowed">${this._tt("status_widowed")}</option>
       </select>
     </label>
     <label
@@ -622,11 +626,16 @@ export function renderDialog(host: FamilyTreePanel) {
             </dd>
             <dt>${this._tt("sex")}</dt>
             <dd>${this._sexBadge(preview.person.sex)}</dd>
-            ${preview.person.birth
-              ? html`<dt>${this._tt("event_birth")}</dt><dd>${formatEventDate(preview.person.birth, lang) || "—"}</dd>`
-              : nothing}
-            ${preview.person.death
-              ? html`<dt>${this._tt("event_death")}</dt><dd>${formatEventDate(preview.person.death, lang) || "—"}</dd>`
+            ${preview.person.birth || preview.person.death
+              ? html`<dt>${this._tt("lifespan")}</dt>
+                  <dd>
+                    ${formatLifespan(
+                      preview.person.birth,
+                      preview.person.death,
+                      preview.person.is_living,
+                      lang,
+                    ) || "—"}
+                  </dd>`
               : nothing}
             ${preview.person.notes
               ? html`<dt>${this._tt("notes")}</dt><dd>${preview.person.notes}</dd>`
