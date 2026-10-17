@@ -3241,9 +3241,10 @@ export class FamilyTreePanel extends LitElement {
         : null;
     const ageLabel =
       ageAtEvent && ageAtEvent.years > 0
-        ? ageAtEvent.approx
-          ? `±${ageAtEvent.years}`
-          : String(ageAtEvent.years)
+        ? this._tt(ageAtEvent.approx ? "years_old_approx" : "years_old").replace(
+            "%s",
+            String(ageAtEvent.years),
+          )
         : "";
     return html`
       <div class="event-timeline-item">

@@ -775,22 +775,23 @@ export const panelStyles = css`
     }
     .event-timeline-item {
       display: grid;
-      grid-template-columns: minmax(5.5rem, 7.5rem) 14px minmax(0, 1fr);
-      column-gap: 10px;
+      grid-template-columns: minmax(6.5rem, 8.5rem) 14px minmax(0, 1fr);
+      column-gap: 12px;
       align-items: stretch;
+      padding-bottom: 12px;
     }
     .event-timeline-date {
       text-align: right;
-      padding: 4px 0 12px;
-      font-size: 0.82em;
-      line-height: 1.3;
+      padding: 10px 0 0;
+      font-size: 0.95rem;
+      line-height: 1.35;
       color: var(--secondary-text-color);
       word-break: break-word;
     }
     .event-timeline-age {
       display: block;
-      margin-top: 2px;
-      font-size: 0.92em;
+      margin-top: 3px;
+      font-size: 0.88em;
       opacity: 0.9;
     }
     .event-timeline-spine {
@@ -809,10 +810,10 @@ export const panelStyles = css`
       background: var(--divider-color);
     }
     .event-timeline-item:first-child .event-timeline-spine::before {
-      top: 10px;
+      top: 16px;
     }
     .event-timeline-item:last-child .event-timeline-spine::before {
-      bottom: calc(100% - 12px);
+      bottom: calc(100% - 20px);
     }
     .event-timeline-item:only-child .event-timeline-spine::before {
       display: none;
@@ -822,34 +823,41 @@ export const panelStyles = css`
       z-index: 1;
       width: 9px;
       height: 9px;
-      margin-top: 8px;
+      margin-top: 14px;
       border-radius: 50%;
       background: var(--primary-color);
       box-sizing: border-box;
       flex: none;
     }
     .event-timeline-body {
-      padding: 2px 0 14px;
+      box-sizing: border-box;
       min-width: 0;
+      max-width: min(100%, 36rem);
+      padding: 10px 14px;
+      border: 1px solid var(--divider-color);
+      border-radius: var(--ha-border-radius-lg, 12px);
+      background: var(--card-background-color, var(--secondary-background-color));
+      box-shadow: var(--ha-card-box-shadow, none);
     }
     .event-timeline-head {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
+      flex-wrap: wrap;
       gap: 8px;
     }
     .event-timeline-head .event-card-title,
     .event-timeline-head > strong {
-      font-size: 0.95rem;
+      font-size: 1.05rem;
     }
     .event-timeline-meta {
       color: var(--secondary-text-color);
-      font-size: 0.85em;
-      margin-top: 2px;
+      font-size: 0.95em;
+      margin-top: 4px;
     }
     .event-timeline-desc {
-      margin-top: 4px;
-      font-size: 0.9em;
+      margin-top: 6px;
+      font-size: 0.95em;
     }
     .import-counts li { justify-content: space-between; }
     .tree-grid {
@@ -1826,6 +1834,15 @@ export const panelStyles = css`
       .rel-person-wrap {
         width: 100%;
         flex: 1 1 100%;
+      }
+      .event-timeline-item {
+        grid-template-columns: minmax(4.5rem, 5.5rem) 12px minmax(0, 1fr);
+        column-gap: 8px;
+        padding-bottom: 10px;
+      }
+      .event-timeline-body {
+        max-width: 100%;
+        padding: 8px 10px;
       }
     }
   `;
