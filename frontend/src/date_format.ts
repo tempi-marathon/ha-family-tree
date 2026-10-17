@@ -268,7 +268,7 @@ export function formatDeathCell(
   return isLiving ? "" : WORDS[lang(language)].deceased;
 }
 
-/** Compact lifespan for cards: "Apr 26, 1941 (85)" or "1905 - about 1995 (±90)". */
+/** Full-date lifespan for details: "Apr 26, 1941 (85)" or "Apr 26, 1941 – Jun 20, 1995 (89)". */
 export function formatLifespan(
   birth: DateSummary | null | undefined,
   death: DateSummary | null | undefined,
@@ -281,19 +281,11 @@ export function formatLifespan(
     const date = formatEventDate(birth, language);
     return [date, age].filter(Boolean).join(" ");
   }
-  const words = WORDS[lang(language)];
-  const yearOnly = (s: DateSummary | null | undefined): string => {
-    if (!s) return "";
-    const parsed = parseGedcomDate(s.date_text);
-    const parts = parsed.first || partsFromSortDate(s.sort_date);
-    if (!parts) return parsed.raw;
-    return parsed.qualifier === "exact" ? String(parts.year) : `${words[parsed.qualifier] || ""} ${parts.year}`.trim();
-  };
-  const by = yearOnly(birth);
-  const dy = yearOnly(death);
-  if (by && dy) return `${by} - ${dy}${age ? ` ${age}` : ""}`;
-  if (by) return `${by} -`;
-  if (dy) return `- ${dy}`;
+  const by = formatEventDate(birth, language);
+  const dy = formatEventDate(death, language);
+  if (by && dy) return `${by} – ${dy}${age ? ` ${age}` : ""}`;
+  if (by) return `${by} –`;
+  if (dy) return `– ${dy}`;
   return "";
 }
 

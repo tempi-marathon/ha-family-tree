@@ -75,14 +75,22 @@ describe("formatDeathCell", () => {
 });
 
 describe("formatLifespan", () => {
-  it("formats living and deceased lifespans", () => {
+  it("formats living and deceased lifespans with full dates", () => {
     expect(formatLifespan({ date_text: "26 APR 1941" }, null, true, "en", today)).toBe(
       "Apr 26, 1941 (85)",
     );
     expect(
       formatLifespan({ date_text: "1905" }, { date_text: "ABT 1995" }, false, "en"),
-    ).toBe("1905 - about 1995 (±90)");
-    expect(formatLifespan({ date_text: "1905" }, null, false, "en")).toBe("1905 -");
+    ).toBe("1905 – about 1995 (±90)");
+    expect(
+      formatLifespan(
+        { date_text: "26 APR 1941" },
+        { date_text: "20 JUN 1995" },
+        false,
+        "en",
+      ),
+    ).toBe("Apr 26, 1941 – Jun 20, 1995 (54)");
+    expect(formatLifespan({ date_text: "1905" }, null, false, "en")).toBe("1905 –");
   });
 });
 

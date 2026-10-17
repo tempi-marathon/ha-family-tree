@@ -90,9 +90,10 @@ import {
   buildGedcomDate,
   formatDeathCell,
   formatAge,
+  computeAge,
   formatEventDate,
-  formatLifespan,
   gedcomToForm,
+  type DateSummary,
 } from "./date_format";
 import {
   daysUntilLabel,
@@ -1671,7 +1672,13 @@ export class FamilyTreePanel extends LitElement {
           <button type="button" class="linkish" @click=${() => onSelect(p.id)}>
             <strong>${personDisplayName(p)}</strong>
             <span class="muted">
-              ${formatLifespan(p.birth, p.death, p.is_living, lang)}
+              ${formatLifespanLine({
+                birth_date_text: p.birth?.date_text,
+                birth_sort_date: p.birth?.sort_date,
+                death_date_text: p.death?.date_text,
+                death_sort_date: p.death?.sort_date,
+                is_living: p.is_living,
+              })}
               ${[p.father?.name, p.mother?.name].filter(Boolean).join(" · ")}
             </span>
           </button>
@@ -3214,7 +3221,7 @@ export class FamilyTreePanel extends LitElement {
       .filter((p) => p.id && p.id !== selfId);
   }
 
-  private _renderEventCard(ev: EventDto) {
+  private _renderEventCard(ev: EventDto, birth?: DateSummary | null) {
     const canEdit = this._canWrite() && ev.subject_type === "person";
     const lang = this.hass?.language;
     const unionTypes = new Set(["marriage", "divorce", "partnership"]);
@@ -3227,25 +3234,48 @@ export class FamilyTreePanel extends LitElement {
       desc &&
       (!partnerRefs.length ||
         desc.localeCompare(partnerNamesJoined, undefined, { sensitivity: "accent" }) !== 0);
+    const dateLabel = formatEventDate(ev, lang) || formatGedcomDate(ev.date_text);
+    const ageAtEvent =
+      birth && ev.type !== "birth" && (ev.date_text || ev.sort_date)
+        ? computeAge(birth, ev, false)
+        : null;
+    const ageLabel =
+      ageAtEvent && ageAtEvent.years > 0
+        ? ageAtEvent.approx
+          ? `±${ageAtEvent.years}`
+          : String(ageAtEvent.years)
+        : "";
     return html`
-      <div class="event-card">
-        <div class="event-card-head">
-          ${this._renderEventTypeHeading(ev)}
-          ${canEdit
-            ? html`<span class="row-actions">
-                <button class="linkish" @click=${() => this._openEditEvent(ev)}>${this._tt("edit")}</button>
-                <button class="linkish danger" @click=${() => this._deleteEvent(ev.id)}>${this._tt("delete")}</button>
-              </span>`
+      <div class="event-timeline-item">
+        <div class="event-timeline-date">
+          ${dateLabel || nothing}
+          ${ageLabel
+            ? html`<span class="event-timeline-age">${ageLabel}</span>`
             : nothing}
         </div>
-        <div class="event-card-meta">${formatEventDate(ev, lang) || formatGedcomDate(ev.date_text)}</div>
-        ${ev.place_name ? html`<div class="event-card-meta">${ev.place_name}</div>` : nothing}
-        ${partnerRefs.length && !titleShowsPartners
-          ? html`<div class="event-card-meta">
-              ${this._renderEventPartnerLinks(partnerRefs)}
-            </div>`
-          : nothing}
-        ${showDesc ? html`<div class="event-card-desc">${desc}</div>` : nothing}
+        <div class="event-timeline-spine" aria-hidden="true">
+          <span class="event-timeline-dot"></span>
+        </div>
+        <div class="event-timeline-body">
+          <div class="event-timeline-head">
+            ${this._renderEventTypeHeading(ev)}
+            ${canEdit
+              ? html`<span class="row-actions">
+                  <button class="linkish" @click=${() => this._openEditEvent(ev)}>${this._tt("edit")}</button>
+                  <button class="linkish danger" @click=${() => this._deleteEvent(ev.id)}>${this._tt("delete")}</button>
+                </span>`
+              : nothing}
+          </div>
+          ${ev.place_name
+            ? html`<div class="event-timeline-meta">${ev.place_name}</div>`
+            : nothing}
+          ${partnerRefs.length && !titleShowsPartners
+            ? html`<div class="event-timeline-meta">
+                ${this._renderEventPartnerLinks(partnerRefs)}
+              </div>`
+            : nothing}
+          ${showDesc ? html`<div class="event-timeline-desc">${desc}</div>` : nothing}
+        </div>
       </div>
     `;
   }
