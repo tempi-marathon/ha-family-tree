@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from typing import Any
 
 import voluptuous as vol
@@ -126,6 +127,17 @@ def _bounded_string(max_length: int, *, allow_empty: bool = True):
 def _cap(limit: int | None, default: int, hard: int) -> int:
     value = default if limit is None else int(limit)
     return max(1, min(value, hard))
+
+
+def _sync_union_status_for_living_change(
+    coordinator: FamilyTreeCoordinator, person_id: str, is_living: bool
+) -> None:
+    """Mark ongoing unions widowed on death; restore widowed to ongoing on revive."""
+    for union in coordinator.repo.list_unions_for_person(person_id):
+        if not is_living and union.status == UnionStatus.ONGOING:
+            coordinator.repo.update_union(replace(union, status=UnionStatus.WIDOWED))
+        elif is_living and union.status == UnionStatus.WIDOWED:
+            coordinator.repo.update_union(replace(union, status=UnionStatus.ONGOING))
 
 
 # --- Reads -----------------------------------------------------------------
@@ -862,10 +874,12 @@ async def ws_persons_save(
     def _run() -> dict[str, Any]:
         given_names = (msg.get("given_names") or "").strip()
         person_id = msg.get("person_id")
+        was_living: bool | None = None
         if person_id:
             existing = coordinator.repo.get_person(person_id, include_deleted=True)
             if existing is None:
                 raise LookupError("Person not found")
+            was_living = existing.is_living
             person = Person(
                 id=existing.id,
                 given_names=given_names,
@@ -893,6 +907,8 @@ async def ws_persons_save(
                 notes=msg.get("notes") or "",
             )
             saved = coordinator.repo.add_person(person)
+        if was_living is not None and was_living != saved.is_living:
+            _sync_union_status_for_living_change(coordinator, saved.id, saved.is_living)
         return {**saved.to_dict(), "display_name": display_name(saved)}
 
     try:

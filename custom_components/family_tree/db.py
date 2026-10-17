@@ -167,6 +167,19 @@ _MIGRATIONS: dict[int, str] = {
         REFERENCES person_media(id) ON DELETE SET NULL;
     ALTER TABLE persons ADD COLUMN profile_crop_json TEXT;
     """,
+    4: """
+    UPDATE unions
+    SET status = 'widowed'
+    WHERE deleted_at IS NULL
+      AND status = 'ongoing'
+      AND id IN (
+        SELECT up.union_id
+        FROM union_partners up
+        JOIN persons p ON p.id = up.person_id
+        WHERE p.is_living = 0
+          AND p.deleted_at IS NULL
+      );
+    """,
 }
 
 

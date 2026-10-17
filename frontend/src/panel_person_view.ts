@@ -212,6 +212,9 @@ export function renderRelationshipsTab(host: FamilyTreePanel, d: PersonDetail) {
             const coParentId = String(
               (u.partners?.[0] as Record<string, unknown> | undefined)?.id || "",
             );
+            const focusDeathText = d.person.death?.date_text || "";
+            const widowedDateText = this._widowedDateText(u, focusDeathText);
+            const widowedDate = this._formatUnionDate(widowedDateText, lang);
             return html`<div class="rel-union-card">
               <div class="rel-union-head">
                 <strong>
@@ -239,13 +242,32 @@ export function renderRelationshipsTab(host: FamilyTreePanel, d: PersonDetail) {
                     </span>`
                   : nothing}
               </div>
-              ${u.marriage_date || u.divorce_date || u.known_children_count != null
+              ${u.marriage_date ||
+              u.divorce_date ||
+              u.status === "widowed" ||
+              u.known_children_count != null
                 ? html`<div class="rel-union-meta">
                     ${u.marriage_date
-                      ? html`<div>${this._tt("event_marriage")}: <strong>${this._formatUnionDate(u.marriage_date, lang)}</strong></div>`
+                      ? html`<div>
+                          ${this._tt("event_marriage")}:
+                          <strong
+                            >${this._formatUnionMarriageDisplay(
+                              u,
+                              lang,
+                              focusDeathText,
+                            )}</strong
+                          >
+                        </div>`
                       : nothing}
                     ${u.divorce_date
                       ? html`<div>${this._tt("event_divorce")}: <strong>${this._formatUnionDate(u.divorce_date, lang)}</strong></div>`
+                      : nothing}
+                    ${u.status === "widowed"
+                      ? html`<div>
+                          ${this._tt("status_widowed")}${widowedDate
+                            ? html`: <strong>${widowedDate}</strong>`
+                            : nothing}
+                        </div>`
                       : nothing}
                     ${u.known_children_count != null
                       ? html`<div>
@@ -343,7 +365,11 @@ export function renderTreeTab(host: FamilyTreePanel, d: PersonDetail) {
     null;
   const canAddParents = this._canWrite() && parentNodes.length < 2;
   const gpSlots = this._grandparentSlots(tree, parentNodes);
-  const marriageSubtitle = this._unionMetaSubtitle(activeUnion, lang);
+  const marriageSubtitle = this._unionMetaSubtitle(
+    activeUnion,
+    lang,
+    d.person.death?.date_text || "",
+  );
   const canWrite = this._canWrite();
   const fatherGpCount = [gpSlots[0], gpSlots[1]].filter(Boolean).length;
   const motherGpCount = [gpSlots[2], gpSlots[3]].filter(Boolean).length;

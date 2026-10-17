@@ -18,7 +18,6 @@ import {
   MDI_DOTS_VERTICAL,
   MDI_GENDER_FEMALE,
   MDI_GENDER_MALE,
-  MDI_INFORMATION,
   MDI_MENU,
   MDI_MENU_DOWN,
   MDI_MENU_UP,
@@ -90,6 +89,7 @@ import {
   type DateQualifier,
   buildGedcomDate,
   formatDeathCell,
+  formatAge,
   formatEventDate,
   formatLifespan,
   gedcomToForm,
@@ -2432,25 +2432,25 @@ export class FamilyTreePanel extends LitElement {
           <h3>${this._tt("upcoming_birthdays")}</h3>
           <ul class="plain">
             ${upcoming.length
-              ? upcoming.slice(0, 8).map(
-                  (u) => html`<li>
+              ? upcoming.slice(0, 8).map((u) => {
+                  const when = daysUntilLabel(Number(u.days_until), this._tt("days"));
+                  const turns =
+                    u.age != null
+                      ? this._tt("turns_age").replace("%s", String(u.age))
+                      : "";
+                  const meta = [turns, when].filter(Boolean).join(" · ");
+                  return html`<li>
                     <button class="linkish" @click=${() => void this._openPersonPreview(String(u.person_id))}>
                       ${u.name}
                     </button>
-                    <span class="muted">${daysUntilLabel(Number(u.days_until), this._tt("days"))}</span>
-                  </li>`,
-                )
+                    <span class="muted">${meta}</span>
+                  </li>`;
+                })
               : html`<li class="muted">—</li>`}
           </ul>
         </div>
         <div class="block dashboard-panel">
-          <h3 class="heading-with-tip">
-            ${this._tt("on_this_day")}
-            ${tooltip(
-              this._tt("on_this_day_hint"),
-              html`<span class="info-tip">${icon(MDI_INFORMATION)}</span>`,
-            )}
-          </h3>
+          <h3>${this._tt("on_this_day")}</h3>
           <ul class="plain">
             ${onThisDay.length
               ? onThisDay.slice(0, 8).map((u) => {
@@ -2673,14 +2673,14 @@ export class FamilyTreePanel extends LitElement {
       ${showFilters && this._filtersOpen
         ? html`<div class="filters">
             <select
-              aria-label=${this._tt("filter_all")}
+              aria-label=${this._tt("filter_all_statuses")}
               .value=${this._filterLiving}
               @change=${(e: Event) => {
                 this._filterLiving = (e.target as HTMLSelectElement).value;
                 this._persistViewState();
               }}
             >
-              <option value="all">${this._tt("filter_all")}</option>
+              <option value="all">${this._tt("filter_all_statuses")}</option>
               <option value="living">${this._tt("filter_living")}</option>
               <option value="deceased">${this._tt("filter_deceased")}</option>
             </select>
@@ -2706,33 +2706,35 @@ export class FamilyTreePanel extends LitElement {
                 this._persistViewState();
               }}
             >
-              <option value="">${this._tt("filter_all")}</option>
+              <option value="">${this._tt("filter_all_people")}</option>
               <option value="linked">${this._tt("filter_linked_users")}</option>
             </select>
             <select
               aria-label=${this._tt("filter_family")}
-              .value=${this._familyShortcut}
               @change=${(e: Event) => {
                 this._familyShortcut = (e.target as HTMLSelectElement).value;
                 this._persistViewState();
               }}
             >
-              <option value="">${this._tt("filter_all_families")}</option>
+              <option value="" ?selected=${this._familyShortcut === ""}>
+                ${this._tt("filter_all_families")}
+              </option>
               ${families.map(
-                (f) => html`<option value=${f}>${f}</option>`,
+                (f) => html`<option value=${f} ?selected=${f === this._familyShortcut}>${f}</option>`,
               )}
             </select>
             <select
               aria-label=${this._tt("place")}
-              .value=${this._filterPlace}
               @change=${(e: Event) => {
                 this._filterPlace = (e.target as HTMLSelectElement).value;
                 this._persistViewState();
               }}
             >
-              <option value="">${this._tt("filter_all_places")}</option>
+              <option value="" ?selected=${this._filterPlace === ""}>
+                ${this._tt("filter_all_places")}
+              </option>
               ${places.map(
-                (p) => html`<option value=${p.id}>${p.label}</option>`,
+                (p) => html`<option value=${p.id} ?selected=${p.id === this._filterPlace}>${p.label}</option>`,
               )}
             </select>
             <label class="date-filter">
@@ -3026,14 +3028,78 @@ export class FamilyTreePanel extends LitElement {
     return formatEventDate({ date_text: text }, lang) || text;
   }
 
-  private _unionMetaSubtitle(union: TreeUnion | undefined, lang?: string): string {
+  /** Death date that ended a widowed union (partner or focus person). */
+  private _widowedDateText(
+    union: TreeUnion,
+    focusDeathText?: string | null,
+  ): string {
+    if (union.status !== "widowed") return "";
+    for (const partner of union.partners || []) {
+      const text =
+        typeof partner.death_date_text === "string"
+          ? partner.death_date_text.trim()
+          : "";
+      if (text) return text;
+    }
+    return (focusDeathText || "").trim();
+  }
+
+  /** Years together, same style as person age: "(25)" / "(±25)". */
+  private _unionDurationSuffix(
+    union: TreeUnion,
+    focusDeathText?: string | null,
+  ): string {
+    const marriage = (union.marriage_date || "").trim();
+    if (!marriage) return "";
+    const start = { date_text: marriage };
+    if (union.status === "divorced") {
+      const end = (union.divorce_date || "").trim();
+      return end ? formatAge(start, { date_text: end }, false) : "";
+    }
+    if (union.status === "widowed") {
+      const end = this._widowedDateText(union, focusDeathText);
+      return end ? formatAge(start, { date_text: end }, false) : "";
+    }
+    if (union.status === "ongoing" || union.status === "separated") {
+      return formatAge(start, null, true);
+    }
+    return "";
+  }
+
+  private _formatUnionMarriageDisplay(
+    union: TreeUnion,
+    lang?: string,
+    focusDeathText?: string | null,
+  ): string {
+    const marriageDate = this._formatUnionDate(union.marriage_date, lang);
+    if (!marriageDate) return "";
+    const duration = this._unionDurationSuffix(union, focusDeathText);
+    return duration ? `${marriageDate} ${duration}` : marriageDate;
+  }
+
+  private _unionMetaSubtitle(
+    union: TreeUnion | undefined,
+    lang?: string,
+    focusDeathText?: string | null,
+  ): string {
     if (!union) return "";
     const parts: string[] = [];
-    const marriageDate = this._formatUnionDate(union.marriage_date, lang);
+    const marriageDate = this._formatUnionMarriageDisplay(union, lang, focusDeathText);
     if (marriageDate) parts.push(`${this._tt("event_marriage")}: ${marriageDate}`);
     if (union.marriage_place) parts.push(union.marriage_place);
     const divorceDate = this._formatUnionDate(union.divorce_date, lang);
     if (divorceDate) parts.push(`${this._tt("event_divorce")}: ${divorceDate}`);
+    if (union.status === "widowed") {
+      const widowedDate = this._formatUnionDate(
+        this._widowedDateText(union, focusDeathText),
+        lang,
+      );
+      parts.push(
+        widowedDate
+          ? `${this._tt("status_widowed")}: ${widowedDate}`
+          : this._tt("status_widowed"),
+      );
+    }
     return parts.join(" · ");
   }
 
