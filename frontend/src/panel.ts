@@ -89,6 +89,7 @@ import {
   type DateQualifier,
   buildGedcomDate,
   formatDeathCell,
+  formatAge,
   formatEventDate,
   formatLifespan,
   gedcomToForm,
@@ -3027,14 +3028,78 @@ export class FamilyTreePanel extends LitElement {
     return formatEventDate({ date_text: text }, lang) || text;
   }
 
-  private _unionMetaSubtitle(union: TreeUnion | undefined, lang?: string): string {
+  /** Death date that ended a widowed union (partner or focus person). */
+  private _widowedDateText(
+    union: TreeUnion,
+    focusDeathText?: string | null,
+  ): string {
+    if (union.status !== "widowed") return "";
+    for (const partner of union.partners || []) {
+      const text =
+        typeof partner.death_date_text === "string"
+          ? partner.death_date_text.trim()
+          : "";
+      if (text) return text;
+    }
+    return (focusDeathText || "").trim();
+  }
+
+  /** Years together, same style as person age: "(25)" / "(±25)". */
+  private _unionDurationSuffix(
+    union: TreeUnion,
+    focusDeathText?: string | null,
+  ): string {
+    const marriage = (union.marriage_date || "").trim();
+    if (!marriage) return "";
+    const start = { date_text: marriage };
+    if (union.status === "divorced") {
+      const end = (union.divorce_date || "").trim();
+      return end ? formatAge(start, { date_text: end }, false) : "";
+    }
+    if (union.status === "widowed") {
+      const end = this._widowedDateText(union, focusDeathText);
+      return end ? formatAge(start, { date_text: end }, false) : "";
+    }
+    if (union.status === "ongoing" || union.status === "separated") {
+      return formatAge(start, null, true);
+    }
+    return "";
+  }
+
+  private _formatUnionMarriageDisplay(
+    union: TreeUnion,
+    lang?: string,
+    focusDeathText?: string | null,
+  ): string {
+    const marriageDate = this._formatUnionDate(union.marriage_date, lang);
+    if (!marriageDate) return "";
+    const duration = this._unionDurationSuffix(union, focusDeathText);
+    return duration ? `${marriageDate} ${duration}` : marriageDate;
+  }
+
+  private _unionMetaSubtitle(
+    union: TreeUnion | undefined,
+    lang?: string,
+    focusDeathText?: string | null,
+  ): string {
     if (!union) return "";
     const parts: string[] = [];
-    const marriageDate = this._formatUnionDate(union.marriage_date, lang);
+    const marriageDate = this._formatUnionMarriageDisplay(union, lang, focusDeathText);
     if (marriageDate) parts.push(`${this._tt("event_marriage")}: ${marriageDate}`);
     if (union.marriage_place) parts.push(union.marriage_place);
     const divorceDate = this._formatUnionDate(union.divorce_date, lang);
     if (divorceDate) parts.push(`${this._tt("event_divorce")}: ${divorceDate}`);
+    if (union.status === "widowed") {
+      const widowedDate = this._formatUnionDate(
+        this._widowedDateText(union, focusDeathText),
+        lang,
+      );
+      parts.push(
+        widowedDate
+          ? `${this._tt("status_widowed")}: ${widowedDate}`
+          : this._tt("status_widowed"),
+      );
+    }
     return parts.join(" · ");
   }
 

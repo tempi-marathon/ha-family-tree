@@ -2293,7 +2293,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
           ${q(this._tt(`link_existing_person`),{onClick:()=>this._openPickPerson(`partner`)})}
         </div>`:G}
     ${i.length?W`<div class="card-list">
-          ${i.map(t=>{let r=t.children||[],i=t.known_children_count,o=i!=null&&i>r.length?i-r.length:0,s=String(t.partners?.[0]?.id||``);return W`<div class="rel-union-card">
+          ${i.map(t=>{let r=t.children||[],i=t.known_children_count,o=i!=null&&i>r.length?i-r.length:0,s=String(t.partners?.[0]?.id||``),c=e.person.death?.date_text||``,l=this._widowedDateText(t,c),u=this._formatUnionDate(l,n);return W`<div class="rel-union-card">
               <div class="rel-union-head">
                 <strong>
                   ${(t.partners||[]).map(e=>String(e.name||``)).filter(Boolean).join(` & `)||this._tt(`partners`)}
@@ -2315,9 +2315,17 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
                       </button>
                     </span>`:G}
               </div>
-              ${t.marriage_date||t.divorce_date||t.known_children_count!=null?W`<div class="rel-union-meta">
-                    ${t.marriage_date?W`<div>${this._tt(`event_marriage`)}: <strong>${this._formatUnionDate(t.marriage_date,n)}</strong></div>`:G}
+              ${t.marriage_date||t.divorce_date||t.status===`widowed`||t.known_children_count!=null?W`<div class="rel-union-meta">
+                    ${t.marriage_date?W`<div>
+                          ${this._tt(`event_marriage`)}:
+                          <strong
+                            >${this._formatUnionMarriageDisplay(t,n,c)}</strong
+                          >
+                        </div>`:G}
                     ${t.divorce_date?W`<div>${this._tt(`event_divorce`)}: <strong>${this._formatUnionDate(t.divorce_date,n)}</strong></div>`:G}
+                    ${t.status===`widowed`?W`<div>
+                          ${this._tt(`status_widowed`)}${u?W`: <strong>${u}</strong>`:G}
+                        </div>`:G}
                     ${t.known_children_count==null?G:W`<div>
                           ${this._tt(`known_children`)}:
                           <strong>${t.known_children_count}</strong>
@@ -2339,7 +2347,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
   `;return W`
     ${this._renderCollapsibleSection(`rel-parents`,this._tt(`section_parents`),o,!0,`cards`)}
     ${this._renderCollapsibleSection(`rel-partners`,this._tt(`section_partners`),s,!0,`cards`)}
-  `}).call(e,t)}function jf(e,t){return(function(e){let t=e.person,n=e.tree,r=this.hass?.language,i=n?.partners||[],a=Math.min(this._treeUnion,Math.max(0,i.length-1)),o=i[a],s=Number(n?.person?.sibling_count||n?.siblings?.length||0),c={id:t.id,name:J(t),given_names:t.given_names,call_name:t.call_name,surname_prefix:t.surname_prefix,surname:t.surname,sex:t.sex,is_living:t.is_living,sibling_count:s,...n?.person||{}},l=[...o?.children||[]].sort((e,t)=>{let n=typeof e.birth_sort_date==`string`?e.birth_sort_date:``,r=typeof t.birth_sort_date==`string`?t.birth_sort_date:``;return!n&&!r?0:n?r?n<r?-1:+(n>r):-1:1}),u=o?.known_children_count,d=u!=null&&u>l.length?u-l.length:0,f=this._sortParents(n?.parents||[]),p=f.find(e=>e.sex===`male`)||f[0],m=f.find(e=>e.sex===`female`&&e!==p)||f.find(e=>e!==p)||null,h=this._canWrite()&&f.length<2,g=this._grandparentSlots(n,f),_=this._unionMetaSubtitle(o,r),v=this._canWrite(),y=[g[0],g[1]].filter(Boolean).length,b=[g[2],g[3]].filter(Boolean).length,x=g.some(Boolean)||v&&(!!p&&y<2||!!m&&b<2),S=String(o?.partners?.[0]?.id||``),C=v?()=>this._openAddRelation({kind:`child`,personId:t.id,unionId:o?.union_id,coParentId:S}):void 0,w=(e,t)=>e?this._treeCard(e):h&&t?W`<div class="tree-card-wrap">
+  `}).call(e,t)}function jf(e,t){return(function(e){let t=e.person,n=e.tree,r=this.hass?.language,i=n?.partners||[],a=Math.min(this._treeUnion,Math.max(0,i.length-1)),o=i[a],s=Number(n?.person?.sibling_count||n?.siblings?.length||0),c={id:t.id,name:J(t),given_names:t.given_names,call_name:t.call_name,surname_prefix:t.surname_prefix,surname:t.surname,sex:t.sex,is_living:t.is_living,sibling_count:s,...n?.person||{}},l=[...o?.children||[]].sort((e,t)=>{let n=typeof e.birth_sort_date==`string`?e.birth_sort_date:``,r=typeof t.birth_sort_date==`string`?t.birth_sort_date:``;return!n&&!r?0:n?r?n<r?-1:+(n>r):-1:1}),u=o?.known_children_count,d=u!=null&&u>l.length?u-l.length:0,f=this._sortParents(n?.parents||[]),p=f.find(e=>e.sex===`male`)||f[0],m=f.find(e=>e.sex===`female`&&e!==p)||f.find(e=>e!==p)||null,h=this._canWrite()&&f.length<2,g=this._grandparentSlots(n,f),_=this._unionMetaSubtitle(o,r,e.person.death?.date_text||``),v=this._canWrite(),y=[g[0],g[1]].filter(Boolean).length,b=[g[2],g[3]].filter(Boolean).length,x=g.some(Boolean)||v&&(!!p&&y<2||!!m&&b<2),S=String(o?.partners?.[0]?.id||``),C=v?()=>this._openAddRelation({kind:`child`,personId:t.id,unionId:o?.union_id,coParentId:S}):void 0,w=(e,t)=>e?this._treeCard(e):h&&t?W`<div class="tree-card-wrap">
         <button type="button" class="add-slot" @click=${()=>this._openParentsDialog()}>
           ${K(Nd)} ${this._tt(`add_parents`)}
         </button>
@@ -3126,7 +3134,7 @@ function e(e){return e+.5|0}var t=(e,t,n)=>Math.max(Math.min(e,n),t);function n(
         >`:W`<strong>${n}</strong>`}let t=this._relatedEventTemplate(e);return t&&e.related_person_id?W`<span class="event-card-title"
         ><strong>${(this._tt(t).split(`%s`)[0]||this._tt(t)).trimEnd()}</strong> —
         ${this._personLink({id:e.related_person_id,name:e.related_person_name||e.related_person_id},{preview:!0})}</span
-      >`:t?W`<strong>${this._eventTypeLabel(e)}</strong>`:W`<strong>${this._plainEventTypeLabel(e.type)}</strong>`}_formatUnionDate(e,t){let n=(e||``).trim();return n?gd({date_text:n},t)||n:``}_unionMetaSubtitle(e,t){if(!e)return``;let n=[],r=this._formatUnionDate(e.marriage_date,t);r&&n.push(`${this._tt(`event_marriage`)}: ${r}`),e.marriage_place&&n.push(e.marriage_place);let i=this._formatUnionDate(e.divorce_date,t);return i&&n.push(`${this._tt(`event_divorce`)}: ${i}`),n.join(` · `)}_renderPersonCard(e,t={}){let n=String(e.id||``),r=Vp(e),i=typeof e.sex==`string`?e.sex:`unknown`,a=typeof e.formal_name==`string`&&e.formal_name||[e.given_names,e.surname_prefix,e.surname].map(e=>typeof e==`string`?e.trim():``).filter(Boolean).join(` `),o=Dp({birth_date_text:typeof e.birth_date_text==`string`?e.birth_date_text:``,birth_sort_date:typeof e.birth_sort_date==`string`?e.birth_sort_date:null,death_date_text:typeof e.death_date_text==`string`?e.death_date_text:``,death_sort_date:typeof e.death_sort_date==`string`?e.death_sort_date:null,is_living:e.is_living!==!1}),s=typeof e.birth_place==`string`?e.birth_place:``,c=Number(e.sibling_count||0),l=e.is_living!==!1,u=t.preview!==!1,d=()=>{n&&(u?this._openPersonPreview(n):this._openPerson(n))},f=t.compact!==!1;return W`
+      >`:t?W`<strong>${this._eventTypeLabel(e)}</strong>`:W`<strong>${this._plainEventTypeLabel(e.type)}</strong>`}_formatUnionDate(e,t){let n=(e||``).trim();return n?gd({date_text:n},t)||n:``}_widowedDateText(e,t){if(e.status!==`widowed`)return``;for(let t of e.partners||[]){let e=typeof t.death_date_text==`string`?t.death_date_text.trim():``;if(e)return e}return(t||``).trim()}_unionDurationSuffix(e,t){let n=(e.marriage_date||``).trim();if(!n)return``;let r={date_text:n};if(e.status===`divorced`){let t=(e.divorce_date||``).trim();return t?bd(r,{date_text:t},!1):``}if(e.status===`widowed`){let n=this._widowedDateText(e,t);return n?bd(r,{date_text:n},!1):``}return e.status===`ongoing`||e.status===`separated`?bd(r,null,!0):``}_formatUnionMarriageDisplay(e,t,n){let r=this._formatUnionDate(e.marriage_date,t);if(!r)return``;let i=this._unionDurationSuffix(e,n);return i?`${r} ${i}`:r}_unionMetaSubtitle(e,t,n){if(!e)return``;let r=[],i=this._formatUnionMarriageDisplay(e,t,n);i&&r.push(`${this._tt(`event_marriage`)}: ${i}`),e.marriage_place&&r.push(e.marriage_place);let a=this._formatUnionDate(e.divorce_date,t);if(a&&r.push(`${this._tt(`event_divorce`)}: ${a}`),e.status===`widowed`){let i=this._formatUnionDate(this._widowedDateText(e,n),t);r.push(i?`${this._tt(`status_widowed`)}: ${i}`:this._tt(`status_widowed`))}return r.join(` · `)}_renderPersonCard(e,t={}){let n=String(e.id||``),r=Vp(e),i=typeof e.sex==`string`?e.sex:`unknown`,a=typeof e.formal_name==`string`&&e.formal_name||[e.given_names,e.surname_prefix,e.surname].map(e=>typeof e==`string`?e.trim():``).filter(Boolean).join(` `),o=Dp({birth_date_text:typeof e.birth_date_text==`string`?e.birth_date_text:``,birth_sort_date:typeof e.birth_sort_date==`string`?e.birth_sort_date:null,death_date_text:typeof e.death_date_text==`string`?e.death_date_text:``,death_sort_date:typeof e.death_sort_date==`string`?e.death_sort_date:null,is_living:e.is_living!==!1}),s=typeof e.birth_place==`string`?e.birth_place:``,c=Number(e.sibling_count||0),l=e.is_living!==!1,u=t.preview!==!1,d=()=>{n&&(u?this._openPersonPreview(n):this._openPerson(n))},f=t.compact!==!1;return W`
       <button type="button" class="person-card" @click=${d}>
         <div class="person-card-head person-card-head--with-avatar">
           ${wf({...e,sex:i,is_living:l,profile_media_id:typeof e.profile_media_id==`string`?e.profile_media_id:null},{size:`sm`,hass:this.hass,deceasedOverlay:f,title:r})}
