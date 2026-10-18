@@ -8,7 +8,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from .const import MAX_MEDIA_TOTAL_BYTES, MAX_PHOTOS_PER_PERSON, META_FAMILY_SHORTCUTS
+from .const import (
+    MAX_MEDIA_TOTAL_BYTES,
+    MAX_PHOTOS_PER_PERSON,
+    META_FAMILY_SHORTCUTS,
+    META_SURNAME_PREFIX_DEDUPE,
+)
 from .db import Database
 from .lineage import would_create_parent_child_cycle
 from .models import (
@@ -27,7 +32,7 @@ from .models import (
     UserLink,
     new_id,
 )
-from .names import display_name
+from .names import display_name, normalize_surname_fields
 from .shortcuts import normalize_family_shortcuts
 from .validation import normalize_caption, normalize_entity_id, normalize_source_url
 
@@ -1342,5 +1347,34 @@ class Repository:
                     (META_FAMILY_SHORTCUTS, payload),
                 )
             return normalized
+
+        return self._mutate(_do)
+
+    def dedupe_surname_prefixes(self) -> int:
+        """One-time repair: strip duplicated tussenvoegsel from surname. Returns rows fixed."""
+        if self.meta_has(META_SURNAME_PREFIX_DEDUPE):
+            return 0
+
+        def _do() -> int:
+            rows = self.db.fetchall("SELECT * FROM persons")
+            fixed = 0
+            now = _now()
+            for row in rows:
+                person = _row_person(row)
+                new_prefix, new_surname = normalize_surname_fields(
+                    person.surname_prefix, person.surname
+                )
+                if new_prefix == person.surname_prefix and new_surname == person.surname:
+                    continue
+                self.db.execute(
+                    "UPDATE persons SET surname_prefix=?, surname=?, updated_at=? WHERE id=?",
+                    (new_prefix, new_surname, now, person.id),
+                )
+                fixed += 1
+            self.db.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?)",
+                (META_SURNAME_PREFIX_DEDUPE, "1"),
+            )
+            return fixed
 
         return self._mutate(_do)

@@ -96,6 +96,7 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
         )
         await self.async_sync_gazetteer()
         await self.hass.async_add_executor_job(self._migrate_family_shortcuts)
+        await self.hass.async_add_executor_job(self._migrate_surname_prefixes)
         await self._async_strip_shortcuts_from_options()
         await self.async_refresh()
 
@@ -104,6 +105,11 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
             return
         legacy = list(self.entry.options.get(CONF_FAMILY_SHORTCUTS) or [])
         self.repo.set_family_shortcuts(legacy)
+
+    def _migrate_surname_prefixes(self) -> None:
+        fixed = self.repo.dedupe_surname_prefixes()
+        if fixed:
+            _LOGGER.info("Deduped surname prefix on %s person(s)", fixed)
 
     async def _async_strip_shortcuts_from_options(self) -> None:
         opts = dict(self.entry.options)

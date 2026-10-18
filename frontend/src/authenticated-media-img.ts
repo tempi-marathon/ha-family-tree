@@ -2,7 +2,7 @@
 
 import { LitElement, css, html } from "lit";
 import { property, state } from "lit/decorators.js";
-import { hassAuthHeaders } from "./auth";
+import { ensureHassAuthHeaders } from "./auth";
 import { personMediaApiPath, type MediaVariant } from "./media";
 import type { HomeAssistant } from "./types";
 
@@ -67,10 +67,15 @@ export class FtAuthenticatedMediaImg extends LitElement {
     }
     const gen = ++this._loadGen;
     try {
+      const headers = await ensureHassAuthHeaders(this.hass);
+      // Never hit requires_auth without a Bearer — HA logs that as a ban attempt.
+      if (!headers.Authorization || gen !== this._loadGen) {
+        return;
+      }
       const resp = await fetch(path, {
         method: "GET",
         credentials: "same-origin",
-        headers: hassAuthHeaders(this.hass),
+        headers,
       });
       if (!resp.ok || gen !== this._loadGen) return;
       const blob = await resp.blob();

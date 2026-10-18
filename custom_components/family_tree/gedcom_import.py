@@ -28,7 +28,7 @@ from .models import (
     UnionType,
     new_id,
 )
-from .names import normalize_imported_names, split_surname
+from .names import normalize_imported_names, normalize_surname_fields, split_surname
 from .repository import Repository
 from .validation import normalize_source_url
 
@@ -474,12 +474,16 @@ class GedcomImporter:
         if existing_id:
             person = self.repo.get_person(existing_id, include_deleted=True)
             if person:
+                sp, sn = normalize_surname_fields(
+                    surname_prefix or person.surname_prefix,
+                    surname or person.surname,
+                )
                 updated = Person(
                     id=person.id,
                     given_names=given or person.given_names,
                     call_name=call_name or person.call_name,
-                    surname_prefix=surname_prefix or person.surname_prefix,
-                    surname=surname or person.surname,
+                    surname_prefix=sp,
+                    surname=sn,
                     sex=sex if sex != Sex.UNKNOWN else person.sex,
                     is_living=is_living,
                     notes=notes or person.notes,
@@ -493,11 +497,12 @@ class GedcomImporter:
             else:
                 person_id = existing_id
         else:
+            sp, sn = normalize_surname_fields(surname_prefix, surname)
             person = Person(
                 given_names=given,
                 call_name=call_name,
-                surname_prefix=surname_prefix,
-                surname=surname,
+                surname_prefix=sp,
+                surname=sn,
                 sex=sex,
                 is_living=is_living,
                 notes=notes,

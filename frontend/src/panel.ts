@@ -120,7 +120,7 @@ import {
 } from "./people_view";
 import { nodeName } from "./tree_view";
 import { renderPersonAvatar } from "./person-avatar";
-import { hassAuthHeaders } from "./auth";
+import { ensureHassAuthHeaders } from "./auth";
 import "./authenticated-media-img";
 import { apiUrl, personMediaApiPath } from "./media";
 import {
@@ -582,10 +582,12 @@ export class FamilyTreePanel extends LitElement {
     const path = personMediaApiPath(sourceId, "full");
     if (!path) return;
     try {
+      const headers = await this._authHeaders();
+      if (!headers.Authorization) return;
       const resp = await fetch(apiUrl(this.hass, path), {
         method: "GET",
         credentials: "same-origin",
-        headers: await this._authHeaders(),
+        headers,
       });
       if (!resp.ok) return;
       const blob = await resp.blob();
@@ -1866,7 +1868,7 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private async _authHeaders(): Promise<Record<string, string>> {
-    return hassAuthHeaders(this.hass);
+    return ensureHassAuthHeaders(this.hass);
   }
 
   private async _uploadErrorMessage(resp: Response, fallback: string): Promise<string> {
@@ -2115,8 +2117,32 @@ export class FamilyTreePanel extends LitElement {
     }
   }
 
-  private _exportGedcom() {
-    window.open("/api/family_tree/export_gedcom", "_blank");
+  private async _exportGedcom() {
+    if (!this.hass) return;
+    try {
+      const headers = await this._authHeaders();
+      if (!headers.Authorization) {
+        throw new Error("Not authenticated");
+      }
+      const resp = await fetch("/api/family_tree/export_gedcom", {
+        method: "GET",
+        credentials: "same-origin",
+        headers,
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `Export failed (${resp.status})`);
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "family_tree.ged";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      this._error = formatHassError(err);
+    }
   }
 
   private _destroyCharts() {

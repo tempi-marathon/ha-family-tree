@@ -101,6 +101,25 @@ def normalize_imported_names(given_names: str, call_name: str) -> tuple[str, str
     return given, call
 
 
+def normalize_surname_fields(prefix: str, surname: str) -> tuple[str, str]:
+    """Dedupe tussenvoegsel when it appears in both prefix and surname.
+
+    Handles GEDCOM cases where SPFX is ``de`` and SURN is still ``de Vries``.
+    When prefix is empty, falls back to :func:`split_surname`.
+    """
+    prefix = (prefix or "").strip()
+    surname = (surname or "").strip()
+    if not surname:
+        return (prefix.lower() if prefix else ""), ""
+    if not prefix:
+        return split_surname(surname)
+    pref_cf = prefix.casefold()
+    surn_cf = surname.casefold()
+    if surn_cf.startswith(pref_cf + " "):
+        return prefix.lower(), surname[len(prefix) :].strip()
+    return prefix.lower(), surname
+
+
 def _person_with_normalized_names(person: Person) -> Person:
     given, call = normalize_imported_names(person.given_names, person.call_name)
     return Person(
