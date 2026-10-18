@@ -98,6 +98,32 @@ def test_import_quoted_nick_and_level1_givn(tmp_path: Path):
     db.close()
 
 
+def test_import_spfx_surn_does_not_duplicate_prefix(tmp_path: Path):
+    db = Database(tmp_path / "tree.db")
+    db.open()
+    repo = Repository(db)
+    text = """0 HEAD
+1 SOUR Test
+1 GEDC
+2 VERS 5.5.1
+1 CHAR UTF-8
+0 @I1@ INDI
+1 NAME Ada /de Vries/
+2 GIVN Ada
+2 SPFX de
+2 SURN de Vries
+1 SEX F
+0 TRLR
+"""
+    GedcomImporter(repo).import_text(text)
+    people, _ = repo.list_persons(limit=10)
+    assert len(people) == 1
+    p = people[0]
+    assert p.surname_prefix == "de"
+    assert p.surname == "Vries"
+    db.close()
+
+
 def test_import_nick_with_parens(tmp_path: Path):
     db = Database(tmp_path / "tree.db")
     db.open()

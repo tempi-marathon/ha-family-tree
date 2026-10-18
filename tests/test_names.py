@@ -1,5 +1,8 @@
 """Tests for Dutch-aware name helpers."""
 
+from pathlib import Path
+
+from custom_components.family_tree.db import Database
 from custom_components.family_tree.models import Person
 from custom_components.family_tree.names import (
     display_name,
@@ -7,9 +10,11 @@ from custom_components.family_tree.names import (
     full_name,
     matches_family_shortcut,
     normalize_imported_names,
+    normalize_surname_fields,
     sort_key,
     split_surname,
 )
+from custom_components.family_tree.repository import Repository
 
 
 def test_split_surname_prefixes():
@@ -47,6 +52,34 @@ def test_normalize_imported_names_nick_in_parens():
     given, call = normalize_imported_names("Marinus Theodorus", "Marinus (Rien)")
     assert call == "Rien"
     assert given == "Marinus Theodorus"
+
+
+def test_normalize_surname_fields_strips_duplicate_prefix():
+    assert normalize_surname_fields("de", "de Vries") == ("de", "Vries")
+    assert normalize_surname_fields("van der", "van der Berg") == ("van der", "Berg")
+    assert normalize_surname_fields("De", "de Vries") == ("de", "Vries")
+    assert normalize_surname_fields("de", "Vries") == ("de", "Vries")
+    assert normalize_surname_fields("", "van Iersel") == ("van", "Iersel")
+    assert normalize_surname_fields("", "Jansen") == ("", "Jansen")
+
+
+def test_dedupe_surname_prefixes_repairs_existing_rows(tmp_path: Path):
+    db = Database(tmp_path / "tree.db")
+    db.open()
+    repo = Repository(db)
+    bad = repo.add_person(
+        Person(given_names="Ada", surname_prefix="de", surname="de Vries")
+    )
+    good = repo.add_person(
+        Person(given_names="Bart", surname_prefix="van", surname="Iersel")
+    )
+    fixed = repo.dedupe_surname_prefixes()
+    assert fixed == 1
+    assert repo.get_person(bad.id).surname_prefix == "de"
+    assert repo.get_person(bad.id).surname == "Vries"
+    assert repo.get_person(good.id).surname == "Iersel"
+    assert repo.dedupe_surname_prefixes() == 0
+    db.close()
 
 
 def test_formal_subtitle_dedupes_preferred_in_given():

@@ -12,6 +12,7 @@ CONF_NAME: Final = "name"
 CONF_GAZETTEER_COUNTRIES: Final = "gazetteer_countries"
 CONF_FAMILY_SHORTCUTS: Final = "family_shortcuts"
 META_FAMILY_SHORTCUTS: Final = "family_shortcuts"
+META_SURNAME_PREFIX_DEDUPE: Final = "surname_prefix_dedupe_v1"
 MAX_FAMILY_SHORTCUTS: Final = 50
 
 DEFAULT_PROFILE_NAME: Final = "Family Tree"
