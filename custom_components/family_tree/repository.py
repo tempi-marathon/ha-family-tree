@@ -1364,10 +1364,7 @@ class Repository:
                 new_prefix, new_surname = normalize_surname_fields(
                     person.surname_prefix, person.surname
                 )
-                if (
-                    new_prefix == person.surname_prefix
-                    and new_surname == person.surname
-                ):
+                if new_prefix == person.surname_prefix and new_surname == person.surname:
                     continue
                 self.db.execute(
                     "UPDATE persons SET surname_prefix=?, surname=?, updated_at=? WHERE id=?",

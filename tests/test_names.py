@@ -67,12 +67,8 @@ def test_dedupe_surname_prefixes_repairs_existing_rows(tmp_path: Path):
     db = Database(tmp_path / "tree.db")
     db.open()
     repo = Repository(db)
-    bad = repo.add_person(
-        Person(given_names="Ada", surname_prefix="de", surname="de Vries")
-    )
-    good = repo.add_person(
-        Person(given_names="Bart", surname_prefix="van", surname="Iersel")
-    )
+    bad = repo.add_person(Person(given_names="Ada", surname_prefix="de", surname="de Vries"))
+    good = repo.add_person(Person(given_names="Bart", surname_prefix="van", surname="Iersel"))
     fixed = repo.dedupe_surname_prefixes()
     assert fixed == 1
     assert repo.get_person(bad.id).surname_prefix == "de"
