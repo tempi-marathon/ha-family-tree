@@ -1,16 +1,17 @@
 name: Release
 
-# Prefer: save a draft release, then run this workflow (workflow_dispatch) or wait
-# for release:created. Publish only after family_tree.zip is attached.
+# Flow: create a draft release (or re-run this workflow with the tag) → this job
+# attaches family_tree.zip, then publishes the release so Source code archives exist
+# and HACS sees a complete release in one step.
 # release:published is a fallback when the zip was not built on draft create
-# (API-created drafts often skip the created event).
+# (API-created drafts often skip the created event); publish is then a no-op.
 on:
   release:
     types: [created, published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to attach the zip to (e.g. v0.5.3)"
+        description: "Release tag to attach the zip to (e.g. v0.5.4)"
         required: true
         type: string
 
@@ -78,3 +79,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
         run: gh release upload "${TAG}" "${ZIP_NAME}" --clobber --repo "${GITHUB_REPOSITORY}"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # Idempotent: draft → published; already published → no-op.
+          if [ "$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh release edit "${TAG}" --draft=false --repo "${GITHUB_REPOSITORY}"
+            echo "Published ${TAG}"
+          else
+            echo "${TAG} is already published"
+          fi
