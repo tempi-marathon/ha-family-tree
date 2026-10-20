@@ -29,9 +29,7 @@ DIST_DIR = Path(__file__).parent / "dist"
 BRAND_DIR = Path(__file__).parent / "brand"
 
 
-def _panel_fs_state(
-    panel_path: Path, sourcemap_path: Path
-) -> tuple[bool, int, bool, bool]:
+def _panel_fs_state(panel_path: Path, sourcemap_path: Path) -> tuple[bool, int, bool, bool]:
     """Return (panel_exists, cache_bust_mtime, sourcemap_exists, brand_dir_exists).
 
     Runs in the executor so path checks do not block the event loop.
@@ -57,8 +55,8 @@ async def async_setup_panel(hass: HomeAssistant) -> None:
 
     panel_path = DIST_DIR / PANEL_FILENAME
     sourcemap_path = DIST_DIR / f"{PANEL_FILENAME}.map"
-    panel_exists, cache_bust, sourcemap_exists, brand_exists = (
-        await hass.async_add_executor_job(_panel_fs_state, panel_path, sourcemap_path)
+    panel_exists, cache_bust, sourcemap_exists, brand_exists = await hass.async_add_executor_job(
+        _panel_fs_state, panel_path, sourcemap_path
     )
     if not panel_exists:
         _LOGGER.warning(
