@@ -22,9 +22,9 @@ from custom_components.family_tree.models import (
 )
 from custom_components.family_tree.repository import Repository
 from custom_components.family_tree.sensor import (
+    _UNRECORDED,
     OnThisDaySensor,
     UpcomingEventsSensor,
-    _UNRECORDED,
 )
 
 
