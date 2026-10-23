@@ -2493,7 +2493,11 @@ export class FamilyTreePanel extends LitElement {
                       ? this._tt("on_this_day_death")
                       : kind === "marriage"
                         ? this._tt("on_this_day_marriage")
-                        : this._tt("on_this_day_birth");
+                        : kind === "baptism"
+                          ? this._tt("on_this_day_baptism")
+                          : kind === "partnership"
+                            ? this._tt("on_this_day_partnership")
+                            : this._tt("on_this_day_birth");
                   const names = (u.names as string[]) || [];
                   const label =
                     names.length > 1

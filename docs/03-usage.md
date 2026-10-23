@@ -26,5 +26,9 @@ On a person’s **Details** tab, admins can upload photos (JPEG, PNG, WebP). One
 
 ## Sensors & calendar
 
-- Sensors: total people, living people, days until next birthday
-- Calendar: birthdays (living) and wedding/partnership anniversaries
+- Sensors:
+  - **People** / **Living** — totals from the tree
+  - **On this day** — count of historic events that fall today; attribute `events` lists them (birth, baptism, marriage, partnership, death)
+  - **Upcoming events** — days until the soonest birthday, anniversary, or memorial; attributes `birthdays`, `anniversaries`, `memorials` (plus `next_kind` / `next_label`)
+- Calendar (`family_events`): living birthdays, wedding anniversaries, and death memorials (all-day)
+- Bus events (once per day, deduped): `family_tree_birthday`, `family_tree_anniversary`, `family_tree_memorial`
