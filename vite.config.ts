@@ -18,8 +18,8 @@ export default defineConfig({
       },
       output: {
         entryFileNames: "[name].js",
-        chunkFileNames: "chunks/[name]-[hash].js",
         format: "es",
+        codeSplitting: false,
       },
     },
   },

@@ -32,3 +32,29 @@ On a person’s **Details** tab, admins can upload photos (JPEG, PNG, WebP). One
   - **Upcoming events** — days until the soonest birthday, anniversary, or memorial; attributes `birthdays`, `anniversaries`, `memorials` (plus `next_kind` / `next_label`)
 - Calendar (`family_events`): living birthdays, wedding anniversaries, and death memorials (all-day)
 - Bus events (once per day, deduped): `family_tree_birthday`, `family_tree_anniversary`, `family_tree_memorial`
+
+## Lovelace cards
+
+Cards ship with the integration (no separate HACS install). In **storage mode**, the module
+resource is registered automatically (URL includes a cache-busting query). In **YAML mode**,
+add the resource and bump the `v=` query after upgrades so browsers pick up the new bundle:
+
+```yaml
+resources:
+  - url: /api/family_tree/family-tree-cards.js?v=0.1.0
+    type: module
+```
+
+Examples:
+
+```yaml
+type: custom:family-tree-upcoming-card
+# entity: sensor.family_tree_upcoming_events  # optional; auto-discovered
+
+type: custom:family-tree-on-this-day-card
+# entity: sensor.family_tree_on_this_day
+
+type: custom:family-tree-mini-tree-card
+use_linked_user: true
+# person_id: "<uuid>"  # optional override
+```

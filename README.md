@@ -18,6 +18,7 @@ sensors. Family data stays on your Home Assistant box (SQLite under
 - **Offline gazetteer** — GeoNames country packs, searchable locally
 - **Sidebar panel** — full management UI (English / Dutch)
 - **Calendar & sensors** — birthdays, anniversaries, memorials; on-this-day and upcoming-events sensors
+- **Dashboard cards** — upcoming events, on this day, and mini tree (bundled Lovelace cards)
 - **Access** — admins edit; other HA users read-only
 
 ## Install

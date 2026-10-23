@@ -87,6 +87,11 @@ BRAND_URL_PATH: Final = f"/api/{DOMAIN}/brand"
 PANEL_ICON: Final = "mdi:family-tree"
 PANEL_TITLE: Final = "Family Tree"
 
+# Lovelace cards (embedded in this integration; under /api like brand assets)
+CARDS_FILENAME: Final = "family-tree-cards.js"
+CARDS_URL_PATH: Final = f"/api/{DOMAIN}/{CARDS_FILENAME}"
+CARDS_SOURCEMAP_URL: Final = f"/api/{DOMAIN}/{CARDS_FILENAME}.map"
+
 # GeoNames
 GEONAMES_BASE_URL: Final = "https://download.geonames.org/export/dump"
 GEONAMES_ADMIN1_URL: Final = f"{GEONAMES_BASE_URL}/admin1CodesASCII.txt"

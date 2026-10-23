@@ -125,7 +125,9 @@ def _ensure_homeassistant_stubs() -> None:
     modules["homeassistant.helpers.event"].async_track_time_change = MagicMock(
         return_value=MagicMock()
     )
+    modules["homeassistant.helpers.event"].async_call_later = MagicMock(return_value=MagicMock())
     modules["homeassistant.core"].HomeAssistant = MagicMock
+    modules["homeassistant.core"].Event = MagicMock
     modules["homeassistant.core"].callback = lambda f: f
     modules["homeassistant.core"].CALLBACK_TYPE = object
     modules["homeassistant.core"].ServiceCall = MagicMock
@@ -190,6 +192,7 @@ def _ensure_homeassistant_stubs() -> None:
     modules["homeassistant.const"].EntityCategory = MagicMock
     modules["homeassistant.const"].UnitOfTime = MagicMock(DAYS="d")
     modules["homeassistant.const"].ATTR_NAME = "name"
+    modules["homeassistant.const"].EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
 
     modules["homeassistant.components.logbook"].LOGBOOK_ENTRY_MESSAGE = "message"
     modules["homeassistant.components.logbook"].LOGBOOK_ENTRY_NAME = "name"

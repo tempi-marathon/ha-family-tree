@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
-    "build": "tsc --noEmit && vite build",
+    "dev:cards": "vite build --watch --config vite.cards.config.ts",
+    "dev:all": "npm run dev & npm run dev:cards",
+    "build": "tsc --noEmit && vite build && vite build --config vite.cards.config.ts",
     "lint": "tsc --noEmit",
     "test": "vitest run"
   },
