@@ -20,3 +20,22 @@ Import and export use GEDCOM 5.5.1.
 - Replace all → wipe first (confirmation required)
 
 Max upload size: 20 MiB.
+
+## Privacy export
+
+Default export is a full backup (real names, dates, notes).
+
+**Anonymize living people** (Settings checkbox, service field `anonymize_living`, or
+`GET /api/family_tree/export_gedcom?anonymize_living=1`):
+
+- Living `INDI` records keep structure (`SEX`, `FAMS`/`FAMC`) but the name becomes
+  `Living //`, `RESN privacy` is set, and personal events / notes / citations are
+  omitted.
+- Deceased people export normally.
+- `FAM` partner/child links stay so the tree shape is preserved. Union events
+  (`MARR`, `DIV`, …) are omitted if **any** partner is living.
+- Download filename is `family_tree_private.ged` when anonymizing.
+
+`RESN` is only a hint — many importers ignore it. This mode redacts content in the
+file itself. The result is still plain text; share with care. Omitting living
+people entirely is not supported yet.

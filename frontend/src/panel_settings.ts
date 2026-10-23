@@ -47,6 +47,16 @@ export function renderSettings(host: FamilyTreePanel) {
     <div class="form-stack settings-gedcom-export">
       <span class="form-stack-title">${this._tt("export_gedcom")}</span>
       <p class="muted">${this._tt("settings_gedcom_export_hint")}</p>
+      <label class="check">
+        <input
+          type="checkbox"
+          .checked=${this._anonymizeLivingExport}
+          @change=${(e: Event) =>
+            (this._anonymizeLivingExport = (e.target as HTMLInputElement).checked)}
+        />
+        ${this._tt("anonymize_living")}
+      </label>
+      <p class="muted">${this._tt("anonymize_living_hint")}</p>
       ${mdButton(this._tt("export_gedcom"), {
         variant: "filled",
         onClick: () => this._exportGedcom(),

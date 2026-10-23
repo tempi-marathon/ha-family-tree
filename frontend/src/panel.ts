@@ -203,6 +203,7 @@ export class FamilyTreePanel extends LitElement {
   @state() private _gazQuery = "";
   @state() private _gazHits: GazetteerHit[] = [];
   @state() private _replaceImport = false;
+  @state() private _anonymizeLivingExport = false;
   @state() private _importStatus = "";
   @state() private _importFile: File | null = null;
   @state() private _importReport: Record<string, number> | null = null;
@@ -2124,7 +2125,8 @@ export class FamilyTreePanel extends LitElement {
       if (!headers.Authorization) {
         throw new Error("Not authenticated");
       }
-      const resp = await fetch("/api/family_tree/export_gedcom", {
+      const qs = this._anonymizeLivingExport ? "?anonymize_living=1" : "";
+      const resp = await fetch(`/api/family_tree/export_gedcom${qs}`, {
         method: "GET",
         credentials: "same-origin",
         headers,
@@ -2137,7 +2139,9 @@ export class FamilyTreePanel extends LitElement {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "family_tree.ged";
+      a.download = this._anonymizeLivingExport
+        ? "family_tree_private.ged"
+        : "family_tree.ged";
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {

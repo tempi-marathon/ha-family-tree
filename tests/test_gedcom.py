@@ -162,3 +162,99 @@ def test_import_batch_single_revision(tmp_path: Path):
     assert repo.get_revision() == rev0 + 1
     assert len(notifications) == 1
     db.close()
+
+
+def test_export_anonymize_living(tmp_path: Path):
+    db = Database(tmp_path / "tree.db")
+    db.open()
+    repo = Repository(db)
+    GedcomImporter(repo).import_text(FIXTURE.read_text(encoding="utf-8"))
+
+    full = export_gedcom(db)
+    assert "Johannes" in full
+    assert "Anna" in full
+    assert "Maria" in full
+    assert "1 MARR" in full
+    assert "Living //" not in full
+    assert "1 RESN privacy" not in full
+
+    private = export_gedcom(db, anonymize_living=True)
+    assert private.count("1 NAME Living //") == 2
+    assert private.count("1 RESN privacy") == 2
+    assert "Johannes" not in private
+    assert "Anna" not in private
+    assert "Maria" in private
+    assert "1 BIRT" in private  # deceased still has birth
+    assert "DEAT" in private
+    # Living INDIs must not carry personal events/notes.
+    living_blocks = []
+    current: list[str] = []
+    for line in private.splitlines():
+        if line.startswith("0 @") and " INDI" in line:
+            if current:
+                living_blocks.append(current)
+            current = [line]
+        elif line.startswith("0 "):
+            if current:
+                living_blocks.append(current)
+            current = []
+        elif current:
+            current.append(line)
+    if current:
+        living_blocks.append(current)
+    anonymized = [b for b in living_blocks if any("NAME Living //" in ln for ln in b)]
+    assert len(anonymized) == 2
+    for block in anonymized:
+        joined = "\n".join(block)
+        assert "1 SEX " in joined
+        assert "1 RESN privacy" in joined
+        assert "BIRT" not in joined
+        assert "NOTE" not in joined
+        assert "2 GIVN" not in joined
+        assert "2 SURN" not in joined
+        # Structure preserved
+        assert "FAMS" in joined or "FAMC" in joined
+
+    # FAM with a living partner omits marriage detail; links remain.
+    assert "1 HUSB" in private
+    assert "1 WIFE" in private
+    assert "1 CHIL" in private
+    assert "1 MARR" not in private
+
+    db.close()
+
+
+def test_export_anonymize_all_deceased_fam_keeps_marriage(tmp_path: Path):
+    """When every partner is deceased, union events stay in the export."""
+    db = Database(tmp_path / "tree.db")
+    db.open()
+    repo = Repository(db)
+    text = """0 HEAD
+1 SOUR Test
+1 GEDC
+2 VERS 5.5.1
+1 CHAR UTF-8
+0 @I1@ INDI
+1 NAME Adam /Deceased/
+1 SEX M
+1 DEAT
+2 DATE 1 JAN 1900
+0 @I2@ INDI
+1 NAME Eve /Deceased/
+1 SEX F
+1 DEAT
+2 DATE 1 JAN 1901
+0 @F1@ FAM
+1 HUSB @I1@
+1 WIFE @I2@
+1 MARR
+2 DATE 1 JUN 1870
+0 TRLR
+"""
+    GedcomImporter(repo).import_text(text)
+    private = export_gedcom(db, anonymize_living=True)
+    assert "Living //" not in private
+    assert "Adam" in private
+    assert "Eve" in private
+    assert "1 MARR" in private
+    db.close()
