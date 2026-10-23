@@ -17,7 +17,7 @@ sensors. Family data stays on your Home Assistant box (SQLite under
 - **GEDCOM 5.5.1** — import and export
 - **Offline gazetteer** — GeoNames country packs, searchable locally
 - **Sidebar panel** — full management UI (English / Dutch)
-- **Calendar & sensors** — birthdays and anniversaries of living relatives
+- **Calendar & sensors** — birthdays, anniversaries, memorials; on-this-day and upcoming-events sensors
 - **Access** — admins edit; other HA users read-only
 
 ## Install

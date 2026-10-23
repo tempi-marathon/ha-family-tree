@@ -71,6 +71,7 @@ SCHEMA_VERSION: Final = 4
 # Events
 EVENT_BIRTHDAY: Final = f"{DOMAIN}_birthday"
 EVENT_ANNIVERSARY: Final = f"{DOMAIN}_anniversary"
+EVENT_MEMORIAL: Final = f"{DOMAIN}_memorial"
 
 # Platforms
 PLATFORMS: Final = ["sensor", "calendar"]

@@ -48,8 +48,11 @@
       "living_count": {
         "name": "Living"
       },
-      "next_birthday": {
-        "name": "Next birthday"
+      "on_this_day": {
+        "name": "On this day"
+      },
+      "upcoming_events": {
+        "name": "Upcoming events"
       }
     },
     "calendar": {

@@ -48,8 +48,11 @@
       "living_count": {
         "name": "Levend"
       },
-      "next_birthday": {
-        "name": "Volgende verjaardag"
+      "on_this_day": {
+        "name": "Op deze dag"
+      },
+      "upcoming_events": {
+        "name": "Komende gebeurtenissen"
       }
     },
     "calendar": {

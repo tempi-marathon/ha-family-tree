@@ -40,6 +40,7 @@ def _ensure_homeassistant_stubs() -> None:
         "homeassistant.helpers.entity_platform": types.ModuleType(
             "homeassistant.helpers.entity_platform"
         ),
+        "homeassistant.helpers.entity": types.ModuleType("homeassistant.helpers.entity"),
         "homeassistant.exceptions": types.ModuleType("homeassistant.exceptions"),
         "homeassistant.config_entries": types.ModuleType("homeassistant.config_entries"),
         "homeassistant.const": types.ModuleType("homeassistant.const"),
@@ -58,6 +59,7 @@ def _ensure_homeassistant_stubs() -> None:
     }
 
     modules["homeassistant.helpers.aiohttp_client"].async_get_clientsession = MagicMock()
+    modules["homeassistant.helpers.entity_platform"].AddEntitiesCallback = object
 
     class DeviceEntryType:
         SERVICE = "service"

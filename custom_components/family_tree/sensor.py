@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
@@ -16,8 +18,17 @@ from .const import DOMAIN
 from .coordinator import FamilyTreeCoordinator
 from .helpers import device_info_for_entry
 
-# Exclude PII name attributes from the recorder history DB.
-_UNRECORDED = frozenset({"person_name", "person_id", "names", "union_id"})
+# Exclude PII / list attributes from the recorder history DB.
+_UNRECORDED = frozenset(
+    {
+        "events",
+        "birthdays",
+        "anniversaries",
+        "memorials",
+        "next_kind",
+        "next_label",
+    }
+)
 
 
 async def async_setup_entry(
@@ -31,7 +42,8 @@ async def async_setup_entry(
         [
             PeopleCountSensor(coordinator, entry),
             LivingCountSensor(coordinator, entry),
-            NextBirthdaySensor(coordinator, entry),
+            OnThisDaySensor(coordinator, entry),
+            UpcomingEventsSensor(coordinator, entry),
         ]
     )
 
@@ -96,33 +108,85 @@ class LivingCountSensor(FamilyTreeSensorBase):
         return int(data.stats.get("living") or 0)
 
 
-class NextBirthdaySensor(FamilyTreeSensorBase):
-    """Days until the next birthday among living people."""
+class OnThisDaySensor(FamilyTreeSensorBase):
+    """Count of historic events that fall on today."""
 
-    _attr_translation_key = "next_birthday"
-    _attr_native_unit_of_measurement = UnitOfTime.DAYS
+    _attr_translation_key = "on_this_day"
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:cake-variant"
+    _attr_icon = "mdi:history"
 
     def __init__(self, coordinator: FamilyTreeCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry, "next_birthday")
+        super().__init__(coordinator, entry, "on_this_day")
 
     @property
     def native_value(self) -> int | None:
         data = self.coordinator.data
-        if data is None or not data.upcoming_birthdays:
+        if data is None:
             return None
-        return int(data.upcoming_birthdays[0]["days_until"])
+        return sum(1 for item in data.on_this_day if int(item.get("days_until", -1)) == 0)
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data
-        if data is None or not data.upcoming_birthdays:
+        if data is None:
             return {}
-        nxt = data.upcoming_birthdays[0]
-        return {
-            "person_name": nxt.get("name"),
-            "person_id": nxt.get("person_id"),
-            "date": nxt.get("next_date"),
-            "age": nxt.get("age"),
+        today = [item for item in data.on_this_day if int(item.get("days_until", -1)) == 0]
+        return {"events": today}
+
+
+class UpcomingEventsSensor(FamilyTreeSensorBase):
+    """Days until the soonest birthday, anniversary, or memorial."""
+
+    _attr_translation_key = "upcoming_events"
+    _attr_native_unit_of_measurement = UnitOfTime.DAYS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, coordinator: FamilyTreeCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "upcoming_events")
+
+    def _soonest(self) -> tuple[str, dict[str, Any]] | None:
+        data = self.coordinator.data
+        if data is None:
+            return None
+        candidates: list[tuple[int, str, dict[str, Any]]] = []
+        for item in data.upcoming_birthdays:
+            candidates.append((int(item["days_until"]), "birthday", item))
+        for item in data.upcoming_anniversaries:
+            candidates.append((int(item["days_until"]), "anniversary", item))
+        for item in data.upcoming_memorials:
+            candidates.append((int(item["days_until"]), "memorial", item))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda c: (c[0], c[1]))
+        _, kind, item = candidates[0]
+        return kind, item
+
+    @property
+    def native_value(self) -> int | None:
+        soonest = self._soonest()
+        if soonest is None:
+            return None
+        return int(soonest[1]["days_until"])
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data
+        if data is None:
+            return {}
+        attrs: dict[str, Any] = {
+            "birthdays": list(data.upcoming_birthdays),
+            "anniversaries": list(data.upcoming_anniversaries),
+            "memorials": list(data.upcoming_memorials),
         }
+        soonest = self._soonest()
+        if soonest is not None:
+            kind, item = soonest
+            attrs["next_kind"] = kind
+            if kind == "birthday":
+                attrs["next_label"] = item.get("name")
+            elif kind == "anniversary":
+                attrs["next_label"] = " & ".join(item.get("names") or [])
+            else:
+                attrs["next_label"] = item.get("name")
+        return attrs

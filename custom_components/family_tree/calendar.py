@@ -1,4 +1,4 @@
-"""Calendar platform for birthdays and anniversaries."""
+"""Calendar platform for birthdays, anniversaries, and memorials."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ async def async_setup_entry(
 
 
 class FamilyTreeCalendar(CoordinatorEntity[FamilyTreeCoordinator], CalendarEntity):
-    """All-day birthday and anniversary calendar."""
+    """All-day birthday, anniversary, and memorial calendar."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "family_events"
@@ -79,6 +79,20 @@ class FamilyTreeCalendar(CoordinatorEntity[FamilyTreeCoordinator], CalendarEntit
                         summary=f"Anniversary: {names}",
                         description=(f"{item.get('years')} years" if item.get("years") else None),
                         uid=f"anniversary-{item['union_id']}-{item['next_date']}",
+                    ),
+                )
+            )
+        for item in data.upcoming_memorials[:5]:
+            start = date.fromisoformat(item["next_date"])
+            candidates.append(
+                (
+                    item["days_until"],
+                    CalendarEvent(
+                        start=start,
+                        end=start + timedelta(days=1),
+                        summary=f"Memorial: {item['name']}",
+                        description=(f"{item.get('years')} years" if item.get("years") else None),
+                        uid=f"memorial-{item['person_id']}-{item['next_date']}",
                     ),
                 )
             )
@@ -151,6 +165,30 @@ class FamilyTreeCalendar(CoordinatorEntity[FamilyTreeCoordinator], CalendarEntit
                             end=cursor + timedelta(days=1),
                             summary=f"Anniversary: {names}",
                             uid=f"anniversary-{union.id}-{cursor.isoformat()}",
+                        )
+                    )
+                    cursor = _next_occurrence(month, day, cursor + timedelta(days=1))
+
+            for ev in repo.list_events_by_type(EventType.DEATH.value):
+                if ev.subject_type != SubjectType.PERSON:
+                    continue
+                person = repo.get_person(ev.subject_id)
+                if person is None:
+                    continue
+                parsed = parse_gedcom_date(ev.date_text)
+                sort = ev.sort_date or (parsed.sort_date if parsed else None)
+                md = _month_day_from_sort(sort)
+                if md is None or not sort or len(sort) < 10:
+                    continue
+                month, day = md
+                cursor = _next_occurrence(month, day, start_d)
+                while cursor < end_d:
+                    events.append(
+                        CalendarEvent(
+                            start=cursor,
+                            end=cursor + timedelta(days=1),
+                            summary=f"Memorial: {display_name(person)}",
+                            uid=f"memorial-{person.id}-{cursor.isoformat()}",
                         )
                     )
                     cursor = _next_occurrence(month, day, cursor + timedelta(days=1))

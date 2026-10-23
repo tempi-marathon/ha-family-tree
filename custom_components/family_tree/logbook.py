@@ -1,4 +1,4 @@
-"""Logbook descriptions for Family Tree birthday/anniversary events."""
+"""Logbook descriptions for Family Tree birthday/anniversary/memorial events."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from homeassistant.components.logbook import (
 from homeassistant.const import ATTR_NAME
 from homeassistant.core import Event, HomeAssistant, callback
 
-from .const import DOMAIN, EVENT_ANNIVERSARY, EVENT_BIRTHDAY
+from .const import DOMAIN, EVENT_ANNIVERSARY, EVENT_BIRTHDAY, EVENT_MEMORIAL
 
 
 @callback
@@ -48,5 +48,17 @@ def async_describe_events(
             ATTR_NAME: label,
         }
 
+    @callback
+    def _describe_memorial(event: Event) -> dict[str, Any]:
+        name = event.data.get("name") or "Someone"
+        years = event.data.get("years")
+        message = f"{name} — {years} year memorial" if years is not None else f"{name}'s memorial"
+        return {
+            LOGBOOK_ENTRY_NAME: "Family Tree",
+            LOGBOOK_ENTRY_MESSAGE: message,
+            ATTR_NAME: name,
+        }
+
     async_describe_event(DOMAIN, EVENT_BIRTHDAY, _describe_birthday)
     async_describe_event(DOMAIN, EVENT_ANNIVERSARY, _describe_anniversary)
+    async_describe_event(DOMAIN, EVENT_MEMORIAL, _describe_memorial)
