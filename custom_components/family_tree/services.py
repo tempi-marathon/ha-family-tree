@@ -38,6 +38,7 @@ ATTR_IS_LIVING = "is_living"
 ATTR_NOTES = "notes"
 ATTR_HA_USER_ID = "ha_user_id"
 ATTR_PERSON_ID = "person_id"
+ATTR_ANONYMIZE_LIVING = "anonymize_living"
 
 
 def _bounded_string(max_length: int):
@@ -74,6 +75,7 @@ LINK_USER_SCHEMA = vol.Schema(
 EXPORT_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+        vol.Optional(ATTR_ANONYMIZE_LIVING, default=False): cv.boolean,
     }
 )
 
@@ -124,7 +126,11 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def async_export(call: ServiceCall) -> dict[str, Any]:
         await async_require_admin_or_automation(hass, call.context.user_id)
         coordinator = get_coordinator(hass, config_entry_id=entry_id_from_call_data(call.data))
-        text = await hass.async_add_executor_job(export_gedcom, coordinator.repo.db)
+        anonymize = bool(call.data.get(ATTR_ANONYMIZE_LIVING, False))
+        db = coordinator.repo.db
+        text = await hass.async_add_executor_job(
+            lambda: export_gedcom(db, anonymize_living=anonymize)
+        )
         return {"gedcom": text}
 
     hass.services.async_register(

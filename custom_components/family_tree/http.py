@@ -168,17 +168,24 @@ class FamilyTreeExportGedcomView(HomeAssistantView):
             _LOGGER.exception("GEDCOM export coordinator lookup failed")
             return self.json_message("Family Tree is not available", HTTPStatus.BAD_REQUEST)
 
-        text = await hass.async_add_executor_job(export_gedcom, coordinator.repo.db)
+        raw = (request.query.get("anonymize_living") or "").strip().lower()
+        anonymize = raw in ("1", "true", "yes")
+        db = coordinator.repo.db
+        text = await hass.async_add_executor_job(
+            lambda: export_gedcom(db, anonymize_living=anonymize)
+        )
+        filename = "family_tree_private.ged" if anonymize else "family_tree.ged"
         _LOGGER.info(
-            "GEDCOM export ok (bytes=%s revision=%s)",
+            "GEDCOM export ok (bytes=%s revision=%s anonymize_living=%s)",
             len(text.encode("utf-8")),
             coordinator.repo.get_revision(),
+            anonymize,
         )
         return web.Response(
             body=text.encode("utf-8"),
             content_type="text/plain",
             headers={
-                "Content-Disposition": 'attachment; filename="family_tree.ged"',
+                "Content-Disposition": f'attachment; filename="{filename}"',
             },
         )
 

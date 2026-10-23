@@ -65,6 +65,9 @@ const EN = {
   read_only: "Read-only — admin required to edit.",
   settings_gedcom: "GEDCOM",
   settings_gedcom_export_hint: "Download the full tree as a .ged file.",
+  anonymize_living: "Anonymize living people",
+  anonymize_living_hint:
+    "Living names become “Living”, dates and notes are stripped, tree links stay. The file is still plain text — share with care.",
   import_gedcom: "Import GEDCOM",
   export_gedcom: "Export GEDCOM",
   link_ha_user: "Home Assistant user",
@@ -300,6 +303,9 @@ const NL: Record<LocaleKey, string> = {
   read_only: "Alleen-lezen — beheerder nodig om te bewerken.",
   settings_gedcom: "GEDCOM",
   settings_gedcom_export_hint: "Download de volledige stamboom als .ged-bestand.",
+  anonymize_living: "Levende personen anonimiseren",
+  anonymize_living_hint:
+    "Namen van levenden worden “Living”, datums en notities verdwijnen, familiebanden blijven. Het bestand blijft platte tekst — deel met zorg.",
   import_gedcom: "GEDCOM importeren",
   export_gedcom: "GEDCOM exporteren",
   link_ha_user: "Home Assistant-gebruiker",

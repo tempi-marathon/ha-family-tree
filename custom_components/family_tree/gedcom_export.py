@@ -46,8 +46,14 @@ def _fmt_coord(lat: float | None, lon: float | None) -> list[str]:
     ]
 
 
-def export_gedcom(db: Database) -> str:
-    """Serialize the database to a GEDCOM 5.5.1 string."""
+def export_gedcom(db: Database, *, anonymize_living: bool = False) -> str:
+    """Serialize the database to a GEDCOM 5.5.1 string.
+
+    When ``anonymize_living`` is True, living people keep INDI/FAM structure
+    (SEX, FAMS/FAMC) but names become ``Living //``, ``RESN privacy`` is set,
+    and personal notes/events/citations are omitted. Union events are omitted
+    when any partner is living.
+    """
     lines: list[str] = [
         "0 HEAD",
         "1 SOUR HA-FAMILY-TREE",
@@ -81,8 +87,11 @@ def export_gedcom(db: Database) -> str:
         "SELECT * FROM persons WHERE deleted_at IS NULL ORDER BY surname, given_names"
     )
     person_xref: dict[str, str] = {}
+    living_ids: set[str] = set()
     for i, row in enumerate(persons, start=1):
         person_xref[row["id"]] = _xref("I", i)
+        if anonymize_living and Person.from_dict(dict(row)).is_living:
+            living_ids.add(row["id"])
 
     # Preload fam membership for FAMS/FAMC
     unions = db.fetchall("SELECT * FROM unions WHERE deleted_at IS NULL ORDER BY created_at")
@@ -162,27 +171,33 @@ def export_gedcom(db: Database) -> str:
     for row in persons:
         xref = person_xref[row["id"]]
         person = Person.from_dict(dict(row))
+        redact = person.id in living_ids
         lines.append(f"0 {xref} INDI")
-        given = person.given_names or ""
-        surname = person.surname or ""
-        if person.surname_prefix:
-            surname_part = f"{person.surname_prefix} {surname}".strip()
+        if redact:
+            lines.append("1 NAME Living //")
+            lines.append(f"1 SEX {_SEX_OUT.get(person.sex, 'U')}")
+            lines.append("1 RESN privacy")
         else:
-            surname_part = surname
-        lines.append(f"1 NAME {given} /{surname_part}/")
-        if given:
-            lines.append(f"2 GIVN {given}")
-        if person.surname_prefix:
-            lines.append(f"2 SPFX {person.surname_prefix}")
-        if surname:
-            lines.append(f"2 SURN {surname}")
-        if person.call_name:
-            lines.append(f"2 NICK {person.call_name}")
-        lines.append(f"1 SEX {_SEX_OUT.get(person.sex, 'U')}")
-        if person.notes:
-            lines.append(f"1 NOTE {person.notes}")
-        emit_event(SubjectType.PERSON.value, person.id)
-        emit_citations(SubjectType.PERSON.value, person.id)
+            given = person.given_names or ""
+            surname = person.surname or ""
+            if person.surname_prefix:
+                surname_part = f"{person.surname_prefix} {surname}".strip()
+            else:
+                surname_part = surname
+            lines.append(f"1 NAME {given} /{surname_part}/")
+            if given:
+                lines.append(f"2 GIVN {given}")
+            if person.surname_prefix:
+                lines.append(f"2 SPFX {person.surname_prefix}")
+            if surname:
+                lines.append(f"2 SURN {surname}")
+            if person.call_name:
+                lines.append(f"2 NICK {person.call_name}")
+            lines.append(f"1 SEX {_SEX_OUT.get(person.sex, 'U')}")
+            if person.notes:
+                lines.append(f"1 NOTE {person.notes}")
+            emit_event(SubjectType.PERSON.value, person.id)
+            emit_citations(SubjectType.PERSON.value, person.id)
         for union_id in fams_for_person.get(person.id, []):
             lines.append(f"1 FAMS {union_xref[union_id]}")
         if person.id in famc_for_child:
@@ -210,7 +225,9 @@ def export_gedcom(db: Database) -> str:
                 lines.append(f"2 PEDI {pedi}")
         if row["known_children_count"] is not None:
             lines.append(f"1 NCHI {row['known_children_count']}")
-        emit_event(SubjectType.UNION.value, row["id"])
+        any_living_partner = any(pid in living_ids for pid, _ in partners)
+        if not any_living_partner:
+            emit_event(SubjectType.UNION.value, row["id"])
 
     lines.append("0 TRLR")
     return "\n".join(lines) + "\n"
