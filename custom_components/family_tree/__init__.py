@@ -25,6 +25,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Family Tree from a config entry."""
+    from .cards import async_setup_cards
     from .coordinator import FamilyTreeCoordinator
     from .db import Database
     from .gazetteer import Gazetteer
@@ -56,6 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_register_websocket(hass)
     async_register_http(hass)
     await async_setup_panel(hass)
+    await async_setup_cards(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, [Platform(p) for p in PLATFORMS])
 
@@ -65,6 +67,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    from .cards import async_unload_cards
     from .coordinator import FamilyTreeCoordinator
     from .panel import async_unregister_panel
     from .services import async_unregister_services
@@ -78,6 +81,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not hass.data[DOMAIN]:
             async_unregister_services(hass)
             async_unregister_panel(hass)
+            async_unload_cards(hass)
             hass.data.pop(DOMAIN, None)
     return unload_ok
 
