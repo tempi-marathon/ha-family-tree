@@ -125,9 +125,7 @@ def _ensure_homeassistant_stubs() -> None:
     modules["homeassistant.helpers.event"].async_track_time_change = MagicMock(
         return_value=MagicMock()
     )
-    modules["homeassistant.helpers.event"].async_call_later = MagicMock(
-        return_value=MagicMock()
-    )
+    modules["homeassistant.helpers.event"].async_call_later = MagicMock(return_value=MagicMock())
     modules["homeassistant.core"].HomeAssistant = MagicMock
     modules["homeassistant.core"].Event = MagicMock
     modules["homeassistant.core"].callback = lambda f: f
