@@ -36,12 +36,8 @@ def _repo(tmp_path: Path) -> Repository:
 
 def test_upcoming_memorials_precise_dates_only(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    precise = repo.add_person(
-        Person(given_names="Ada", surname="Lovelace", is_living=False)
-    )
-    year_only = repo.add_person(
-        Person(given_names="Year", surname="Only", is_living=False)
-    )
+    precise = repo.add_person(Person(given_names="Ada", surname="Lovelace", is_living=False))
+    year_only = repo.add_person(Person(given_names="Year", surname="Only", is_living=False))
     repo.add_event(
         Event(
             subject_type=SubjectType.PERSON,
@@ -77,9 +73,7 @@ def test_upcoming_memorials_includes_death_even_if_flagged_living(
     tmp_path: Path,
 ) -> None:
     repo = _repo(tmp_path)
-    person = repo.add_person(
-        Person(given_names="Misflagged", surname="Living", is_living=True)
-    )
+    person = repo.add_person(Person(given_names="Misflagged", surname="Living", is_living=True))
     repo.add_event(
         Event(
             subject_type=SubjectType.PERSON,
@@ -98,12 +92,8 @@ def test_upcoming_memorials_includes_death_even_if_flagged_living(
 
 def test_on_this_day_baptism_and_partnership(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
-    deceased = repo.add_person(
-        Person(given_names="Jan", surname="Baptiste", is_living=False)
-    )
-    living = repo.add_person(
-        Person(given_names="Living", surname="Child", is_living=True)
-    )
+    deceased = repo.add_person(Person(given_names="Jan", surname="Baptiste", is_living=False))
+    living = repo.add_person(Person(given_names="Living", surname="Child", is_living=True))
     a = repo.add_person(Person(given_names="Alex", surname="One"))
     b = repo.add_person(Person(given_names="Blake", surname="Two"))
     union = repo.add_union(

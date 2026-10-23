@@ -91,9 +91,7 @@ class FamilyTreeCalendar(CoordinatorEntity[FamilyTreeCoordinator], CalendarEntit
                         start=start,
                         end=start + timedelta(days=1),
                         summary=f"Memorial: {item['name']}",
-                        description=(
-                            f"{item.get('years')} years" if item.get("years") else None
-                        ),
+                        description=(f"{item.get('years')} years" if item.get("years") else None),
                         uid=f"memorial-{item['person_id']}-{item['next_date']}",
                     ),
                 )

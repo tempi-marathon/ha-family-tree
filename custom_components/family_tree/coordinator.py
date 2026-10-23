@@ -194,9 +194,7 @@ class FamilyTreeCoordinator(DataUpdateCoordinator[FamilyTreeData]):
             on_this_day,
             revision,
         ) = await self.hass.async_add_executor_job(_compute)
-        await self._async_fire_transition_events(
-            birthdays, anniversaries, memorials, today
-        )
+        await self._async_fire_transition_events(birthdays, anniversaries, memorials, today)
         return FamilyTreeData(
             stats=stats,
             upcoming_birthdays=birthdays,

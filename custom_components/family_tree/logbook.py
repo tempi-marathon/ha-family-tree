@@ -52,11 +52,7 @@ def async_describe_events(
     def _describe_memorial(event: Event) -> dict[str, Any]:
         name = event.data.get("name") or "Someone"
         years = event.data.get("years")
-        message = (
-            f"{name} — {years} year memorial"
-            if years is not None
-            else f"{name}'s memorial"
-        )
+        message = f"{name} — {years} year memorial" if years is not None else f"{name}'s memorial"
         return {
             LOGBOOK_ENTRY_NAME: "Family Tree",
             LOGBOOK_ENTRY_MESSAGE: message,
