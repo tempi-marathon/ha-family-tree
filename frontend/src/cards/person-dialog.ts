@@ -1,8 +1,8 @@
 /** Vedurkort-style native <dialog> person quickview for Lovelace cards. */
 
 import { css, html, nothing } from "lit";
-import { getPerson, type PersonDetail } from "../api";
-import { formatLifespanLine } from "../dates_view";
+import { getPerson, type PersonDetail, type PersonDto } from "../api";
+import { formatLifespan } from "../date_format";
 import { personDisplayName } from "../people_view";
 import { renderPersonAvatar } from "../person-avatar";
 import type { HomeAssistant } from "../types";
@@ -10,6 +10,7 @@ import { avatarStyles } from "./avatar-styles";
 import {
   navigateToFamilyTreePerson,
   tt,
+  type CardStringKey,
 } from "./common";
 import { trapFocus } from "./focus-trap";
 import { lockScroll } from "./scroll-lock";
@@ -20,6 +21,28 @@ export interface PersonDialogHost {
   hass: HomeAssistant;
   renderRoot: HTMLElement | DocumentFragment;
   requestUpdate(): void;
+}
+
+function sexLabel(hass: HomeAssistant, sex: string | undefined): string | null {
+  if (!sex || sex === "unknown") return null;
+  const key = `sex_${sex}` as CardStringKey;
+  if (key === "sex_male" || key === "sex_female" || key === "sex_other") {
+    return tt(hass, key);
+  }
+  return null;
+}
+
+function surnameLine(person: PersonDto): string {
+  return [person.surname_prefix, person.surname].filter(Boolean).join(" ").trim();
+}
+
+function kvRow(label: string, value: string | null | undefined) {
+  const text = (value || "").trim();
+  if (!text) return nothing;
+  return html`<div class="ft-kv-row">
+    <dt>${label}</dt>
+    <dd>${text}</dd>
+  </div>`;
 }
 
 /**
@@ -146,20 +169,37 @@ export class PersonDialogController {
     navigateToFamilyTreePerson(id);
   }
 
+  private _renderDetails(person: PersonDto) {
+    const hass = this._host.hass;
+    const lang = hass?.language;
+    const sex = sexLabel(hass, person.sex);
+    const lifespan =
+      person.birth || person.death
+        ? formatLifespan(person.birth, person.death, person.is_living, lang)
+        : "";
+    const rows = [
+      kvRow(tt(hass, "given_names"), person.given_names),
+      kvRow(tt(hass, "call_name"), person.call_name),
+      kvRow(tt(hass, "surname"), surnameLine(person)),
+      sex
+        ? html`<div class="ft-kv-row">
+            <dt>${tt(hass, "sex")}</dt>
+            <dd><span class="ft-sex-badge ft-sex-${person.sex}">${sex}</span></dd>
+          </div>`
+        : nothing,
+      kvRow(tt(hass, "lifespan"), lifespan),
+      kvRow(tt(hass, "notes"), person.notes),
+    ].filter((row) => row !== nothing);
+
+    if (!rows.length) return nothing;
+    return html`<dl class="ft-kv">${rows}</dl>`;
+  }
+
   render() {
     if (!this.openId) return nothing;
     const hass = this._host.hass;
     const person = this._detail?.person;
     const title = person ? personDisplayName(person) : tt(hass, "person");
-    const lifespan = person
-      ? formatLifespanLine({
-          birth_date_text: person.birth?.date_text,
-          birth_sort_date: person.birth?.sort_date,
-          death_date_text: person.death?.date_text,
-          death_sort_date: person.death?.sort_date,
-          is_living: person.is_living,
-        })
-      : "";
 
     return html`
       <dialog
@@ -176,7 +216,17 @@ export class PersonDialogController {
       >
         <div class="ft-modal-inner">
           <div class="ft-modal-header">
-            <h2 id="ft-person-modal-title" class="ft-modal-title">${title}</h2>
+            <h2 id="ft-person-modal-title" class="ft-modal-head">
+              ${person
+                ? html`${renderPersonAvatar(person, {
+                    size: "md",
+                    hass,
+                    deceasedOverlay: true,
+                    isLiving: person.is_living,
+                  })}
+                  <span class="ft-modal-title">${title}</span>`
+                : html`<span class="ft-modal-title">${title}</span>`}
+            </h2>
             <button type="button" class="ft-modal-close" @click=${() => this.close()}>
               ${tt(hass, "close")}
             </button>
@@ -188,20 +238,7 @@ export class PersonDialogController {
                 ? html`<p class="muted">${this._error}</p>`
                 : person
                   ? html`
-                      <div class="ft-person-hero">
-                        ${renderPersonAvatar(person, {
-                          size: "detail",
-                          hass,
-                          deceasedOverlay: true,
-                          isLiving: person.is_living,
-                        })}
-                        <div class="ft-person-hero-text">
-                          <div class="ft-person-name">${personDisplayName(person)}</div>
-                          ${lifespan
-                            ? html`<div class="muted">${lifespan}</div>`
-                            : nothing}
-                        </div>
-                      </div>
+                      ${this._renderDetails(person)}
                       <button
                         type="button"
                         class="ft-modal-primary"
@@ -263,16 +300,26 @@ export const personDialogStyles = css`
   }
   .ft-modal-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
     padding: 14px 16px 12px;
     flex-shrink: 0;
   }
+  .ft-modal-head {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+  }
   .ft-modal-title {
     margin: 0;
     font-size: 1.1rem;
     font-weight: 650;
+    line-height: 1.3;
+    min-width: 0;
   }
   .ft-modal-close {
     appearance: none;
@@ -285,6 +332,7 @@ export const personDialogStyles = css`
     font-size: 0.9rem;
     font-weight: 600;
     cursor: pointer;
+    flex-shrink: 0;
   }
   .ft-modal-close:hover,
   .ft-modal-close:focus-visible {
@@ -297,19 +345,45 @@ export const personDialogStyles = css`
     padding: 0 16px 16px;
     flex: 1;
     min-height: 0;
-  }
-  .ft-person-hero {
     display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .ft-kv {
+    margin: 0;
+    display: grid;
+    gap: 8px;
+  }
+  .ft-kv-row {
+    display: grid;
+    grid-template-columns: minmax(100px, 38%) 1fr;
+    gap: 8px 12px;
+    align-items: baseline;
+  }
+  .ft-kv dt {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--secondary-text-color);
+  }
+  .ft-kv dd {
+    margin: 0;
+    font-size: 0.95rem;
+    word-break: break-word;
+  }
+  .ft-sex-badge {
+    display: inline-flex;
     align-items: center;
-    gap: 14px;
-    padding: 4px 0 16px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
   }
-  .ft-person-hero-text {
-    min-width: 0;
+  .ft-sex-male {
+    background: color-mix(in srgb, var(--primary-color, #03a9f4) 16%, transparent);
   }
-  .ft-person-name {
-    font-size: 1.05rem;
-    font-weight: 600;
+  .ft-sex-female {
+    background: color-mix(in srgb, #e91e63 14%, transparent);
   }
   .ft-modal-primary {
     appearance: none;
@@ -322,6 +396,7 @@ export const personDialogStyles = css`
     cursor: pointer;
     background: var(--primary-color, #03a9f4);
     color: var(--text-primary-color, #fff);
+    margin-top: auto;
   }
   .ft-modal-primary:hover,
   .ft-modal-primary:focus-visible {

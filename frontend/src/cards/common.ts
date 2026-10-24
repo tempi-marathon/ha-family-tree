@@ -39,6 +39,16 @@ const EN = {
   use_linked_user: "Use linked Home Assistant user",
   search_person: "Search person",
   no_person_results: "No people found",
+  clear_person: "Clear person",
+  given_names: "First name(s)",
+  call_name: "Preferred name",
+  surname: "Last name",
+  sex: "Gender",
+  sex_male: "Male",
+  sex_female: "Female",
+  sex_other: "Other",
+  lifespan: "Lifespan",
+  notes: "Notes",
 } as const;
 
 const NL: Record<keyof typeof EN, string> = {
@@ -76,6 +86,16 @@ const NL: Record<keyof typeof EN, string> = {
   use_linked_user: "Gekoppelde Home Assistant-gebruiker gebruiken",
   search_person: "Zoek persoon",
   no_person_results: "Geen personen gevonden",
+  clear_person: "Persoon wissen",
+  given_names: "Voornaam/voornamen",
+  call_name: "Roepnaam",
+  surname: "Achternaam",
+  sex: "Geslacht",
+  sex_male: "Man",
+  sex_female: "Vrouw",
+  sex_other: "Anders",
+  lifespan: "Levensduur",
+  notes: "Notities",
 };
 
 export type CardStringKey = keyof typeof EN;
