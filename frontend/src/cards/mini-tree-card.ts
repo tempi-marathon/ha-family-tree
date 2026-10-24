@@ -3,9 +3,19 @@
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { getMyLineage, getTree, type TreePayload } from "../api";
-import { flattenChildren, flattenParents, nodeName, partnerNames } from "../tree_view";
+import { renderPersonAvatar } from "../person-avatar";
+import {
+  flattenChildren,
+  flattenParents,
+  flattenPartners,
+  nodeName,
+  type TreeNodeSummary,
+} from "../tree_view";
 import type { HomeAssistant } from "../types";
+import { avatarStyles } from "./avatar-styles";
 import { registerCard, tt } from "./common";
+import "./editor";
+import { personDialogStyles, PersonDialogController } from "./person-dialog";
 
 export interface MiniTreeCardConfig {
   type?: string;
@@ -26,6 +36,7 @@ export class FamilyTreeMiniTreeCard extends LitElement {
   /** Cached linked-user person id so hass updates don't re-hit lineage/mine. */
   private _resolvedPersonId: string | null | undefined = undefined;
   private _loadGen = 0;
+  private _personDialog = new PersonDialogController(this);
 
   static getStubConfig(): MiniTreeCardConfig {
     return { use_linked_user: true };
@@ -47,6 +58,11 @@ export class FamilyTreeMiniTreeCard extends LitElement {
     return 4;
   }
 
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._personDialog.disconnected();
+  }
+
   protected firstUpdated() {
     void this._maybeLoad();
   }
@@ -55,6 +71,7 @@ export class FamilyTreeMiniTreeCard extends LitElement {
     if (changed.has("_config")) {
       void this._maybeLoad();
     }
+    this._personDialog.ensureOpen();
   }
 
   private async _resolvePersonId(): Promise<string | null> {
@@ -109,102 +126,193 @@ export class FamilyTreeMiniTreeCard extends LitElement {
     }
   }
 
+  private _nodeButton(node: TreeNodeSummary, opts: { focus?: boolean; size?: "sm" | "md" } = {}) {
+    const size = opts.size ?? "sm";
+    const avatar = renderPersonAvatar(
+      {
+        id: node.id,
+        given_names: node.name,
+        call_name: "",
+        surname_prefix: "",
+        surname: "",
+        sex: node.sex || "unknown",
+        is_living: Boolean(node.is_living),
+        notes: "",
+        display_name: node.name,
+        profile_media_id: node.profile_media_id ?? undefined,
+      },
+      {
+        size,
+        hass: this.hass,
+        deceasedOverlay: true,
+        isLiving: Boolean(node.is_living),
+        profileMediaId: node.profile_media_id,
+        title: node.name,
+      },
+    );
+    if (!node.id) {
+      return html`<div class="node ${opts.focus ? "node--focus" : ""}">
+        ${avatar}
+        <span class="node-name">${node.name}</span>
+      </div>`;
+    }
+    return html`<button
+      type="button"
+      class="node ${opts.focus ? "node--focus" : ""}"
+      @click=${() => this._personDialog.open(node.id)}
+    >
+      ${avatar}
+      <span class="node-name">${node.name}</span>
+    </button>`;
+  }
+
   protected render() {
     const title = this._config.title || tt(this.hass, "mini_tree_title");
     if (this._loading && !this._tree) {
       return html`<ha-card header=${title}>
         <div class="pad muted">${tt(this.hass, "loading")}</div>
+        ${this._personDialog.render()}
       </ha-card>`;
     }
     if (this._error) {
       return html`<ha-card header=${title}>
         <div class="pad muted">${this._error}</div>
+        ${this._personDialog.render()}
       </ha-card>`;
     }
     if (!this._tree) {
       return html`<ha-card header=${title}>
         <div class="pad muted">${tt(this.hass, "empty_tree")}</div>
+        ${this._personDialog.render()}
       </ha-card>`;
     }
 
-    const focus = nodeName(this._tree.person as unknown as Record<string, unknown>);
+    const focusPerson = this._tree.person as unknown as Record<string, unknown>;
+    const focus: TreeNodeSummary = {
+      id: String(focusPerson.id || this._loadedFor),
+      name: nodeName(focusPerson),
+      sex: typeof focusPerson.sex === "string" ? focusPerson.sex : undefined,
+      is_living: Boolean(focusPerson.is_living),
+      profile_media_id:
+        typeof focusPerson.profile_media_id === "string"
+          ? focusPerson.profile_media_id
+          : null,
+    };
     const parents = flattenParents(this._tree.parents);
-    const children = flattenChildren(this._tree.children);
-    const partners = partnerNames(
+    const partners = flattenPartners(
       this._tree.partners as unknown as Array<Record<string, unknown>>,
     );
+    const children = flattenChildren(this._tree.children);
 
     return html`<ha-card header=${title}>
       <div class="tree">
         ${parents.length
-          ? html`<section>
-              <h4>${tt(this.hass, "parents")}</h4>
-              <ul>
-                ${parents.map((p) => html`<li>${p.name}</li>`)}
-              </ul>
-            </section>`
+          ? html`<div class="row row--parents">
+              ${parents.map((p) => this._nodeButton(p))}
+            </div>
+            <div class="connector connector--parents" aria-hidden="true"></div>`
           : nothing}
-        <section class="focus">
-          <div class="focus-name">${focus}</div>
-        </section>
-        ${partners.length
-          ? html`<section>
-              <h4>${tt(this.hass, "partners")}</h4>
-              <ul>
-                ${partners.map((n) => html`<li>${n}</li>`)}
-              </ul>
-            </section>`
-          : nothing}
+
+        <div class="row row--focus">
+          ${this._nodeButton(focus, { focus: true, size: "md" })}
+          ${partners.map((p) => this._nodeButton(p, { size: "md" }))}
+        </div>
+
         ${children.length
-          ? html`<section>
-              <h4>${tt(this.hass, "children")}</h4>
-              <ul>
-                ${children.map((c) => html`<li>${c.name}</li>`)}
-              </ul>
-            </section>`
+          ? html`<div class="connector connector--children" aria-hidden="true"></div>
+            <div class="row row--children">
+              ${children.map((c) => this._nodeButton(c))}
+            </div>`
           : nothing}
       </div>
+      ${this._personDialog.render()}
     </ha-card>`;
   }
 
-  static styles = css`
-    .pad {
-      padding: 12px 16px 16px;
-    }
-    .muted {
-      color: var(--secondary-text-color);
-    }
-    .tree {
-      padding: 8px 16px 16px;
-      display: grid;
-      gap: 12px;
-    }
-    h4 {
-      margin: 0 0 4px;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: var(--secondary-text-color);
-      font-weight: 600;
-    }
-    ul {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-    }
-    li {
-      padding: 2px 0;
-    }
-    .focus {
-      padding: 10px 12px;
-      border-radius: 8px;
-      background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
-    }
-    .focus-name {
-      font-size: 1.1rem;
-      font-weight: 600;
-    }
-  `;
+  static styles = [
+    avatarStyles,
+    personDialogStyles,
+    css`
+      .pad {
+        padding: 12px 16px 16px;
+      }
+      .muted {
+        color: var(--secondary-text-color);
+      }
+      .tree {
+        padding: 12px 16px 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px 16px;
+        width: 100%;
+      }
+      .connector {
+        width: 2px;
+        height: 14px;
+        background: var(--divider-color, rgba(0, 0, 0, 0.18));
+        margin: 2px 0;
+      }
+      .connector--parents {
+        position: relative;
+      }
+      .connector--parents::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 50%;
+        width: min(120px, 40%);
+        height: 2px;
+        background: var(--divider-color, rgba(0, 0, 0, 0.18));
+        transform: translate(-50%, -100%);
+      }
+      .node {
+        appearance: none;
+        border: none;
+        background: transparent;
+        padding: 6px 8px;
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        max-width: 110px;
+        cursor: pointer;
+        color: inherit;
+        font: inherit;
+      }
+      .node:hover,
+      .node:focus-visible {
+        background: var(--secondary-background-color, rgba(0, 0, 0, 0.04));
+        outline: none;
+      }
+      .node--focus {
+        background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
+        box-shadow: inset 0 0 0 1px var(--divider-color, rgba(0, 0, 0, 0.12));
+        max-width: 140px;
+      }
+      .node-name {
+        font-size: 0.8rem;
+        font-weight: 500;
+        text-align: center;
+        line-height: 1.25;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      .node--focus .node-name {
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+    `,
+  ];
 }
 
 @customElement("family-tree-mini-tree-card-editor")
@@ -227,77 +335,17 @@ export class FamilyTreeMiniTreeCardEditor extends LitElement {
   }
 
   protected render() {
-    return html`<div class="form">
-      <label class="check">
-        <input
-          type="checkbox"
-          .checked=${this._config.use_linked_user !== false}
-          @change=${(e: Event) => {
-            this._config = {
-              ...this._config,
-              use_linked_user: (e.target as HTMLInputElement).checked,
-            };
-            this._fire();
-          }}
-        />
-        Use linked Home Assistant user
-      </label>
-      <label>
-        Person ID
-        <input
-          type="text"
-          .value=${this._config.person_id || ""}
-          placeholder="optional override"
-          @change=${(e: Event) => {
-            this._config = {
-              ...this._config,
-              person_id: (e.target as HTMLInputElement).value.trim() || undefined,
-            };
-            this._fire();
-          }}
-        />
-      </label>
-      <label>
-        Title
-        <input
-          type="text"
-          .value=${this._config.title || ""}
-          @change=${(e: Event) => {
-            this._config = {
-              ...this._config,
-              title: (e.target as HTMLInputElement).value.trim() || undefined,
-            };
-            this._fire();
-          }}
-        />
-      </label>
-    </div>`;
+    return html`<family-tree-card-editor-form
+      .hass=${this.hass}
+      .config=${this._config}
+      .showPersonPicker=${true}
+      .showLinkedUser=${true}
+      @config-changed=${(e: CustomEvent) => {
+        this._config = { use_linked_user: true, ...e.detail.config };
+        this._fire();
+      }}
+    ></family-tree-card-editor-form>`;
   }
-
-  static styles = css`
-    .form {
-      display: grid;
-      gap: 12px;
-      padding: 4px 0;
-    }
-    label {
-      display: grid;
-      gap: 4px;
-      font-size: 0.85rem;
-    }
-    label.check {
-      grid-template-columns: auto 1fr;
-      align-items: center;
-      gap: 8px;
-    }
-    input[type="text"] {
-      padding: 8px;
-      border-radius: 4px;
-      border: 1px solid var(--divider-color);
-      background: var(--card-background-color);
-      color: var(--primary-text-color);
-    }
-  `;
 }
 
 registerCard({

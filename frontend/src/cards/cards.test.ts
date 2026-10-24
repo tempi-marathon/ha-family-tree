@@ -6,6 +6,8 @@ import type { HomeAssistant } from "../types";
 vi.mock("../api", () => ({
   getMyLineage: vi.fn(),
   getTree: vi.fn(),
+  getPerson: vi.fn(),
+  listPersons: vi.fn(),
 }));
 
 import { getMyLineage, getTree } from "../api";
@@ -24,9 +26,9 @@ function hassWithSensors(): HomeAssistant {
         entity_id: "sensor.family_tree_upcoming_events",
         state: "2",
         attributes: {
-          birthdays: [{ name: "Ada", days_until: 3, age: 30 }],
+          birthdays: [{ name: "Ada", days_until: 3, age: 30, person_id: "ada" }],
           anniversaries: [],
-          memorials: [{ name: "Sam", days_until: 1, years: 10 }],
+          memorials: [{ name: "Sam", days_until: 1, years: 10, person_id: "sam" }],
         },
       },
       "sensor.family_tree_on_this_day": {
@@ -89,6 +91,8 @@ describe("family-tree-upcoming-card", () => {
     expect(text).toContain("Ada");
     expect(text).toContain("Sam");
     expect(text).toMatch(/Birthday|Memorial/i);
+    expect(text).toContain("turns 30");
+    expect(text).toContain("10 years");
   });
 
   it("shows missing-entity when sensor is absent", async () => {

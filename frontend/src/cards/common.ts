@@ -27,8 +27,19 @@ const EN = {
   days_tomorrow: "tomorrow",
   days_in: "in %s days",
   years_ago: "%s years ago",
+  turns_age: "turns %s",
+  years_count: "%s years",
   loading: "Loading…",
   error: "Could not load",
+  close: "Close",
+  open_in_family_tree: "Open in Family Tree",
+  entity: "Entity",
+  title: "Title",
+  max_items: "Max items",
+  person: "Person",
+  use_linked_user: "Use linked Home Assistant user",
+  search_person: "Search person",
+  no_person_results: "No people found",
 } as const;
 
 const NL: Record<keyof typeof EN, string> = {
@@ -54,8 +65,19 @@ const NL: Record<keyof typeof EN, string> = {
   days_tomorrow: "morgen",
   days_in: "over %s dagen",
   years_ago: "%s jaar geleden",
+  turns_age: "wordt %s",
+  years_count: "%s jaar",
   loading: "Laden…",
   error: "Kon niet laden",
+  close: "Sluiten",
+  open_in_family_tree: "Open in stamboom",
+  entity: "Entiteit",
+  title: "Titel",
+  max_items: "Maximum items",
+  person: "Persoon",
+  use_linked_user: "Gekoppelde Home Assistant-gebruiker gebruiken",
+  search_person: "Zoek persoon",
+  no_person_results: "Geen personen gevonden",
 };
 
 export type CardStringKey = keyof typeof EN;
@@ -107,12 +129,27 @@ export interface UpcomingItem {
   label: string;
   days_until: number;
   next_date?: string;
+  /** Formatted age/years fragment (e.g. "turns 30", "10 years"). */
   detail?: string;
+  person_id?: string;
+  person_ids?: string[];
+}
+
+function asPersonIds(raw: unknown, fallback?: unknown): string[] | undefined {
+  if (Array.isArray(raw)) {
+    const ids = raw.map((v) => String(v || "").trim()).filter(Boolean);
+    return ids.length ? ids : undefined;
+  }
+  if (fallback != null && String(fallback).trim()) {
+    return [String(fallback).trim()];
+  }
+  return undefined;
 }
 
 export function collectUpcoming(
   attrs: Record<string, unknown> | undefined,
   limit = 8,
+  hass?: HomeAssistant | null,
 ): UpcomingItem[] {
   const items: UpcomingItem[] = [];
   const birthdays = (attrs?.birthdays as Array<Record<string, unknown>>) || [];
@@ -120,35 +157,61 @@ export function collectUpcoming(
   const memorials = (attrs?.memorials as Array<Record<string, unknown>>) || [];
 
   for (const b of birthdays) {
+    const personId = b.person_id != null ? String(b.person_id) : undefined;
     items.push({
       kind: "birthday",
       label: String(b.name || ""),
       days_until: Number(b.days_until ?? 0),
       next_date: b.next_date != null ? String(b.next_date) : undefined,
-      detail: b.age != null ? String(b.age) : undefined,
+      detail:
+        b.age != null
+          ? tt(hass, "turns_age").replace("%s", String(b.age))
+          : undefined,
+      person_id: personId,
+      person_ids: personId ? [personId] : undefined,
     });
   }
   for (const a of anniversaries) {
     const names = (a.names as string[]) || [];
+    const personIds = asPersonIds(a.person_ids, a.person_id);
     items.push({
       kind: "anniversary",
       label: names.join(" & ") || String(a.name || ""),
       days_until: Number(a.days_until ?? 0),
       next_date: a.next_date != null ? String(a.next_date) : undefined,
-      detail: a.years != null ? String(a.years) : undefined,
+      detail:
+        a.years != null
+          ? tt(hass, "years_count").replace("%s", String(a.years))
+          : undefined,
+      person_id: personIds?.[0],
+      person_ids: personIds,
     });
   }
   for (const m of memorials) {
+    const personId = m.person_id != null ? String(m.person_id) : undefined;
     items.push({
       kind: "memorial",
       label: String(m.name || ""),
       days_until: Number(m.days_until ?? 0),
       next_date: m.next_date != null ? String(m.next_date) : undefined,
-      detail: m.years != null ? String(m.years) : undefined,
+      detail:
+        m.years != null
+          ? tt(hass, "years_count").replace("%s", String(m.years))
+          : undefined,
+      person_id: personId,
+      person_ids: personId ? [personId] : undefined,
     });
   }
   items.sort((a, b) => a.days_until - b.days_until || a.label.localeCompare(b.label));
   return items.slice(0, limit);
+}
+
+export function upcomingMeta(
+  hass: HomeAssistant | null | undefined,
+  item: Pick<UpcomingItem, "days_until" | "detail">,
+): string {
+  const when = daysLabel(hass, item.days_until);
+  return [item.detail, when].filter(Boolean).join(" · ");
 }
 
 export interface OnThisDayItem {
@@ -156,6 +219,8 @@ export interface OnThisDayItem {
   label: string;
   year?: number;
   years_ago?: number;
+  person_id?: string;
+  person_ids?: string[];
 }
 
 export function collectOnThisDay(
@@ -168,11 +233,14 @@ export function collectOnThisDay(
       names.length > 1
         ? names.join(" & ")
         : String(e.name || names[0] || "—");
+    const personIds = asPersonIds(e.person_ids, e.person_id);
     return {
       kind: String(e.kind || "birth"),
       label,
       year: e.year != null ? Number(e.year) : undefined,
       years_ago: e.years_ago != null ? Number(e.years_ago) : undefined,
+      person_id: personIds?.[0],
+      person_ids: personIds,
     };
   });
 }
@@ -184,6 +252,12 @@ export function kindLabel(
   const key = kind as CardStringKey;
   if (key in EN) return tt(hass, key);
   return kind;
+}
+
+/** CSS modifier class for kind tinting (e.g. kind--birthday). */
+export function kindClass(kind: string): string {
+  const safe = kind.replace(/[^a-z0-9_-]/gi, "").toLowerCase();
+  return safe ? `kind--${safe}` : "";
 }
 
 export function onThisDayMeta(
@@ -217,4 +291,19 @@ export function registerCard(meta: {
     description: meta.description,
     preview: true,
   });
+}
+
+/** Navigate to the Family Tree panel for a person (HA location-changed). */
+export function navigateToFamilyTreePerson(personId: string): void {
+  const path = `/family_tree?person=${encodeURIComponent(personId)}`;
+  if (typeof history !== "undefined") {
+    history.pushState(null, "", path);
+  }
+  window.dispatchEvent(
+    new CustomEvent("location-changed", {
+      detail: { replace: false },
+      bubbles: true,
+      composed: true,
+    }),
+  );
 }

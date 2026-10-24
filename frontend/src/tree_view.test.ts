@@ -21,9 +21,23 @@ describe("flattenParents / children", () => {
   it("maps summaries", () => {
     expect(
       flattenParents([{ id: "1", name: "Parent", sex: "female", is_living: true }]),
-    ).toEqual([{ id: "1", name: "Parent", sex: "female", is_living: true }]);
+    ).toEqual([
+      {
+        id: "1",
+        name: "Parent",
+        sex: "female",
+        is_living: true,
+        profile_media_id: null,
+      },
+    ]);
     expect(flattenChildren([{ id: "2", given_names: "Kid", surname: "X" }])).toEqual([
-      { id: "2", name: "Kid X", sex: undefined, is_living: false },
+      {
+        id: "2",
+        name: "Kid X",
+        sex: undefined,
+        is_living: false,
+        profile_media_id: null,
+      },
     ]);
   });
 });
