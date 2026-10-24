@@ -267,15 +267,25 @@ export class FamilyTreePanel extends LitElement {
   private _charts: Chart[] = [];
   private _revision = 0;
   private _chartsStatsKey = "";
+  /** Person id from `/family_tree?person=` to open after connect. */
+  private _pendingDeepLinkPersonId: string | null = null;
+  private _onLocationChanged = () => {
+    const id = this._readPersonDeepLink();
+    if (!id) return;
+    this._pendingDeepLinkPersonId = id;
+    void this._consumePersonDeepLink();
+  };
 
   connectedCallback(): void {
     super.connectedCallback();
     this._connected = true;
     this._restoreViewState();
+    this._pendingDeepLinkPersonId = this._readPersonDeepLink();
     window.addEventListener("keydown", this._onWindowKeyDown);
     window.addEventListener("click", this._onWindowClick);
     window.addEventListener("scroll", this._onWindowScroll, true);
     window.addEventListener("resize", this._onWindowScroll);
+    window.addEventListener("location-changed", this._onLocationChanged);
     if (typeof window.matchMedia === "function") {
       this._mql = window.matchMedia(MOBILE_QUERY);
       this._isMobile = this._mql.matches;
@@ -291,6 +301,7 @@ export class FamilyTreePanel extends LitElement {
     window.removeEventListener("click", this._onWindowClick);
     window.removeEventListener("scroll", this._onWindowScroll, true);
     window.removeEventListener("resize", this._onWindowScroll);
+    window.removeEventListener("location-changed", this._onLocationChanged);
     this._mql?.removeEventListener("change", this._onMediaChange);
     this._mql = null;
     this._unsub?.();
@@ -376,6 +387,36 @@ export class FamilyTreePanel extends LitElement {
     );
   }
 
+  private _readPersonDeepLink(): string | null {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      const id = (params.get("person") || "").trim();
+      return id || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private _clearPersonDeepLink() {
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has("person")) return;
+      url.searchParams.delete("person");
+      const next = `${url.pathname}${url.search}${url.hash}`;
+      history.replaceState(history.state, "", next);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async _consumePersonDeepLink() {
+    const id = this._pendingDeepLinkPersonId;
+    if (!id || !this.hass) return;
+    this._pendingDeepLinkPersonId = null;
+    this._clearPersonDeepLink();
+    await this._openPerson(id);
+  }
+
   private async _connect() {
     if (!this.hass || this._unsub) return;
     try {
@@ -388,6 +429,7 @@ export class FamilyTreePanel extends LitElement {
         }
       });
       this._error = "";
+      await this._consumePersonDeepLink();
     } catch (err) {
       this._error = formatHassError(err);
     } finally {

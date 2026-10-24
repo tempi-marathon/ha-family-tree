@@ -399,11 +399,13 @@ def _upcoming_anniversaries(
         if days > within_days:
             continue
         start_year = int(sort[:4])
-        names = [display_name(p) for p in people if p is not None]
+        living = [p for p in people if p is not None]
+        names = [display_name(p) for p in living]
         out.append(
             {
                 "union_id": union.id,
                 "names": names,
+                "person_ids": [p.id for p in living],
                 "next_date": next_date.isoformat(),
                 "days_until": days,
                 "years": next_date.year - start_year,
