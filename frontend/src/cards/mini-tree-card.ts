@@ -24,6 +24,16 @@ export interface MiniTreeCardConfig {
   title?: string;
 }
 
+const MINI_CARD_WIDTH = 110;
+const MINI_GAP = 12;
+
+function groupBusStyle(count: number): string {
+  if (count < 2) return "";
+  const groupWidth = count * MINI_CARD_WIDTH + (count - 1) * MINI_GAP;
+  const inset = ((MINI_CARD_WIDTH / 2) / groupWidth) * 100;
+  return `--tree-bus-left:${inset}%;--tree-bus-right:${inset}%`;
+}
+
 @customElement("family-tree-mini-tree-card")
 export class FamilyTreeMiniTreeCard extends LitElement {
   @property({ attribute: false }) hass!: HomeAssistant;
@@ -126,7 +136,10 @@ export class FamilyTreeMiniTreeCard extends LitElement {
     }
   }
 
-  private _nodeButton(node: TreeNodeSummary, opts: { focus?: boolean; size?: "sm" | "md" } = {}) {
+  private _cardWrap(
+    node: TreeNodeSummary,
+    opts: { focus?: boolean; size?: "sm" | "md"; stemDown?: boolean } = {},
+  ) {
     const size = opts.size ?? "sm";
     const avatar = renderPersonAvatar(
       {
@@ -150,20 +163,32 @@ export class FamilyTreeMiniTreeCard extends LitElement {
         title: node.name,
       },
     );
+    const wrapClass = [
+      "tree-card-wrap",
+      opts.stemDown ? "tree-card-wrap--stem-down" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const nodeClass = ["node", opts.focus ? "node--focus" : ""].filter(Boolean).join(" ");
+
     if (!node.id) {
-      return html`<div class="node ${opts.focus ? "node--focus" : ""}">
-        ${avatar}
-        <span class="node-name">${node.name}</span>
+      return html`<div class=${wrapClass}>
+        <div class=${nodeClass}>
+          ${avatar}
+          <span class="node-name">${node.name}</span>
+        </div>
       </div>`;
     }
-    return html`<button
-      type="button"
-      class="node ${opts.focus ? "node--focus" : ""}"
-      @click=${() => this._personDialog.open(node.id)}
-    >
-      ${avatar}
-      <span class="node-name">${node.name}</span>
-    </button>`;
+    return html`<div class=${wrapClass}>
+      <button
+        type="button"
+        class=${nodeClass}
+        @click=${() => this._personDialog.open(node.id)}
+      >
+        ${avatar}
+        <span class="node-name">${node.name}</span>
+      </button>
+    </div>`;
   }
 
   protected render() {
@@ -203,25 +228,55 @@ export class FamilyTreeMiniTreeCard extends LitElement {
       this._tree.partners as unknown as Array<Record<string, unknown>>,
     );
     const children = flattenChildren(this._tree.children);
+    const hasParents = parents.length > 0;
+    const hasPartners = partners.length > 0;
+    const hasChildren = children.length > 0;
+    const focusStemDown = hasPartners || hasChildren;
+    const partnerStemDown = hasChildren;
+    const parentsBus = groupBusStyle(parents.length);
+    const childrenBus = groupBusStyle(children.length);
 
     return html`<ha-card header=${title}>
       <div class="tree">
-        ${parents.length
-          ? html`<div class="row row--parents">
-              ${parents.map((p) => this._nodeButton(p))}
-            </div>
-            <div class="connector connector--parents" aria-hidden="true"></div>`
+        ${hasParents
+          ? html`<div
+              class="tree-row tree-row--parents ${parents.length >= 2 ? "tree-row--bus" : ""}"
+              style=${parentsBus}
+            >
+              <div class="tree-group">
+                ${parents.map((p) => this._cardWrap(p, { stemDown: true }))}
+              </div>
+            </div>`
           : nothing}
 
-        <div class="row row--focus">
-          ${this._nodeButton(focus, { focus: true, size: "md" })}
-          ${partners.map((p) => this._nodeButton(p, { size: "md" }))}
+        <div
+          class="tree-row tree-row--focus ${hasParents ? "tree-row--stem-up" : ""}"
+        >
+          ${this._cardWrap(focus, {
+            focus: true,
+            size: "md",
+            stemDown: focusStemDown,
+          })}
         </div>
 
-        ${children.length
-          ? html`<div class="connector connector--children" aria-hidden="true"></div>
-            <div class="row row--children">
-              ${children.map((c) => this._nodeButton(c))}
+        ${hasPartners
+          ? html`<div
+              class="tree-row tree-row--partner tree-row--stem-up"
+            >
+              ${partners.map((p) =>
+                this._cardWrap(p, { size: "md", stemDown: partnerStemDown }),
+              )}
+            </div>`
+          : nothing}
+
+        ${hasChildren
+          ? html`<div
+              class="tree-row tree-row--children ${children.length >= 2 ? "tree-row--bus" : ""} tree-row--stem-up"
+              style=${childrenBus}
+            >
+              <div class="tree-group">
+                ${children.map((c) => this._cardWrap(c))}
+              </div>
             </div>`
           : nothing}
       </div>
@@ -240,52 +295,146 @@ export class FamilyTreeMiniTreeCard extends LitElement {
         color: var(--secondary-text-color);
       }
       .tree {
+        --tree-card-width: 110px;
+        --tree-gap: 12px;
+        --tree-connector: 0.9rem;
+        --tree-row-gap: 24px;
+        --tree-line-color: var(--divider-color, rgba(0, 0, 0, 0.18));
         padding: 12px 16px 16px;
         display: flex;
         flex-direction: column;
         align-items: center;
         gap: 0;
       }
-      .row {
+      .tree-row {
         display: flex;
         flex-wrap: wrap;
         justify-content: center;
-        gap: 12px 16px;
+        align-items: stretch;
+        gap: var(--tree-gap);
         width: 100%;
+        position: relative;
+        padding-bottom: var(--tree-row-gap);
       }
-      .connector {
-        width: 2px;
-        height: 14px;
-        background: var(--divider-color, rgba(0, 0, 0, 0.18));
-        margin: 2px 0;
+      .tree-row--partner {
+        padding-bottom: calc(var(--tree-row-gap) / 2);
       }
-      .connector--parents {
+      .tree-row--children {
+        padding-bottom: 0;
+        padding-top: calc(var(--tree-connector) + 2px);
+      }
+      .tree-group {
+        display: flex;
+        justify-content: center;
+        align-items: stretch;
+        flex-wrap: wrap;
+        gap: var(--tree-gap);
+        width: fit-content;
+        max-width: 100%;
+        margin-inline: auto;
         position: relative;
       }
-      .connector--parents::before {
+      .tree-row--bus .tree-group::before {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: var(--tree-bus-left, 12.5%);
+        right: var(--tree-bus-right, 12.5%);
+        border-top: 2px solid var(--tree-line-color);
+        z-index: 0;
+        pointer-events: none;
+      }
+      .tree-row--parents.tree-row--bus .tree-group::before {
+        top: auto;
+        bottom: calc(-1 * var(--tree-connector) + 0.15rem);
+      }
+      .tree-row--children.tree-row--bus .tree-group::before {
+        top: calc(-1 * var(--tree-connector));
+      }
+      .tree-row--stem-up::before {
+        content: "";
+        position: absolute;
+        top: calc(-1 * var(--tree-connector));
+        left: 50%;
+        margin-left: -1px;
+        width: 0;
+        height: var(--tree-connector);
+        border-left: 2px solid var(--tree-line-color);
+        z-index: 0;
+        pointer-events: none;
+      }
+      .tree-row--children.tree-row--stem-up::before {
+        /* Per-child stems handle single-child; multi uses bus + per-card stems */
+        display: none;
+      }
+      .tree-row--children:not(.tree-row--bus)::before {
+        display: block;
         content: "";
         position: absolute;
         top: 0;
         left: 50%;
-        width: min(120px, 40%);
-        height: 2px;
-        background: var(--divider-color, rgba(0, 0, 0, 0.18));
-        transform: translate(-50%, -100%);
+        margin-left: -1px;
+        width: 0;
+        height: var(--tree-connector);
+        border-left: 2px solid var(--tree-line-color);
+        z-index: 0;
+        pointer-events: none;
+      }
+      .tree-card-wrap {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        box-sizing: border-box;
+        width: var(--tree-card-width);
+        min-width: var(--tree-card-width);
+        max-width: var(--tree-card-width);
+        flex: 0 0 var(--tree-card-width);
+        z-index: 1;
+      }
+      .tree-card-wrap--stem-down::after {
+        content: "";
+        position: absolute;
+        bottom: calc(-1 * var(--tree-connector));
+        left: 50%;
+        margin-left: -1px;
+        width: 0;
+        height: var(--tree-connector);
+        border-left: 2px solid var(--tree-line-color);
+        z-index: 0;
+        pointer-events: none;
+      }
+      .tree-row--children .tree-card-wrap::before {
+        content: "";
+        position: absolute;
+        top: calc(-1 * var(--tree-connector));
+        left: 50%;
+        margin-left: -1px;
+        width: 0;
+        height: var(--tree-connector);
+        border-left: 2px solid var(--tree-line-color);
+        z-index: 0;
+        pointer-events: none;
+      }
+      .tree-row--children:not(.tree-row--bus) .tree-card-wrap::before {
+        display: none;
       }
       .node {
         appearance: none;
-        border: none;
-        background: transparent;
-        padding: 6px 8px;
-        border-radius: 10px;
+        box-sizing: border-box;
+        width: 100%;
+        border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+        background: var(--card-background-color, var(--secondary-background-color, #fff));
+        padding: 10px 8px;
+        border-radius: var(--ha-border-radius-lg, 12px);
         display: flex;
         flex-direction: column;
         align-items: center;
         gap: 6px;
-        max-width: 110px;
         cursor: pointer;
         color: inherit;
         font: inherit;
+        flex: 1;
+        min-height: 0;
       }
       .node:hover,
       .node:focus-visible {
@@ -294,8 +443,8 @@ export class FamilyTreeMiniTreeCard extends LitElement {
       }
       .node--focus {
         background: var(--secondary-background-color, rgba(0, 0, 0, 0.06));
-        box-shadow: inset 0 0 0 1px var(--divider-color, rgba(0, 0, 0, 0.12));
-        max-width: 140px;
+        box-shadow: inset 0 0 0 1px var(--primary-color, rgba(3, 169, 244, 0.35));
+        border-color: var(--primary-color, var(--divider-color));
       }
       .node-name {
         font-size: 0.8rem;
@@ -308,7 +457,7 @@ export class FamilyTreeMiniTreeCard extends LitElement {
         -webkit-box-orient: vertical;
       }
       .node--focus .node-name {
-        font-size: 0.9rem;
+        font-size: 0.85rem;
         font-weight: 600;
       }
     `,
