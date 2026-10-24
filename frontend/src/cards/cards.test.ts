@@ -92,7 +92,7 @@ describe("family-tree-upcoming-card", () => {
     expect(text).toContain("Sam");
     expect(text).toMatch(/Birthday|Memorial/i);
     expect(text).toContain("turns 30");
-    expect(text).toContain("10 years");
+    expect(text).toContain("10 years ago");
   });
 
   it("shows missing-entity when sensor is absent", async () => {

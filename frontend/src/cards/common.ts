@@ -28,7 +28,6 @@ const EN = {
   days_in: "in %s days",
   years_ago: "%s years ago",
   turns_age: "turns %s",
-  years_count: "%s years",
   loading: "Loading…",
   error: "Could not load",
   close: "Close",
@@ -66,7 +65,6 @@ const NL: Record<keyof typeof EN, string> = {
   days_in: "over %s dagen",
   years_ago: "%s jaar geleden",
   turns_age: "wordt %s",
-  years_count: "%s jaar",
   loading: "Laden…",
   error: "Kon niet laden",
   close: "Sluiten",
@@ -129,7 +127,7 @@ export interface UpcomingItem {
   label: string;
   days_until: number;
   next_date?: string;
-  /** Formatted age/years fragment (e.g. "turns 30", "10 years"). */
+  /** Formatted age/years fragment (e.g. "turns 30", "10 years ago"). */
   detail?: string;
   person_id?: string;
   person_ids?: string[];
@@ -181,7 +179,7 @@ export function collectUpcoming(
       next_date: a.next_date != null ? String(a.next_date) : undefined,
       detail:
         a.years != null
-          ? tt(hass, "years_count").replace("%s", String(a.years))
+          ? tt(hass, "years_ago").replace("%s", String(a.years))
           : undefined,
       person_id: personIds?.[0],
       person_ids: personIds,
@@ -196,7 +194,7 @@ export function collectUpcoming(
       next_date: m.next_date != null ? String(m.next_date) : undefined,
       detail:
         m.years != null
-          ? tt(hass, "years_count").replace("%s", String(m.years))
+          ? tt(hass, "years_ago").replace("%s", String(m.years))
           : undefined,
       person_id: personId,
       person_ids: personId ? [personId] : undefined,

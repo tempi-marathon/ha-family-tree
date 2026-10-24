@@ -57,10 +57,10 @@ describe("collectUpcoming", () => {
     expect(items).toHaveLength(3);
     expect(items[0].kind).toBe("anniversary");
     expect(items[0].label).toBe("A & B");
-    expect(items[0].detail).toBe("10 years");
+    expect(items[0].detail).toBe("10 years ago");
     expect(items[0].person_ids).toEqual(["p2", "p3"]);
     expect(items[1].kind).toBe("memorial");
-    expect(items[1].detail).toBe("20 years");
+    expect(items[1].detail).toBe("20 years ago");
     expect(items[2].kind).toBe("birthday");
     expect(items[2].detail).toBe("turns 30");
     expect(items[2].person_id).toBe("p1");
