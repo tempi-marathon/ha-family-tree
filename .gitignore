@@ -50,3 +50,6 @@ config/
 # Package lock is committed; ignore npm debug logs
 npm-debug.log*
 !package-lock.json
+
+# Spec Kit feature specs (local planning artifacts, not shipped)
+specs/

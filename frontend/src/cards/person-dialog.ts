@@ -1,10 +1,16 @@
 /** Vedurkort-style native <dialog> person quickview for Lovelace cards. */
 
 import { css, html, nothing } from "lit";
-import { getPerson, type PersonDetail, type PersonDto } from "../api";
+import { getPerson, type PersonDetail, type PersonDto, type TreePayload } from "../api";
 import { formatLifespan } from "../date_format";
 import { personDisplayName } from "../people_view";
 import { renderPersonAvatar } from "../person-avatar";
+import {
+  flattenChildren,
+  flattenParents,
+  flattenPartners,
+  type TreeNodeSummary,
+} from "../tree_view";
 import type { HomeAssistant } from "../types";
 import { avatarStyles } from "./avatar-styles";
 import {
@@ -195,6 +201,71 @@ export class PersonDialogController {
     return html`<dl class="ft-kv">${rows}</dl>`;
   }
 
+  private _renderRelative(node: TreeNodeSummary) {
+    const hass = this._host.hass;
+    const avatar = renderPersonAvatar(
+      {
+        id: node.id,
+        given_names: node.name,
+        call_name: "",
+        surname_prefix: "",
+        surname: "",
+        sex: node.sex || "unknown",
+        is_living: Boolean(node.is_living),
+        notes: "",
+        display_name: node.name,
+        profile_media_id: node.profile_media_id ?? undefined,
+      },
+      {
+        size: "sm",
+        hass,
+        deceasedOverlay: true,
+        isLiving: Boolean(node.is_living),
+        profileMediaId: node.profile_media_id,
+        title: node.name,
+      },
+    );
+    if (!node.id) {
+      return html`<div class="ft-tree-person">
+        ${avatar}<span class="ft-tree-name">${node.name}</span>
+      </div>`;
+    }
+    return html`<button
+      type="button"
+      class="ft-tree-person"
+      @click=${() => this.open(node.id)}
+    >
+      ${avatar}<span class="ft-tree-name">${node.name}</span>
+    </button>`;
+  }
+
+  /** Immediate family (parents, all partners, children) for the quick-view body. */
+  private _renderTree(tree: TreePayload | null) {
+    if (!tree) return nothing;
+    const hass = this._host.hass;
+    const parents = flattenParents(tree.parents);
+    const partners = flattenPartners(
+      tree.partners as unknown as Array<Record<string, unknown>>,
+    );
+    const children = flattenChildren(tree.children);
+    if (!parents.length && !partners.length && !children.length) return nothing;
+
+    const group = (labelKey: CardStringKey, people: TreeNodeSummary[]) =>
+      people.length
+        ? html`<div class="ft-tree-group">
+            <div class="ft-tree-label">${tt(hass, labelKey)}</div>
+            <div class="ft-tree-people">
+              ${people.map((p) => this._renderRelative(p))}
+            </div>
+          </div>`
+        : nothing;
+
+    return html`<div class="ft-tree">
+      ${group("parents", parents)} ${group("partners", partners)}
+      ${group("children", children)}
+    </div>`;
+  }
+
   render() {
     if (!this.openId) return nothing;
     const hass = this._host.hass;
@@ -239,6 +310,7 @@ export class PersonDialogController {
                 : person
                   ? html`
                       ${this._renderDetails(person)}
+                      ${this._renderTree(this._detail?.tree ?? null)}
                       <button
                         type="button"
                         class="ft-modal-primary"
@@ -384,6 +456,52 @@ export const personDialogStyles = css`
   }
   .ft-sex-female {
     background: color-mix(in srgb, #e91e63 14%, transparent);
+  }
+  .ft-tree {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ft-tree-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ft-tree-label {
+    font-size: 0.85rem;
+    color: var(--secondary-text-color);
+  }
+  .ft-tree-people {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .ft-tree-person {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 72px;
+    color: inherit;
+    font: inherit;
+  }
+  .ft-tree-name {
+    font-size: 0.8rem;
+    text-align: center;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+  .ft-tree-person:focus-visible {
+    outline: 2px solid var(--primary-color, #03a9f4);
+    outline-offset: 2px;
+    border-radius: 8px;
   }
   .ft-modal-primary {
     appearance: none;
