@@ -6,6 +6,7 @@ export interface TreeNodeSummary {
   sex?: string;
   is_living?: boolean;
   profile_media_id?: string | null;
+  birth_sort_date?: string | null;
 }
 
 export function nodeName(node: Record<string, unknown> | null | undefined): string {
@@ -28,7 +29,34 @@ function toSummary(node: Record<string, unknown>): TreeNodeSummary {
     is_living: Boolean(node.is_living),
     profile_media_id:
       typeof node.profile_media_id === "string" ? node.profile_media_id : null,
+    birth_sort_date:
+      typeof node.birth_sort_date === "string" ? node.birth_sort_date : null,
   };
+}
+
+/**
+ * Focal person plus siblings, ordered by birth date (oldest first). People with no
+ * known birth date are placed last; ties (and undated people) fall back to a stable
+ * name comparison. Siblings from the backend already include full and half siblings
+ * (shared-parent); step-siblings are excluded server-side.
+ */
+export function flattenSiblings(
+  focus: TreeNodeSummary,
+  siblings: Array<Record<string, unknown>> | undefined,
+): TreeNodeSummary[] {
+  const all = [focus, ...(siblings || []).map(toSummary)];
+  return all.sort((a, b) => {
+    const da = a.birth_sort_date || "";
+    const db = b.birth_sort_date || "";
+    if (da && db) {
+      if (da !== db) return da < db ? -1 : 1;
+    } else if (da) {
+      return -1;
+    } else if (db) {
+      return 1;
+    }
+    return a.name.localeCompare(b.name);
+  });
 }
 
 export function flattenParents(

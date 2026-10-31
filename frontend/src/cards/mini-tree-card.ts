@@ -8,6 +8,7 @@ import {
   flattenChildren,
   flattenParents,
   flattenPartners,
+  flattenSiblings,
   nodeName,
   type TreeNodeSummary,
 } from "../tree_view";
@@ -41,6 +42,8 @@ export class FamilyTreeMiniTreeCard extends LitElement {
   @state() private _tree: TreePayload | null = null;
   @state() private _error = "";
   @state() private _loading = false;
+  /** True when the linked HA user resolved to no person in the tree. */
+  @state() private _notLinked = false;
   /** Person id currently shown in `_tree`. */
   private _loadedFor = "";
   /** Cached linked-user person id so hass updates don't re-hit lineage/mine. */
@@ -62,6 +65,7 @@ export class FamilyTreeMiniTreeCard extends LitElement {
     this._tree = null;
     this._resolvedPersonId = undefined;
     this._error = "";
+    this._notLinked = false;
   }
 
   getCardSize(): number {
@@ -80,6 +84,11 @@ export class FamilyTreeMiniTreeCard extends LitElement {
   protected updated(changed: Map<string, unknown>) {
     if (changed.has("_config")) {
       void this._maybeLoad();
+    } else if (changed.has("hass") && this.hass && !this._loadedFor && !this._loading) {
+      // `hass`/connection became available after first render, or a previous
+      // lineage lookup failed transiently and left us unresolved. Retry without
+      // requiring a config change, page refresh, or app restart.
+      void this._maybeLoad();
     }
     this._personDialog.ensureOpen();
   }
@@ -94,20 +103,34 @@ export class FamilyTreeMiniTreeCard extends LitElement {
     if (this._resolvedPersonId !== undefined) {
       return this._resolvedPersonId;
     }
-    try {
-      const mine = await getMyLineage(this.hass);
-      this._resolvedPersonId = mine.person_id || null;
-    } catch {
-      this._resolvedPersonId = null;
-    }
+    // Let a thrown lineage lookup propagate to the caller: a transient failure
+    // (e.g. the HA connection not yet ready) MUST NOT be cached, so the next
+    // update can retry. Only a successful resolution is cached — including a
+    // genuine "no linked person" result (null).
+    const mine = await getMyLineage(this.hass);
+    this._resolvedPersonId = mine.person_id || null;
     return this._resolvedPersonId;
   }
 
   private async _maybeLoad() {
     if (!this.hass) return;
     const gen = ++this._loadGen;
-    const personId = await this._resolvePersonId();
+    let personId: string | null;
+    try {
+      personId = await this._resolvePersonId();
+    } catch {
+      // Transient lineage failure: leave the card unresolved (not cached) so a
+      // later hass/connection-ready update retries automatically.
+      if (gen === this._loadGen) this._loading = false;
+      return;
+    }
     if (gen !== this._loadGen) return;
+
+    // "Not linked" applies only when the card follows the linked HA user and that
+    // lookup resolved to no person — distinct from an unconfigured card.
+    const usingLinkedUser =
+      !this._config.person_id?.trim() && this._config.use_linked_user !== false;
+    this._notLinked = usingLinkedUser && !personId;
 
     if (!personId) {
       this._tree = null;
@@ -205,6 +228,12 @@ export class FamilyTreeMiniTreeCard extends LitElement {
         ${this._personDialog.render()}
       </ha-card>`;
     }
+    if (this._notLinked) {
+      return html`<ha-card header=${title}>
+        <div class="pad muted">${tt(this.hass, "not_linked")}</div>
+        ${this._personDialog.render()}
+      </ha-card>`;
+    }
     if (!this._tree) {
       return html`<ha-card header=${title}>
         <div class="pad muted">${tt(this.hass, "empty_tree")}</div>
@@ -222,7 +251,12 @@ export class FamilyTreeMiniTreeCard extends LitElement {
         typeof focusPerson.profile_media_id === "string"
           ? focusPerson.profile_media_id
           : null,
+      birth_sort_date:
+        typeof focusPerson.birth_sort_date === "string"
+          ? focusPerson.birth_sort_date
+          : null,
     };
+    const focusRow = flattenSiblings(focus, this._tree.siblings);
     const parents = flattenParents(this._tree.parents);
     const partners = flattenPartners(
       this._tree.partners as unknown as Array<Record<string, unknown>>,
@@ -252,11 +286,17 @@ export class FamilyTreeMiniTreeCard extends LitElement {
         <div
           class="tree-row tree-row--focus ${hasParents ? "tree-row--stem-up" : ""}"
         >
-          ${this._cardWrap(focus, {
-            focus: true,
-            size: "md",
-            stemDown: focusStemDown,
-          })}
+          <div class="tree-group tree-group--focus">
+            ${focusRow.map((p) =>
+              p.id === focus.id
+                ? this._cardWrap(p, {
+                    focus: true,
+                    size: "md",
+                    stemDown: focusStemDown,
+                  })
+                : this._cardWrap(p, { size: "sm" }),
+            )}
+          </div>
         </div>
 
         ${hasPartners
@@ -333,6 +373,10 @@ export class FamilyTreeMiniTreeCard extends LitElement {
         max-width: 100%;
         margin-inline: auto;
         position: relative;
+      }
+      /* Focus + siblings share one row, capped at 3 cards wide before wrapping. */
+      .tree-group--focus {
+        max-width: calc(3 * var(--tree-card-width) + 2 * var(--tree-gap));
       }
       .tree-row--bus .tree-group::before {
         content: "";

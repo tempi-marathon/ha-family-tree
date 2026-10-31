@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   flattenChildren,
   flattenParents,
+  flattenSiblings,
   generationLabel,
   nodeName,
   partnerNames,
+  type TreeNodeSummary,
 } from "./tree_view";
 
 describe("nodeName", () => {
@@ -28,6 +30,7 @@ describe("flattenParents / children", () => {
         sex: "female",
         is_living: true,
         profile_media_id: null,
+        birth_sort_date: null,
       },
     ]);
     expect(flattenChildren([{ id: "2", given_names: "Kid", surname: "X" }])).toEqual([
@@ -37,8 +40,39 @@ describe("flattenParents / children", () => {
         sex: undefined,
         is_living: false,
         profile_media_id: null,
+        birth_sort_date: null,
       },
     ]);
+  });
+});
+
+describe("flattenSiblings", () => {
+  const focus: TreeNodeSummary = {
+    id: "f",
+    name: "Focus",
+    birth_sort_date: "1980-05-01",
+  };
+
+  it("orders focus + siblings by birth date, oldest first", () => {
+    const result = flattenSiblings(focus, [
+      { id: "s1", name: "Older", birth_sort_date: "1978-01-01" },
+      { id: "s2", name: "Younger", birth_sort_date: "1985-01-01" },
+    ]);
+    expect(result.map((s) => s.id)).toEqual(["s1", "f", "s2"]);
+  });
+
+  it("places people without a birth date last, tiebroken by name", () => {
+    const result = flattenSiblings(focus, [
+      { id: "s1", name: "Zoe" },
+      { id: "s2", name: "Amy" },
+    ]);
+    // Focus (dated) first, then undated by name.
+    expect(result.map((s) => s.id)).toEqual(["f", "s2", "s1"]);
+  });
+
+  it("returns only the focus when there are no siblings", () => {
+    expect(flattenSiblings(focus, []).map((s) => s.id)).toEqual(["f"]);
+    expect(flattenSiblings(focus, undefined).map((s) => s.id)).toEqual(["f"]);
   });
 });
 

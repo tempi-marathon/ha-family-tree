@@ -58,3 +58,17 @@ type: custom:family-tree-mini-tree-card
 use_linked_user: true
 # person_id: "<uuid>"  # optional override
 ```
+
+### Card behaviour
+
+- **Mini tree card** shows the focal person with their parents, partner(s), and children,
+  plus the focal person's **siblings** (full and half siblings) on the same row as the
+  person, ordered by birth date and wrapping at three cards per row. Selecting any person —
+  including a sibling — opens the person quick view.
+- With `use_linked_user: true` the card follows the Home Assistant user linked to a person
+  in the tree. It resolves that link on load and recovers on its own if the first lookup is
+  slow or the connection is not yet ready (no page refresh or app restart needed). If the
+  signed-in user is not linked to anyone, the card says so rather than showing a blank card.
+- **Upcoming events** and **On this day** cards open a person quick view that now also shows
+  that person's immediate family (parents, partner(s), children) below the details; selecting
+  a relative there re-opens the quick view for that relative.

@@ -250,6 +250,161 @@ describe("family-tree-mini-tree-card", () => {
     expect(el.shadowRoot?.querySelectorAll(".tree-card-wrap").length).toBeGreaterThanOrEqual(4);
     expect(el.shadowRoot?.querySelector(".node--focus")).toBeTruthy();
   });
+
+  // US1: reliable linked-user resolution
+  it("recovers after a transient lineage failure without re-config", async () => {
+    vi.mocked(getMyLineage)
+      .mockRejectedValueOnce(new Error("connection not ready"))
+      .mockResolvedValue({
+        person_id: "p1",
+        person_name: "Focus Person",
+        relatives: {},
+      });
+    const el = await mount<FamilyTreeMiniTreeCard>("family-tree-mini-tree-card");
+    el.setConfig({ use_linked_user: true });
+    el.hass = emptyHass();
+    await el.updateComplete;
+    await vi.waitFor(() => expect(getMyLineage).toHaveBeenCalled());
+    // First lookup failed → nothing cached, nothing loaded yet.
+    expect(getTree).not.toHaveBeenCalled();
+
+    // A later hass/connection-ready update retries automatically.
+    el.hass = { ...emptyHass(), language: "nl" };
+    await el.updateComplete;
+    await vi.waitFor(() => {
+      expect(el.shadowRoot?.textContent).toContain("Focus Person");
+    });
+    expect(getTree).toHaveBeenCalledWith(expect.anything(), "p1");
+  });
+
+  it("loads once hass arrives after the first render", async () => {
+    const el = await mount<FamilyTreeMiniTreeCard>("family-tree-mini-tree-card");
+    el.setConfig({ use_linked_user: true });
+    await el.updateComplete; // first render, hass not set yet
+    expect(getTree).not.toHaveBeenCalled();
+
+    el.hass = emptyHass();
+    await el.updateComplete;
+    await vi.waitFor(() =>
+      expect(getTree).toHaveBeenCalledWith(expect.anything(), "p1"),
+    );
+  });
+
+  it("shows a not-linked message when the linked user has no person", async () => {
+    vi.mocked(getMyLineage).mockResolvedValue({
+      person_id: "",
+      person_name: "",
+      relatives: {},
+    } as never);
+    const el = await mount<FamilyTreeMiniTreeCard>("family-tree-mini-tree-card");
+    el.setConfig({ use_linked_user: true });
+    el.hass = emptyHass();
+    await el.updateComplete;
+    await vi.waitFor(() => {
+      expect(el.shadowRoot?.textContent).toContain("not linked");
+    });
+    expect(getTree).not.toHaveBeenCalled();
+  });
+
+  it("renders the focal person when the linked person has no relatives", async () => {
+    vi.mocked(getTree).mockResolvedValue({
+      person: { id: "p1", name: "Lonely Person", sex: "unknown", is_living: true },
+      parents: [],
+      grandparents: {},
+      partners: [],
+      children: [],
+      siblings: [],
+    } as never);
+    const el = await mount<FamilyTreeMiniTreeCard>("family-tree-mini-tree-card");
+    el.setConfig({ use_linked_user: true });
+    el.hass = emptyHass();
+    await el.updateComplete;
+    await vi.waitFor(() =>
+      expect(el.shadowRoot?.querySelector(".node--focus")).toBeTruthy(),
+    );
+    expect(el.shadowRoot?.textContent).toContain("Lonely Person");
+    expect(el.shadowRoot?.textContent).not.toContain("not linked");
+  });
+
+  // US2: siblings on the focus row
+  it("renders siblings on the focus row ordered by birth date", async () => {
+    vi.mocked(getTree).mockResolvedValue({
+      person: {
+        id: "p1",
+        name: "Focus Person",
+        sex: "unknown",
+        is_living: true,
+        birth_sort_date: "1980-01-01",
+      },
+      parents: [],
+      grandparents: {},
+      partners: [],
+      children: [],
+      siblings: [
+        { id: "s1", name: "Sib A", birth_sort_date: "1978-01-01" },
+        { id: "s2", name: "Sib B", birth_sort_date: "1982-01-01" },
+        { id: "s3", name: "Sib C", birth_sort_date: "1984-01-01" },
+      ],
+    } as never);
+    const el = await mount<FamilyTreeMiniTreeCard>("family-tree-mini-tree-card");
+    el.setConfig({ use_linked_user: true });
+    el.hass = emptyHass();
+    await el.updateComplete;
+    await vi.waitFor(() =>
+      expect(el.shadowRoot?.querySelector(".tree-group--focus")).toBeTruthy(),
+    );
+    const group = el.shadowRoot!.querySelector(".tree-group--focus")!;
+    const names = [...group.querySelectorAll(".node-name")].map(
+      (n) => n.textContent?.trim() || "",
+    );
+    // Focus (1980) sits between Sib A (1978) and Sib B (1982).
+    expect(names).toEqual(["Sib A", "Focus Person", "Sib B", "Sib C"]);
+    expect(group.querySelectorAll(".tree-card-wrap").length).toBe(4);
+  });
+
+  it("opens the quick-view when a sibling is clicked", async () => {
+    vi.mocked(getTree).mockResolvedValue({
+      person: {
+        id: "p1",
+        name: "Focus Person",
+        sex: "unknown",
+        is_living: true,
+        birth_sort_date: "1980-01-01",
+      },
+      parents: [],
+      grandparents: {},
+      partners: [],
+      children: [],
+      siblings: [{ id: "s1", name: "Sib A", birth_sort_date: "1978-01-01" }],
+    } as never);
+    const el = await mount<FamilyTreeMiniTreeCard>("family-tree-mini-tree-card");
+    el.setConfig({ use_linked_user: true });
+    el.hass = emptyHass();
+    await el.updateComplete;
+    await vi.waitFor(() => {
+      expect(el.shadowRoot?.textContent).toContain("Sib A");
+    });
+    const group = el.shadowRoot!.querySelector(".tree-group--focus")!;
+    const sibBtn = [...group.querySelectorAll("button.node")].find((b) =>
+      b.textContent?.includes("Sib A"),
+    ) as HTMLButtonElement;
+    sibBtn.click();
+    await vi.waitFor(() =>
+      expect(getPerson).toHaveBeenCalledWith(expect.anything(), "s1"),
+    );
+  });
+
+  it("renders only the focus when there are no siblings", async () => {
+    const el = await mount<FamilyTreeMiniTreeCard>("family-tree-mini-tree-card");
+    el.setConfig({ use_linked_user: true });
+    el.hass = emptyHass();
+    await el.updateComplete;
+    await vi.waitFor(() =>
+      expect(el.shadowRoot?.querySelector(".tree-group--focus")).toBeTruthy(),
+    );
+    const group = el.shadowRoot!.querySelector(".tree-group--focus")!;
+    expect(group.querySelectorAll(".tree-card-wrap").length).toBe(1);
+  });
 });
 
 describe("family-tree-card-editor-form", () => {
@@ -374,5 +529,114 @@ describe("PersonDialogController", () => {
     expect(text).toContain("Male");
     expect(text).not.toContain("Preferred name");
     expect(text).not.toContain("Notes");
+  });
+});
+
+describe("PersonDialogController tree section", () => {
+  const basePerson = {
+    id: "p1",
+    given_names: "Focus",
+    call_name: "",
+    surname_prefix: "",
+    surname: "Person",
+    sex: "unknown",
+    is_living: true,
+    notes: "",
+    display_name: "Focus Person",
+  };
+
+  function detailWithTree() {
+    return {
+      person: basePerson,
+      events: [],
+      citations: [],
+      media: [],
+      tree: {
+        person: { id: "p1", name: "Focus Person" },
+        parents: [{ id: "par1", name: "Parent One" }],
+        grandparents: {},
+        partners: [
+          { partners: [{ id: "pt1", name: "Partner A" }] },
+          { partners: [{ id: "pt2", name: "Partner B" }] },
+        ],
+        children: [{ id: "c1", name: "Child One" }],
+        siblings: [],
+      },
+    } as never;
+  }
+
+  async function openDialog(detail: unknown) {
+    vi.mocked(getPerson).mockResolvedValue(detail as never);
+    const host = await mount<FamilyTreeMiniTreeCard>("family-tree-mini-tree-card");
+    host.hass = emptyHass();
+    const dialog = new PersonDialogController(host);
+    dialog.open("p1");
+    await vi.waitFor(() => expect(getPerson).toHaveBeenCalled());
+    const wrap = document.createElement("div");
+    const litRender = await import("lit");
+    const rerender = () => litRender.render(dialog.render(), wrap);
+    await vi.waitFor(() => {
+      rerender();
+      expect(wrap.querySelector(".ft-modal-title")?.textContent).toContain(
+        "Focus Person",
+      );
+    });
+    return { dialog, wrap, rerender };
+  }
+
+  // US3: both the Upcoming and On This Day cards share this controller, so the
+  // tree section proven here is what both cards display.
+  it("shows parents, all partners, and children below the details", async () => {
+    const { wrap } = await openDialog(detailWithTree());
+    const text = wrap.textContent || "";
+    expect(text).toContain("Parent One");
+    expect(text).toContain("Partner A");
+    expect(text).toContain("Partner B");
+    expect(text).toContain("Child One");
+    expect(wrap.querySelectorAll(".ft-tree-group").length).toBe(3);
+  });
+
+  it("re-roots the dialog to a relative when clicked", async () => {
+    const { dialog, wrap } = await openDialog(detailWithTree());
+    vi.mocked(getPerson).mockClear();
+    const relBtn = [...wrap.querySelectorAll("button.ft-tree-person")].find((b) =>
+      b.textContent?.includes("Child One"),
+    ) as HTMLButtonElement;
+    relBtn.click();
+    expect(dialog.openId).toBe("c1");
+    await vi.waitFor(() =>
+      expect(getPerson).toHaveBeenCalledWith(expect.anything(), "c1"),
+    );
+  });
+
+  it("omits the tree section when the person has no relatives", async () => {
+    const { wrap } = await openDialog({
+      person: basePerson,
+      events: [],
+      citations: [],
+      media: [],
+      tree: {
+        person: { id: "p1", name: "Focus Person" },
+        parents: [],
+        grandparents: {},
+        partners: [],
+        children: [],
+        siblings: [],
+      },
+    });
+    expect(wrap.querySelector(".ft-tree")).toBeNull();
+    // Details still render.
+    expect(wrap.textContent).toContain("Focus Person");
+  });
+
+  it("renders unchanged when tree is null", async () => {
+    const { wrap } = await openDialog({
+      person: basePerson,
+      events: [],
+      citations: [],
+      media: [],
+      tree: null,
+    });
+    expect(wrap.querySelector(".ft-tree")).toBeNull();
   });
 });
