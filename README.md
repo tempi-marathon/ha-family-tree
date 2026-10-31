@@ -4,6 +4,8 @@
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.12%2B-41BDF5?style=for-the-badge&logo=homeassistant&logoColor=white)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-green?style=for-the-badge&logo=github&logoColor=white)](SECURITY.md)
+[![Buy me a coffee](https://img.shields.io/badge/Donate-Buy%20me%20a%20coffee-red?style=for-the-badge&logo=kofi)]([https://www.buymeacoffee.com/clooos](https://ko-fi.com/tempi_marathon/tip))
+
 
 Local genealogy for Home Assistant: people, unions, parent–child links, places,
 sources, tree view, GEDCOM import/export, offline place lookup, calendar and
@@ -51,6 +53,11 @@ Full guide: [1. Installation](docs/01-installation.md) ·
 - Tree data lives only in `/config/family_tree/` and HA backups.
 - Do not commit `.ged` or `.db` files to git.
 - Prefer HA MFA when using Nabu Casa remote access.
+
+
+## Donate
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z6A229BZSN)
 
 ## License
 
