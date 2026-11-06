@@ -25,18 +25,19 @@ sensors. Family data stays on your Home Assistant box (SQLite under
 
 ## Install
 
-Family Tree is **not** in the default HACS catalog. Add this GitHub repo as a
-**custom repository**, then install it.
+Family Tree is **not** in the default catalog. Add this GitHub repo as a
+**custom repository** in **Settings → Marketplace** (Home Assistant 2026.11+),
+then install it.
 
-1. HACS → Integrations → ⋮ → **Custom repositories**
-2. Add `https://github.com/tempi-marathon/ha-family-tree`, category **Integration**
-3. Install **Family Tree**, restart Home Assistant
-4. Settings → Devices & Services → Add Integration → **Family Tree**
+[![Add this custom repository in the Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=tempi-marathon&repository=ha-family-tree&category=integration)
 
-[![Add this custom repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tempi-marathon&repository=ha-family-tree&category=integration)
+1. Click the badge above (or add `https://github.com/tempi-marathon/ha-family-tree`
+   as a custom repository, category **Integration**)
+2. Install **Family Tree**, restart Home Assistant
+3. Settings → Devices & Services → Add Integration → **Family Tree**
 
-From **2026.11**, you can add the same custom repository under
-**Settings → Marketplace** (the HACS custom-repo UI still works after upgrade).
+On Home Assistant 2026.10 or older, use HACS instead: HACS → Integrations → ⋮ →
+**Custom repositories**, or [this link](https://my.home-assistant.io/redirect/hacs_repository/?owner=tempi-marathon&repository=ha-family-tree&category=integration).
 
 After install and restart, open the config flow:
 

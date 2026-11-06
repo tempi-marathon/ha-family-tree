@@ -3,25 +3,33 @@
 ## Requirements
 
 - Home Assistant OS / Supervised / Container (2024.12+)
-- [HACS](https://hacs.xyz/) (or **Settings → Marketplace** on Home Assistant 2026.11+)
+- **Settings → Marketplace** (Home Assistant 2026.11+), or [HACS](https://hacs.xyz/) on 2024.12–2026.10
 
-Family Tree is **not** in the default HACS / Marketplace catalog. Install by
-adding this GitHub repo as a **custom repository**.
+Family Tree is **not** in the default catalog. Install by adding this GitHub
+repo as a **custom repository**.
 
 ## Custom repository (recommended)
+
+On Home Assistant 2026.11+:
+
+[![Add this custom repository in the Marketplace](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=tempi-marathon&repository=ha-family-tree&category=integration)
+
+1. Click the badge above, or open **Settings → Marketplace** and add
+   `https://github.com/tempi-marathon/ha-family-tree` as a custom repository
+   (category **Integration**)
+2. Install **Family Tree**
+3. Restart Home Assistant
+4. Settings → Devices & Services → **Add Integration** → Family Tree
+5. Enter a display name (e.g. Family Tree)
+
+### Home Assistant 2026.10 and older (HACS)
 
 1. HACS → Integrations → three-dot menu → **Custom repositories**
 2. Repository: `https://github.com/tempi-marathon/ha-family-tree`
 3. Category: **Integration**
-4. Search for **Family Tree** and install
-5. Restart Home Assistant
-6. Settings → Devices & Services → **Add Integration** → Family Tree
-7. Enter a display name (e.g. Family Tree)
+4. Search for **Family Tree** and install, then continue from step 3 above
 
 [![Add this custom repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=tempi-marathon&repository=ha-family-tree&category=integration)
-
-From **2026.11**, you can add the same custom repository under
-**Settings → Marketplace** (the HACS custom-repo UI still works after upgrade).
 
 After install and restart, open the config flow:
 
