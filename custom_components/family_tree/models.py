@@ -68,6 +68,8 @@ class EventType(StrEnum):
     MARRIAGE = "marriage"
     DIVORCE = "divorce"
     PARTNERSHIP = "partnership"
+    COHABITATION = "cohabitation"
+    ENGAGEMENT = "engagement"
     OCCUPATION = "occupation"
     RESIDENCE = "residence"
 

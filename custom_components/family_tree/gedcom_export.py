@@ -19,8 +19,17 @@ _EVENT_TAG = {
     EventType.BURIAL: "BURI",
     EventType.MARRIAGE: "MARR",
     EventType.DIVORCE: "DIV",
+    EventType.ENGAGEMENT: "ENGA",
+    EventType.COHABITATION: "EVEN",
+    EventType.PARTNERSHIP: "EVEN",
     EventType.OCCUPATION: "OCCU",
     EventType.RESIDENCE: "RESI",
+}
+
+# No standard GEDCOM tag exists for these; they are written as a generic event with a TYPE.
+EVENT_TYPE_LABELS = {
+    EventType.COHABITATION: "Cohabitation",
+    EventType.PARTNERSHIP: "Registered partnership",
 }
 
 _PEDI_OUT = {
@@ -143,6 +152,8 @@ def export_gedcom(db: Database, *, anonymize_living: bool = False) -> str:
                 lines.append(f"1 {tag} {ev['description']}")
             else:
                 lines.append(f"1 {tag}")
+            if et in EVENT_TYPE_LABELS:
+                lines.append(f"2 TYPE {EVENT_TYPE_LABELS[et]}")
             if ev["date_text"]:
                 lines.append(f"2 DATE {ev['date_text']}")
             place = places.get(ev["place_id"]) if ev["place_id"] else None

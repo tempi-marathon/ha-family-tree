@@ -3,6 +3,16 @@
 import Chart from "chart.js/auto";
 import { LitElement, html, nothing } from "lit";
 import { panelStyles } from "./panel_styles";
+import {
+  UNION_EVENT_KINDS,
+  isManualPersonEvent,
+  pickStartEvent,
+  resolveUnionDateText,
+  startEventLabelKey,
+  unionDateFields,
+  unionStartEventType,
+  type DateFormScope,
+} from "./union_form";
 import { renderImportDialogBody, renderDialog } from "./panel_dialogs";
 import { renderPerson, renderPersonDetailsTab, renderRelationshipsTab, renderTreeTab, renderSourcesTab, renderPhotosSection } from "./panel_person_view";
 import { renderSettings, renderUserLinkForm, renderLinkedUsersSettingsBody } from "./panel_settings";
@@ -920,7 +930,7 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _vitalDateFieldsFromText(
-    prefix: "birth" | "death",
+    prefix: string,
     dateText: string,
   ): Record<string, string> {
     const form = gedcomToForm(dateText || "");
@@ -1249,63 +1259,88 @@ export class FamilyTreePanel extends LitElement {
     }, 250);
   }
 
+  private _dateScopeForm(scope: DateFormScope): Record<string, string> {
+    return scope === "union" ? this._unionForm : this._form;
+  }
+
+  private _patchDateScope(scope: DateFormScope, patch: Record<string, string>) {
+    if (scope === "union") this._unionForm = { ...this._unionForm, ...patch };
+    else this._form = { ...this._form, ...patch };
+  }
+
   private _vitalDateTextFromForm(
-    prefix: "birth" | "death",
+    prefix: string,
+    scope: DateFormScope = "person",
   ): { text: string; error: boolean } {
-    const mode = this._form[`${prefix}_date_mode`] || "simple";
+    const form = this._dateScopeForm(scope);
+    const mode = form[`${prefix}_date_mode`] || "simple";
     if (mode === "simple") {
-      const isoTrim = (this._form[`${prefix}_date_iso`] || "").trim();
+      const isoTrim = (form[`${prefix}_date_iso`] || "").trim();
       if (!isoTrim) return { text: "", error: false };
       const gedcom = isoToGedcomDate(isoTrim);
       return gedcom ? { text: gedcom, error: false } : { text: "", error: true };
     }
-    const qualifier = (this._form[`${prefix}_date_qualifier`] ||
-      "exact") as DateQualifier;
+    const qualifier = (form[`${prefix}_date_qualifier`] || "exact") as DateQualifier;
     const built = buildGedcomDate(
       qualifier,
-      this._form[`${prefix}_date_first`] || "",
-      this._form[`${prefix}_date_second`] || "",
+      form[`${prefix}_date_first`] || "",
+      form[`${prefix}_date_second`] || "",
     );
     if (built.error) return { text: "", error: true };
     return { text: built.value, error: false };
   }
 
-  private _togglePersonVitalDateMode(prefix: "birth" | "death") {
-    const mode = this._form[`${prefix}_date_mode`] || "simple";
+  /** Date text of a couple date field; an untouched legacy free-text date is kept verbatim. */
+  private _unionDateText(prefix: "start" | "end"): { text: string; error: boolean } {
+    const form = this._unionForm;
+    return resolveUnionDateText(
+      this._vitalDateTextFromForm(prefix, "union"),
+      {
+        mode: form[`${prefix}_date_mode`] || "",
+        qualifier: form[`${prefix}_date_qualifier`] || "",
+        first: form[`${prefix}_date_first`] || "",
+      },
+      form[`${prefix}_date_orig`] || "",
+    );
+  }
+
+  private _togglePersonVitalDateMode(prefix: string, scope: DateFormScope = "person") {
+    const form = this._dateScopeForm(scope);
+    const mode = form[`${prefix}_date_mode`] || "simple";
     if (mode === "simple") {
-      const dateFirst = this._form[`${prefix}_date_iso`]
-        ? isoToGedcomDate(this._form[`${prefix}_date_iso`])
-        : this._form[`${prefix}_date_first`] || "";
-      this._form = {
-        ...this._form,
+      const dateFirst = form[`${prefix}_date_iso`]
+        ? isoToGedcomDate(form[`${prefix}_date_iso`])
+        : form[`${prefix}_date_first`] || "";
+      this._patchDateScope(scope, {
         [`${prefix}_date_mode`]: "advanced",
         [`${prefix}_date_qualifier`]: "exact",
         [`${prefix}_date_first`]: dateFirst,
         [`${prefix}_date_iso`]: "",
-      };
+      });
       return;
     }
-    const dateIso = gedcomToIsoDate(this._form[`${prefix}_date_first`] || "") || "";
-    this._form = {
-      ...this._form,
+    const dateIso = gedcomToIsoDate(form[`${prefix}_date_first`] || "") || "";
+    this._patchDateScope(scope, {
       [`${prefix}_date_mode`]: "simple",
       [`${prefix}_date_iso`]: dateIso,
       [`${prefix}_date_qualifier`]: "exact",
       [`${prefix}_date_first`]: "",
       [`${prefix}_date_second`]: "",
-    };
+    });
   }
 
   private _renderPersonVitalDateField(
-    prefix: "birth" | "death",
+    prefix: string,
     label: string,
     write: boolean,
+    scope: DateFormScope = "person",
   ) {
-    const advanced = (this._form[`${prefix}_date_mode`] || "simple") === "advanced";
+    const form = this._dateScopeForm(scope);
+    const advanced = (form[`${prefix}_date_mode`] || "simple") === "advanced";
     const needsSecond =
       advanced &&
-      (this._form[`${prefix}_date_qualifier`] === "between" ||
-        this._form[`${prefix}_date_qualifier`] === "from_to");
+      (form[`${prefix}_date_qualifier`] === "between" ||
+        form[`${prefix}_date_qualifier`] === "from_to");
     return html`<div class="event-date-field">
       ${advanced
         ? html`<label
@@ -1313,13 +1348,12 @@ export class FamilyTreePanel extends LitElement {
             <select
               ?disabled=${!write}
               @change=${(e: Event) =>
-                (this._form = {
-                  ...this._form,
+                this._patchDateScope(scope, {
                   [`${prefix}_date_qualifier`]: (e.target as HTMLSelectElement).value,
                 })}
             >
               ${FORM_QUALIFIERS.map((q) => {
-                const current = this._form[`${prefix}_date_qualifier`] || "exact";
+                const current = form[`${prefix}_date_qualifier`] || "exact";
                 return html`<option value=${q} ?selected=${q === current}
                   >${this._tt(QUALIFIER_KEYS[q])}</option
                 >`;
@@ -1329,12 +1363,11 @@ export class FamilyTreePanel extends LitElement {
           <label
             >${label}
             <input
-              .value=${this._form[`${prefix}_date_first`] || ""}
+              .value=${form[`${prefix}_date_first`] || ""}
               placeholder=${this._tt("date_gedcom_hint")}
               ?disabled=${!write}
               @input=${(e: Event) =>
-                (this._form = {
-                  ...this._form,
+                this._patchDateScope(scope, {
                   [`${prefix}_date_first`]: (e.target as HTMLInputElement).value,
                 })}
             />
@@ -1343,12 +1376,11 @@ export class FamilyTreePanel extends LitElement {
             ? html`<label
                 >${this._tt("date_second")}
                 <input
-                  .value=${this._form[`${prefix}_date_second`] || ""}
+                  .value=${form[`${prefix}_date_second`] || ""}
                   placeholder=${this._tt("date_gedcom_hint")}
                   ?disabled=${!write}
                   @input=${(e: Event) =>
-                    (this._form = {
-                      ...this._form,
+                    this._patchDateScope(scope, {
                       [`${prefix}_date_second`]: (e.target as HTMLInputElement).value,
                     })}
                 />
@@ -1358,7 +1390,7 @@ export class FamilyTreePanel extends LitElement {
             ? html`<button
                 type="button"
                 class="linkish date-mode-toggle"
-                @click=${() => this._togglePersonVitalDateMode(prefix)}
+                @click=${() => this._togglePersonVitalDateMode(prefix, scope)}
               >
                 ${this._tt("date_simple")}
               </button>`
@@ -1368,11 +1400,10 @@ export class FamilyTreePanel extends LitElement {
               <span class="field-label">${label}</span>
               <input
                 type="date"
-                .value=${this._form[`${prefix}_date_iso`] || ""}
+                .value=${form[`${prefix}_date_iso`] || ""}
                 ?disabled=${!write}
                 @input=${(e: Event) =>
-                  (this._form = {
-                    ...this._form,
+                  this._patchDateScope(scope, {
                     [`${prefix}_date_iso`]: (e.target as HTMLInputElement).value,
                   })}
               />
@@ -1381,7 +1412,7 @@ export class FamilyTreePanel extends LitElement {
               ? html`<button
                   type="button"
                   class="linkish date-mode-toggle"
-                  @click=${() => this._togglePersonVitalDateMode(prefix)}
+                  @click=${() => this._togglePersonVitalDateMode(prefix, scope)}
                 >
                   ${this._tt("date_advanced")}
                 </button>`
@@ -3074,8 +3105,7 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _renderEventTypeHeading(ev: EventDto) {
-    const unionTypes = new Set(["marriage", "divorce", "partnership"]);
-    if (unionTypes.has(ev.type)) {
+    if (UNION_EVENT_KINDS.has(ev.type)) {
       const partners = this._unionEventPartners(ev);
       const label = this._plainEventTypeLabel(ev.type);
       if (partners.length) {
@@ -3132,12 +3162,12 @@ export class FamilyTreePanel extends LitElement {
     union: TreeUnion,
     focusDeathText?: string | null,
   ): string {
-    const marriage = (union.marriage_date || "").trim();
-    if (!marriage) return "";
-    const start = { date_text: marriage };
-    if (union.status === "divorced") {
-      const end = (union.divorce_date || "").trim();
-      return end ? formatAge(start, { date_text: end }, false) : "";
+    const startText = (union.start_date || "").trim();
+    if (!startText || union.start_type !== "marriage") return "";
+    const start = { date_text: startText };
+    const endDate = (union.end_date || "").trim();
+    if (union.status === "divorced" || (union.status === "separated" && endDate)) {
+      return endDate ? formatAge(start, { date_text: endDate }, false) : "";
     }
     if (union.status === "widowed") {
       const end = this._widowedDateText(union, focusDeathText);
@@ -3149,15 +3179,15 @@ export class FamilyTreePanel extends LitElement {
     return "";
   }
 
-  private _formatUnionMarriageDisplay(
+  private _formatUnionStartDisplay(
     union: TreeUnion,
     lang?: string,
     focusDeathText?: string | null,
   ): string {
-    const marriageDate = this._formatUnionDate(union.marriage_date, lang);
-    if (!marriageDate) return "";
+    const startDate = this._formatUnionDate(union.start_date, lang);
+    if (!startDate) return "";
     const duration = this._unionDurationSuffix(union, focusDeathText);
-    return duration ? `${marriageDate} ${duration}` : marriageDate;
+    return duration ? `${startDate} ${duration}` : startDate;
   }
 
   private _unionMetaSubtitle(
@@ -3167,11 +3197,17 @@ export class FamilyTreePanel extends LitElement {
   ): string {
     if (!union) return "";
     const parts: string[] = [];
-    const marriageDate = this._formatUnionMarriageDisplay(union, lang, focusDeathText);
-    if (marriageDate) parts.push(`${this._tt("event_marriage")}: ${marriageDate}`);
-    if (union.marriage_place) parts.push(union.marriage_place);
-    const divorceDate = this._formatUnionDate(union.divorce_date, lang);
-    if (divorceDate) parts.push(`${this._tt("event_divorce")}: ${divorceDate}`);
+    const startDate = this._formatUnionStartDisplay(union, lang, focusDeathText);
+    if (startDate) {
+      parts.push(`${this._tt(startEventLabelKey(union.start_type))}: ${startDate}`);
+    }
+    if (union.start_place) parts.push(union.start_place);
+    const endDate = this._formatUnionDate(union.end_date, lang);
+    if (endDate) {
+      parts.push(
+        `${this._tt(union.status === "separated" ? "event_separated" : "event_divorce")}: ${endDate}`,
+      );
+    }
     if (union.status === "widowed") {
       const widowedDate = this._formatUnionDate(
         this._widowedDateText(union, focusDeathText),
@@ -3298,9 +3334,9 @@ export class FamilyTreePanel extends LitElement {
   }
 
   private _renderEventCard(ev: EventDto, birth?: DateSummary | null) {
-    const canEdit = this._canWrite() && ev.subject_type === "person";
+    const canEdit = this._canWrite() && isManualPersonEvent(ev);
     const lang = this.hass?.language;
-    const unionTypes = new Set(["marriage", "divorce", "partnership"]);
+    const unionTypes = UNION_EVENT_KINDS;
     const partnerRefs =
       unionTypes.has(ev.type) ? this._unionEventPartners(ev) : [];
     const partnerNamesJoined = partnerRefs.map((p) => p.name).join(" & ");
@@ -3445,17 +3481,24 @@ export class FamilyTreePanel extends LitElement {
     if (!this.hass) return;
     try {
       const data = await getUnion(this.hass, unionId);
-      const marriage = data.events.find((e) => e.type === "marriage");
+      const start = pickStartEvent(data.events, data.union.type || "unknown");
+      const end = data.events.find((e) => e.type === "divorce");
       this._editingUnionId = unionId;
       this._unionForm = {
         status: data.union.status || "ongoing",
+        union_type: data.union.type || "unknown",
         notes: data.union.notes || "",
         known_children_count:
           data.union.known_children_count != null
             ? String(data.union.known_children_count)
             : "",
-        marriage_date: marriage?.date_text || "",
-        marriage_place: marriage?.place_name || "",
+        start_event_id: start?.id || "",
+        start_date_orig: start?.date_text || "",
+        start_place: start?.place_name || "",
+        ...this._vitalDateFieldsFromText("start", start?.date_text || ""),
+        end_event_id: end?.id || "",
+        end_date_orig: end?.date_text || "",
+        ...this._vitalDateFieldsFromText("end", end?.date_text || ""),
       };
       this._dialogMode = "union";
       this._dialogOpen = true;
@@ -3528,39 +3571,50 @@ export class FamilyTreePanel extends LitElement {
     const uniquePartners = [...new Set(partnerIds)];
     this._saving = true;
     try {
+      const fields = unionDateFields(this._unionForm.status || "ongoing");
+      const unionType = this._unionForm.union_type || "unknown";
+      const start = this._unionDateText("start");
+      const end = this._unionDateText("end");
+      if (start.error || (fields.end && end.error)) {
+        this._error = this._tt("date_invalid");
+        return;
+      }
       const kcc = (this._unionForm.known_children_count || "").trim();
       await saveUnion(this.hass, {
         union_id: this._editingUnionId,
         partner_ids: uniquePartners,
+        union_type: unionType,
         status: this._unionForm.status || "ongoing",
         notes: this._unionForm.notes || "",
         known_children_count: kcc ? Number(kcc) : null,
       });
-      const marriageDate = (this._unionForm.marriage_date || "").trim();
-      const placeName = (this._unionForm.marriage_place || "").trim();
-      let placeId: string | undefined;
-      if (placeName) {
-        const found = await listPlaces(this.hass, { search: placeName, limit: 20 });
-        const exact = found.places.find(
-          (pl) => pl.name.localeCompare(placeName, undefined, { sensitivity: "accent" }) === 0,
-        );
-        if (exact) placeId = exact.id;
-        else {
-          const { place } = await savePlace(this.hass, { name: placeName });
-          placeId = place.id;
-        }
+      const placeName = (this._unionForm.start_place || "").trim();
+      const placeId = placeName ? await this._resolvePlaceId(placeName) : null;
+      // An existing start event is re-typed (date and place kept) when the type changed.
+      if (start.text || placeName || this._unionForm.start_event_id) {
+        await saveEvent(this.hass, {
+          ...(this._unionForm.start_event_id
+            ? { event_id: this._unionForm.start_event_id }
+            : {}),
+          subject_type: "union",
+          subject_id: this._editingUnionId,
+          event_type: unionStartEventType(unionType),
+          date_text: start.text,
+          place_id: placeId,
+        });
       }
-      if (marriageDate) {
-        const built = buildGedcomDate("exact", marriageDate);
-        if (!built.error && built.value) {
-          await saveEvent(this.hass, {
-            subject_type: "union",
-            subject_id: this._editingUnionId,
-            event_type: "marriage",
-            date_text: built.value,
-            place_id: placeId,
-          });
-        }
+      // A date typed before the status was switched back to ongoing is kept (hidden, not deleted).
+      const endChanged =
+        end.text !== (this._unionForm.end_date_orig || "") &&
+        (end.text || this._unionForm.end_event_id);
+      if (!end.error && endChanged) {
+        await saveEvent(this.hass, {
+          ...(this._unionForm.end_event_id ? { event_id: this._unionForm.end_event_id } : {}),
+          subject_type: "union",
+          subject_id: this._editingUnionId,
+          event_type: "divorce",
+          date_text: end.text,
+        });
       }
       this._dialogOpen = false;
       this._editingUnionId = null;

@@ -56,6 +56,13 @@ _EVENT_TAGS = {
 }
 
 
+# FAM-level generic events (`EVEN` + `TYPE`) that map to union start events.
+_EVEN_UNION_TYPES = {
+    "cohabitation": EventType.COHABITATION,
+    "registered partnership": EventType.PARTNERSHIP,
+}
+
+
 @dataclass
 class ImportReport:
     """Summary of a GEDCOM import run."""
@@ -588,8 +595,18 @@ class GedcomImporter:
 
         union_type = UnionType.UNKNOWN
         status = UnionStatus.ONGOING
+        even_types = {
+            _EVEN_UNION_TYPES.get((_sub_value(block, "TYPE") or "").strip().lower())
+            for block in groups.get("EVEN", [])
+        }
         if "MARR" in groups:
             union_type = UnionType.MARRIAGE
+        elif EventType.PARTNERSHIP in even_types:
+            union_type = UnionType.REGISTERED_PARTNERSHIP
+        elif EventType.COHABITATION in even_types:
+            union_type = UnionType.COHABITATION
+        elif "ENGA" in groups:
+            union_type = UnionType.ENGAGEMENT
         if "DIV" in groups:
             status = UnionStatus.DIVORCED
 
@@ -629,11 +646,19 @@ class GedcomImporter:
 
         self._fam[xref] = union_id
 
-        for tag, event_type in (("MARR", EventType.MARRIAGE), ("DIV", EventType.DIVORCE)):
+        for tag, event_type in (
+            ("MARR", EventType.MARRIAGE),
+            ("DIV", EventType.DIVORCE),
+            ("ENGA", EventType.ENGAGEMENT),
+        ):
             if tag not in groups:
                 continue
             for block in groups[tag]:
                 self._event_from_block(block, event_type, SubjectType.UNION, union_id)
+        for block in groups.get("EVEN", []):
+            even_type = _EVEN_UNION_TYPES.get((_sub_value(block, "TYPE") or "").strip().lower())
+            if even_type:
+                self._event_from_block(block, even_type, SubjectType.UNION, union_id)
 
         # Children
         chil_blocks = groups.get("CHIL", [])

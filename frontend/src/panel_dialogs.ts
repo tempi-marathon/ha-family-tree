@@ -15,6 +15,7 @@ import {
   UNIQUE_PERSON_EVENT_TYPES,
 } from "./panel_shared";
 import { personDisplayName } from "./people_view";
+import { UNION_TYPES, unionDateFields, unionStartLabelKey } from "./union_form";
 import { renderPersonAvatar } from "./person-avatar";
 import { PROFILE_CROP_CANVAS_PX } from "./profile-photo-editor";
 
@@ -392,7 +393,26 @@ export function renderDialog(host: FamilyTreePanel) {
     </div>
   `;
 
+  const unionFields = unionDateFields(this._unionForm.status || "ongoing");
   const unionBody = html`<div class="form-stack">
+    <label
+      >${this._fieldLabel(this._tt("union_type"))}
+      <select
+        .value=${this._unionForm.union_type || "unknown"}
+        @change=${(e: Event) =>
+          (this._unionForm = {
+            ...this._unionForm,
+            union_type: (e.target as HTMLSelectElement).value,
+          })}
+      >
+        ${UNION_TYPES.map(
+          (t) =>
+            html`<option value=${t} ?selected=${t === (this._unionForm.union_type || "unknown")}>
+              ${this._tt(`union_type_${t}`)}
+            </option>`,
+        )}
+      </select>
+    </label>
     <label
       >${this._fieldLabel(this._tt("union_status"))}
       <select
@@ -422,26 +442,30 @@ export function renderDialog(host: FamilyTreePanel) {
           })}
       />
     </label>
-    <label
-      >${this._fieldLabel(this._tt("event_marriage"))}
-      <input
-        .value=${this._unionForm.marriage_date || ""}
-        placeholder=${this._tt("date_gedcom_hint")}
-        @input=${(e: Event) =>
-          (this._unionForm = {
-            ...this._unionForm,
-            marriage_date: (e.target as HTMLInputElement).value,
-          })}
-      />
-    </label>
+    ${this._renderPersonVitalDateField(
+      "start",
+      this._tt(unionStartLabelKey(this._unionForm.union_type || "unknown")),
+      write,
+      "union",
+    )}
+    ${unionFields.end
+      ? this._renderPersonVitalDateField(
+          "end",
+          this._tt(
+            this._unionForm.status === "separated" ? "event_separated" : "event_divorce",
+          ),
+          write,
+          "union",
+        )
+      : nothing}
     <label
       >${this._fieldLabel(this._tt("place"))}
       <input
-        .value=${this._unionForm.marriage_place || ""}
+        .value=${this._unionForm.start_place || ""}
         @input=${(e: Event) =>
           (this._unionForm = {
             ...this._unionForm,
-            marriage_place: (e.target as HTMLInputElement).value,
+            start_place: (e.target as HTMLInputElement).value,
           })}
       />
     </label>

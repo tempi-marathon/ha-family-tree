@@ -126,6 +126,14 @@ describe("buildGedcomDate / gedcomToForm", () => {
     expect(buildGedcomDate("exact", "")).toEqual({ value: "", error: false });
   });
 
+  it("keeps legacy free text verbatim for the advanced form", () => {
+    expect(gedcomToForm("winter 1998")).toEqual({
+      qualifier: "exact",
+      first: "winter 1998",
+      second: "",
+    });
+  });
+
   it("round-trips stored dates into form fields", () => {
     expect(gedcomToForm("ABT 1784")).toEqual({ qualifier: "about", first: "1784", second: "" });
     expect(gedcomToForm("BET 1820 AND 1825")).toEqual({

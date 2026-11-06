@@ -1104,12 +1104,8 @@ async def ws_persons_media_delete(
     "unions/save",
     {
         vol.Optional("union_id"): str,
-        vol.Optional("union_type", default=UnionType.UNKNOWN.value): vol.In(
-            [t.value for t in UnionType]
-        ),
-        vol.Optional("status", default=UnionStatus.ONGOING.value): vol.In(
-            [s.value for s in UnionStatus]
-        ),
+        vol.Optional("union_type"): vol.In([t.value for t in UnionType]),
+        vol.Optional("status"): vol.In([s.value for s in UnionStatus]),
         vol.Optional("known_children_count"): vol.Any(None, int),
         vol.Optional("notes", default=""): _bounded_string(MAX_NOTES),
         vol.Required("partner_ids"): vol.All([str], vol.Length(min=1, max=10)),
@@ -1130,8 +1126,8 @@ async def ws_unions_save(
                 raise LookupError("Union not found")
             union = Union(
                 id=existing.id,
-                type=UnionType(msg.get("union_type") or UnionType.UNKNOWN.value),
-                status=UnionStatus(msg.get("status") or UnionStatus.ONGOING.value),
+                type=UnionType(msg.get("union_type") or existing.type),
+                status=UnionStatus(msg.get("status") or existing.status),
                 known_children_count=msg.get("known_children_count"),
                 notes=msg.get("notes") or "",
                 created_at=existing.created_at,
