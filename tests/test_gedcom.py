@@ -5,6 +5,7 @@ from pathlib import Path
 from custom_components.family_tree.db import Database
 from custom_components.family_tree.gedcom_export import export_gedcom
 from custom_components.family_tree.gedcom_import import GedcomImporter
+from custom_components.family_tree.models import SubjectType
 from custom_components.family_tree.repository import Repository
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample.ged"
@@ -258,3 +259,83 @@ def test_export_anonymize_all_deceased_fam_keeps_marriage(tmp_path: Path):
     assert "Eve" in private
     assert "1 MARR" in private
     db.close()
+
+
+_UNION_KINDS_GED = """0 HEAD
+1 SOUR Test
+1 GEDC
+2 VERS 5.5.1
+1 CHAR UTF-8
+0 @I1@ INDI
+1 NAME A /One/
+0 @I2@ INDI
+1 NAME B /Two/
+0 @I3@ INDI
+1 NAME C /Three/
+0 @I4@ INDI
+1 NAME D /Four/
+0 @I5@ INDI
+1 NAME E /Five/
+0 @I6@ INDI
+1 NAME F /Six/
+0 @F1@ FAM
+1 HUSB @I1@
+1 WIFE @I2@
+1 ENGA
+2 DATE ABT 1990
+0 @F2@ FAM
+1 HUSB @I3@
+1 WIFE @I4@
+1 EVEN
+2 TYPE Cohabitation
+2 DATE 12 MAR 1995
+1 DIV
+2 DATE winter 1999
+0 @F3@ FAM
+1 HUSB @I5@
+1 WIFE @I6@
+1 EVEN
+2 TYPE Registered partnership
+2 DATE BET 2001 AND 2002
+1 EVEN
+2 TYPE Something else
+2 DATE 1 JAN 2005
+0 TRLR
+"""
+
+
+def _union_summary(repo: Repository) -> list[tuple[str, str, str]]:
+    rows = []
+    for row in repo.db.fetchall("SELECT id FROM unions WHERE deleted_at IS NULL"):
+        union = repo.get_union(row["id"])
+        assert union is not None
+        union_id = union.id
+        for ev in repo.list_events(SubjectType.UNION, union_id):
+            rows.append((union.type.value, ev.type.value, ev.date_text))
+    return sorted(rows)
+
+
+def test_union_start_events_round_trip_through_gedcom(tmp_path: Path):
+    db = Database(tmp_path / "a.db")
+    db.open()
+    repo = Repository(db)
+    GedcomImporter(repo).import_text(_UNION_KINDS_GED)
+    expected = [
+        ("cohabitation", "cohabitation", "12 MAR 1995"),
+        ("cohabitation", "divorce", "winter 1999"),
+        ("engagement", "engagement", "ABT 1990"),
+        ("registered_partnership", "partnership", "BET 2001 AND 2002"),
+    ]
+    assert _union_summary(repo) == expected
+    exported = export_gedcom(db)
+    assert "1 ENGA" in exported
+    assert "2 TYPE Cohabitation" in exported
+    assert "2 TYPE Registered partnership" in exported
+    db.close()
+
+    db2 = Database(tmp_path / "b.db")
+    db2.open()
+    repo2 = Repository(db2)
+    GedcomImporter(repo2).import_text(exported)
+    assert _union_summary(repo2) == expected
+    db2.close()

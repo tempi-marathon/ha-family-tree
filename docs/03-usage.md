@@ -12,6 +12,13 @@ The **Family Tree** sidebar panel includes:
 
 Admins can create and edit. Other logged-in users see a read-only panel.
 
+### Events and couples
+
+- A person's **Events** list only offers Edit/Delete for events you added yourself (for example occupation or residence). Birth, baptism, death and burial are edited in the person's details dialog.
+- Editing a couple lets you set the relationship type (marriage, registered partnership, cohabitation, engagement, unknown) and the status (ongoing, divorced, separated, widowed).
+- Every couple has one start date, labelled by type (Marriage, Partnership, Moved in together, Engagement). Divorced and separated couples also have an end date (Divorce or Separation). Changing the type keeps the start date.
+- Separated couples are exported to GEDCOM with a `DIV` record when an end date is set, since GEDCOM has no separate tag for separation.
+
 ## Actions
 
 | Action | Description |

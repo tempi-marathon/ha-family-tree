@@ -2,6 +2,7 @@
 /** Person detail / tabs render helpers. */
 
 import { html, nothing } from "lit";
+import { startEventLabelKey } from "./union_form";
 import type { EventDto, PersonDetail, PersonDto, TreeUnion } from "./api";
 import { formatDeathCell, formatEventDate, formatLifespan } from "./date_format";
 import { formatGedcomDate, formatLifespanLine } from "./dates_view";
@@ -257,25 +258,23 @@ export function renderRelationshipsTab(host: FamilyTreePanel, d: PersonDetail) {
                     </span>`
                   : nothing}
               </div>
-              ${u.marriage_date ||
-              u.divorce_date ||
+              ${u.start_date ||
+              u.end_date ||
               u.status === "widowed" ||
               u.known_children_count != null
                 ? html`<div class="rel-union-meta">
-                    ${u.marriage_date
+                    ${u.start_date
                       ? html`<div>
-                          ${this._tt("event_marriage")}:
+                          ${this._tt(startEventLabelKey(u.start_type))}:
                           <strong
-                            >${this._formatUnionMarriageDisplay(
-                              u,
-                              lang,
-                              focusDeathText,
-                            )}</strong
+                            >${u.start_type === "marriage"
+                              ? this._formatUnionStartDisplay(u, lang, focusDeathText)
+                              : this._formatUnionDate(u.start_date, lang)}</strong
                           >
                         </div>`
                       : nothing}
-                    ${u.divorce_date
-                      ? html`<div>${this._tt("event_divorce")}: <strong>${this._formatUnionDate(u.divorce_date, lang)}</strong></div>`
+                    ${u.end_date
+                      ? html`<div>${this._tt(u.status === "separated" ? "event_separated" : "event_divorce")}: <strong>${this._formatUnionDate(u.end_date, lang)}</strong></div>`
                       : nothing}
                     ${u.status === "widowed"
                       ? html`<div>

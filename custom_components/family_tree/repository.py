@@ -48,6 +48,8 @@ def _now() -> str:
 EVENT_TYPE_ORDER: tuple[str, ...] = (
     "birth",
     "baptism",
+    "engagement",
+    "cohabitation",
     "marriage",
     "partnership",
     "residence",

@@ -18,6 +18,9 @@ from custom_components.family_tree.models import (
     Person,
     Sex,
     SubjectType,
+    Union,
+    UnionStatus,
+    UnionType,
 )
 from custom_components.family_tree.repository import Repository
 
@@ -318,3 +321,181 @@ def test_ha_users_list_admin(repo: Repository) -> None:
     conn = _FakeConnection("admin", is_admin=True)
     asyncio.run(ws.ws_ha_users_list(hass, conn, {"id": 1, "type": "family_tree/ha_users/list"}))
     assert conn.results == [{"users": [{"id": "u1", "name": "Alice", "is_active": True}]}]
+
+
+def _divorced_union(repo: Repository) -> tuple[Union, Event]:
+    a = repo.add_person(Person(given_names="A"))
+    b = repo.add_person(Person(given_names="B"))
+    union = repo.add_union(
+        Union(type=UnionType.MARRIAGE, status=UnionStatus.DIVORCED), [(a.id, 0), (b.id, 1)]
+    )
+    divorce = repo.add_event(
+        Event(
+            subject_type=SubjectType.UNION,
+            subject_id=union.id,
+            type=EventType.DIVORCE,
+            date_text="winter 1998",
+        )
+    )
+    return union, divorce
+
+
+def test_unions_save_changes_status_with_free_text_divorce_date(repo: Repository) -> None:
+    union, divorce = _divorced_union(repo)
+    admin = _FakeConnection("admin", is_admin=True)
+    partners = [p.person_id for p in repo.list_union_partners(union.id)]
+    _call(
+        ws.ws_unions_save,
+        admin,
+        {
+            "type": "family_tree/unions/save",
+            "union_id": union.id,
+            "status": "separated",
+            "partner_ids": partners,
+        },
+    )
+    assert not admin.errors
+    _call(ws.ws_unions_get, admin, {"type": "family_tree/unions/get", "union_id": union.id})
+    result = admin.results[-1]
+    assert result["union"]["status"] == "separated"
+    assert [(e["id"], e["date_text"]) for e in result["events"]] == [(divorce.id, "winter 1998")]
+
+
+def test_unions_save_keeps_type_when_omitted(repo: Repository) -> None:
+    union, _ = _divorced_union(repo)
+    admin = _FakeConnection("admin", is_admin=True)
+    partners = [p.person_id for p in repo.list_union_partners(union.id)]
+    _call(
+        ws.ws_unions_save,
+        admin,
+        {"type": "family_tree/unions/save", "union_id": union.id, "partner_ids": partners},
+    )
+    saved = repo.get_union(union.id)
+    assert saved is not None and saved.type == UnionType.MARRIAGE
+
+
+def test_union_end_event_updates_in_place(repo: Repository) -> None:
+    union, divorce = _divorced_union(repo)
+    admin = _FakeConnection("admin", is_admin=True)
+    base = {
+        "type": "family_tree/events/save",
+        "subject_type": "union",
+        "subject_id": union.id,
+        "event_type": "divorce",
+        "event_id": divorce.id,
+    }
+    _call(ws.ws_events_save, admin, {**base, "date_text": "ABT 1998"})
+    assert admin.results[-1]["event"]["date_qualifier"] == "about"
+    _call(ws.ws_events_save, admin, {**base, "date_text": "BET 1997 AND 1999"})
+    assert admin.results[-1]["event"]["date_qualifier"] == "between"
+    events = repo.list_events(SubjectType.UNION, union.id)
+    assert [e.id for e in events] == [divorce.id]
+
+
+def test_union_marriage_event_not_duplicated_when_saved_by_id(repo: Repository) -> None:
+    union, _ = _divorced_union(repo)
+    admin = _FakeConnection("admin", is_admin=True)
+    base = {
+        "type": "family_tree/events/save",
+        "subject_type": "union",
+        "subject_id": union.id,
+        "event_type": "marriage",
+    }
+    _call(ws.ws_events_save, admin, {**base, "date_text": "1990"})
+    marriage_id = admin.results[-1]["event"]["id"]
+    _call(ws.ws_events_save, admin, {**base, "event_id": marriage_id, "date_text": "1991"})
+    marriages = [
+        e for e in repo.list_events(SubjectType.UNION, union.id) if e.type == EventType.MARRIAGE
+    ]
+    assert [(e.id, e.date_text) for e in marriages] == [(marriage_id, "1991")]
+
+
+def test_union_start_event_can_be_retyped_keeping_date(repo: Repository) -> None:
+    union, _ = _divorced_union(repo)
+    admin = _FakeConnection("admin", is_admin=True)
+    base = {
+        "type": "family_tree/events/save",
+        "subject_type": "union",
+        "subject_id": union.id,
+    }
+    _call(ws.ws_events_save, admin, {**base, "event_type": "cohabitation", "date_text": "ABT 1995"})
+    event_id = admin.results[-1]["event"]["id"]
+    _call(
+        ws.ws_events_save,
+        admin,
+        {**base, "event_type": "engagement", "event_id": event_id, "date_text": "ABT 1995"},
+    )
+    assert not admin.errors
+    starts = [
+        e
+        for e in repo.list_events(SubjectType.UNION, union.id)
+        if e.type in (EventType.COHABITATION, EventType.ENGAGEMENT)
+    ]
+    assert [(e.id, e.type, e.date_text) for e in starts] == [
+        (event_id, EventType.ENGAGEMENT, "ABT 1995")
+    ]
+
+
+def test_unions_save_changes_type(repo: Repository) -> None:
+    union, _ = _divorced_union(repo)
+    admin = _FakeConnection("admin", is_admin=True)
+    partners = [p.person_id for p in repo.list_union_partners(union.id)]
+    _call(
+        ws.ws_unions_save,
+        admin,
+        {
+            "type": "family_tree/unions/save",
+            "union_id": union.id,
+            "union_type": "cohabitation",
+            "partner_ids": partners,
+        },
+    )
+    saved = repo.get_union(union.id)
+    assert saved is not None
+    assert saved.type == UnionType.COHABITATION
+    assert saved.status == UnionStatus.DIVORCED
+
+
+def test_person_events_include_new_union_start_kinds(repo: Repository) -> None:
+    from custom_components.family_tree.relatives import (
+        union_events_for_person,
+        union_start_event_type,
+    )
+
+    union, _ = _divorced_union(repo)
+    person_id = repo.list_union_partners(union.id)[0].person_id
+    for kind in (EventType.ENGAGEMENT, EventType.COHABITATION, EventType.PARTNERSHIP):
+        repo.add_event(
+            Event(
+                subject_type=SubjectType.UNION,
+                subject_id=union.id,
+                type=kind,
+                date_text="1990",
+            )
+        )
+    kinds = {e["type"] for e in union_events_for_person(repo, person_id)}
+    assert {"engagement", "cohabitation", "partnership", "divorce"} <= kinds
+    assert union_start_event_type(UnionType.ENGAGEMENT) == EventType.ENGAGEMENT
+    assert union_start_event_type(UnionType.UNKNOWN) == EventType.MARRIAGE
+
+
+def test_new_event_kinds_sort_before_marriage(repo: Repository) -> None:
+    from custom_components.family_tree.repository import EVENT_TYPE_ORDER
+
+    order = list(EVENT_TYPE_ORDER)
+    assert order.index("engagement") < order.index("cohabitation") < order.index("marriage")
+
+
+def test_union_type_to_start_event_mapping_matches_contract() -> None:
+    """Same table as frontend/src/union_form.test.ts and contracts/ws-union-event.md."""
+    from custom_components.family_tree.relatives import union_start_event_type
+
+    expected = {
+        UnionType.MARRIAGE: EventType.MARRIAGE,
+        UnionType.REGISTERED_PARTNERSHIP: EventType.PARTNERSHIP,
+        UnionType.COHABITATION: EventType.COHABITATION,
+        UnionType.ENGAGEMENT: EventType.ENGAGEMENT,
+        UnionType.UNKNOWN: EventType.MARRIAGE,
+    }
+    assert set(expected) == set(UnionType)
+    assert {t: union_start_event_type(t) for t in UnionType} == expected

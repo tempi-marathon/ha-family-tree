@@ -154,10 +154,11 @@ export interface TreeUnion {
   known_children_count: number | null;
   partners: Array<Record<string, unknown>>;
   children: Array<Record<string, unknown>>;
-  marriage_date: string;
-  marriage_place: string;
-  divorce_date: string;
-  divorce_place: string;
+  start_type: string;
+  start_date: string;
+  start_place: string;
+  end_date: string;
+  end_place: string;
 }
 
 export interface TreePayload {

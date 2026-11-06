@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .db import Database
-from .models import EventType, Person, SubjectType
+from .models import EventType, Person, SubjectType, UnionType
 from .names import display_name, formal_subtitle
 from .repository import Repository
 
@@ -70,29 +70,48 @@ def _person_summary(repo: Repository, person: Person) -> dict[str, Any]:
     }
 
 
-def _union_event_fields(repo: Repository, union_id: str) -> dict[str, Any]:
-    """Marriage/divorce date and place for a union."""
-    marriage_date = ""
-    marriage_place = ""
-    divorce_date = ""
-    divorce_place = ""
+UNION_START_EVENT_TYPES = (
+    EventType.MARRIAGE,
+    EventType.PARTNERSHIP,
+    EventType.COHABITATION,
+    EventType.ENGAGEMENT,
+)
+UNION_EVENT_TYPES = (*UNION_START_EVENT_TYPES, EventType.DIVORCE)
+
+
+def union_start_event_type(union_type: UnionType) -> EventType:
+    """Event kind that holds the start date for a union type."""
+    return {
+        UnionType.REGISTERED_PARTNERSHIP: EventType.PARTNERSHIP,
+        UnionType.COHABITATION: EventType.COHABITATION,
+        UnionType.ENGAGEMENT: EventType.ENGAGEMENT,
+    }.get(union_type, EventType.MARRIAGE)
+
+
+def _union_event_fields(
+    repo: Repository, union_id: str, union_type: UnionType = UnionType.UNKNOWN
+) -> dict[str, Any]:
+    """Start (marriage/partnership/cohabitation/engagement) and end (divorce) of a union."""
+    wanted = union_start_event_type(union_type)
+    found: dict[EventType, tuple[str, str]] = {}
     for event in repo.list_events(SubjectType.UNION, union_id):
+        if event.type not in UNION_EVENT_TYPES or event.type in found:
+            continue
         place_name = ""
         if event.place_id:
             place = repo.get_place(event.place_id)
             if place:
                 place_name = place.name
-        if event.type == EventType.MARRIAGE and not marriage_date:
-            marriage_date = event.date_text or ""
-            marriage_place = place_name
-        elif event.type == EventType.DIVORCE and not divorce_date:
-            divorce_date = event.date_text or ""
-            divorce_place = place_name
+        found[event.type] = (event.date_text or "", place_name)
+    end = found.get(EventType.DIVORCE, ("", ""))
+    start_type = next((t for t in (wanted, *UNION_START_EVENT_TYPES) if t in found), wanted)
+    start = found.get(start_type, ("", ""))
     return {
-        "marriage_date": marriage_date,
-        "marriage_place": marriage_place,
-        "divorce_date": divorce_date,
-        "divorce_place": divorce_place,
+        "end_date": end[0],
+        "end_place": end[1],
+        "start_type": start_type.value,
+        "start_date": start[0],
+        "start_place": start[1],
     }
 
 
@@ -175,7 +194,7 @@ def partners_of(repo: Repository, person_id: str) -> list[dict[str, Any]]:
                 "status": union.status.value,
                 "known_children_count": union.known_children_count,
                 "partners": partners,
-                **_union_event_fields(repo, union.id),
+                **_union_event_fields(repo, union.id, union.type),
             }
         )
     return out
@@ -300,7 +319,7 @@ def relative_vital_events_for_person(repo: Repository, person_id: str) -> list[d
 
 
 def union_events_for_person(repo: Repository, person_id: str) -> list[dict[str, Any]]:
-    """Marriage/divorce events for unions this person belongs to."""
+    """Start (marriage, partnership, cohabitation, engagement) and divorce events of unions."""
     out: list[dict[str, Any]] = []
     for union in repo.list_unions_for_person(person_id):
         partner_names: list[str] = []
@@ -311,7 +330,7 @@ def union_events_for_person(repo: Repository, person_id: str) -> list[dict[str, 
             if partner:
                 partner_names.append(display_name(partner))
         for event in repo.list_events(SubjectType.UNION, union.id):
-            if event.type not in (EventType.MARRIAGE, EventType.DIVORCE):
+            if event.type not in UNION_EVENT_TYPES:
                 continue
             payload = enrich_event_dict(repo, event.to_dict())
             payload["union_id"] = union.id

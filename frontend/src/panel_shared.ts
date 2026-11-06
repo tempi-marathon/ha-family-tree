@@ -13,6 +13,8 @@ export const EVENT_TYPE_KEYS: Record<string, LocaleKey> = {
   marriage: "event_marriage",
   divorce: "event_divorce",
   partnership: "event_partnership",
+  cohabitation: "event_cohabitation",
+  engagement: "event_engagement",
 };
 
 export const PERSON_EVENT_TYPES = ["birth", "baptism", "occupation", "residence", "death", "burial"];

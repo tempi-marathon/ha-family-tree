@@ -7,7 +7,11 @@ Import and export use GEDCOM 5.5.1.
 - `INDI`: `NAME` / `GIVN` / `SURN` / `SPFX` / `NICK`, `SEX`, `NOTE`, `OCCU`
 - Events: `BIRT`, `BAPM`/`CHR`, `DEAT` (incl. `DEAT Y`), `BURI`, `RESI`
 - `FAM`: `HUSB`/`WIFE` (stored as unordered partners), `CHIL`+`PEDI`, `NCHI`,
-  `MARR`, `DIV`
+  `MARR`, `DIV`, `ENGA`
+- Couple events without a standard tag are written and read as a generic `EVEN` with a
+  `TYPE`: `Cohabitation` and `Registered partnership`. Other `EVEN` types on a `FAM` are
+  ignored. The couple's relationship type is inferred on import from these events
+  (`MARR` → marriage, `Registered partnership`, `Cohabitation`, `ENGA`)
 - Places: `PLAC` + `MAP`/`LATI`/`LONG`
 - Sources: `SOUR` with `TITL`, `WWW`, `AUTH`, `PUBL`; citations with `PAGE`
 - Dates: `ABT`, `BEF`, `AFT`, `EST`, `CAL`, `BET`/`AND`, `FROM`/`TO`
